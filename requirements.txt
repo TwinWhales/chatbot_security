@@ -1,0 +1,29 @@
+# --- Data Ingestion ---
+pdfplumber>=0.10.0
+pytesseract>=0.3.10
+pdf2image>=1.16.0
+python-docx>=0.8.11
+
+# --- Embedding & Vector DB ---
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+openai>=1.0.0
+
+# --- LLM & Web Search ---
+anthropic>=0.30.0
+tavily-python>=0.3.0
+
+# --- Text processing ---
+langchain>=0.1.0
+langchain-text-splitters>=0.0.1
+
+# --- Workflow orchestration (5-layer pipeline as StateGraphs) ---
+langgraph>=0.2.0
+
+# --- Logging & API ---
+SQLAlchemy>=2.0.0
+fastapi>=0.100.0
+uvicorn>=0.23.0
+
+# --- HTTP (used by SerpAPI fallback) ---
+requests>=2.31.0
