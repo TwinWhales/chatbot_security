@@ -1,15 +1,11 @@
 """Split cleaned page text into overlapping chunks for embedding.
 
-Uses LangChain's RecursiveCharacterTextSplitter, which prefers paragraph and
-sentence boundaries before falling back to character splits — this matches
-the spec's "재귀적 분할" option while still honoring CHUNK_SIZE/OVERLAP.
+명세 1.7 — 직접 구현해보세요. RecursiveCharacterTextSplitter 권장.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import settings
 from src.ingestion.pdf_extractor import PageText
@@ -19,16 +15,7 @@ from src.ingestion.pdf_extractor import PageText
 class Chunk:
     text: str
     page_number: int
-    chunk_index: int   # ordinal within the source document
-
-
-def _make_splitter(chunk_size: int, chunk_overlap: int) -> RecursiveCharacterTextSplitter:
-    return RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        # English + Korean friendly separators.
-        separators=["\n\n", "\n", "。", ".", "?", "!", " ", ""],
-    )
+    chunk_index: int   # 문서 전역 순번
 
 
 def split(
@@ -36,26 +23,15 @@ def split(
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
 ) -> list[Chunk]:
-    splitter = _make_splitter(
-        chunk_size or settings.CHUNK_SIZE,
-        chunk_overlap or settings.CHUNK_OVERLAP,
-    )
+    """페이지들을 chunk_size / chunk_overlap 기준으로 분할한다.
 
-    chunks: list[Chunk] = []
-    running_index = 0
-    for page in pages:
-        if not page.text.strip():
-            continue
-        for piece in splitter.split_text(page.text):
-            piece = piece.strip()
-            if not piece:
-                continue
-            chunks.append(
-                Chunk(
-                    text=piece,
-                    page_number=page.page_number,
-                    chunk_index=running_index,
-                )
-            )
-            running_index += 1
-    return chunks
+    TODO:
+      1. langchain_text_splitters.RecursiveCharacterTextSplitter 사용
+         - separators 우선순위: ["\\n\\n", "\\n", "。", ".", "?", "!", " ", ""]
+         - chunk_size, chunk_overlap 은 인자 또는 settings 의 값
+      2. 각 page.text 를 splitter.split_text 로 잘라
+         Chunk(text, page_number, chunk_index) 로 감싸기
+      3. chunk_index 는 문서 전체에서 0 부터 증가하는 순번
+      4. 빈 청크 (strip 후 빈 문자열) 는 결과에서 제외
+    """
+    raise NotImplementedError("split(pages) — chunk 분할 구현하기")

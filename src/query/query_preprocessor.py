@@ -1,15 +1,13 @@
-"""Normalize and (optionally) rewrite a user query before embedding."""
+"""Normalize and (optionally) rewrite a user query before embedding.
+
+명세 2.1 / 2.2 — 직접 구현해보세요.
+"""
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from dataclasses import dataclass
 
 from config import settings
-
-
-_WS = re.compile(r"\s+")
 
 
 @dataclass
@@ -20,58 +18,35 @@ class PreprocessedQuery:
 
 
 def _normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text)
-    text = _WS.sub(" ", text).strip()
-    return text
+    """유니코드/공백 정규화.
+
+    TODO:
+      - unicodedata.normalize("NFKC", text)
+      - 연속 공백 → 단일 스페이스, 양끝 strip
+    """
+    raise NotImplementedError("_normalize — 정규화 구현하기")
 
 
 def _rewrite_with_llm(query: str) -> str | None:
-    """Best-effort LLM-based rewriting; returns None when unavailable.
+    """LLM 으로 검색 친화적 형태로 재구성. 키 없으면 None.
 
-    Falls through silently if no API key — preprocessing should never break
-    the request path just because rewriting is unconfigured.
+    TODO (best-effort):
+      - settings.ANTHROPIC_API_KEY 없으면 None
+      - anthropic SDK 없으면 None
+      - client.messages.create 로 "Rewrite the following question into a single
+        self-contained search query" 요청
+      - 실패 시 None (예외를 흘려보내지 말 것 — 파이프라인을 막으면 안 됨)
     """
-    if not settings.ANTHROPIC_API_KEY:
-        return None
-    try:
-        import anthropic  # type: ignore
-    except ImportError:
-        return None
-
-    try:
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        msg = client.messages.create(
-            model=settings.LLM_MODEL,
-            max_tokens=200,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "Rewrite the following question into a single self-contained "
-                        "search query optimized for semantic retrieval. "
-                        "Return only the rewritten query, no preamble.\n\n"
-                        f"Question: {query}"
-                    ),
-                }
-            ],
-        )
-        parts = [b.text for b in msg.content if getattr(b, "type", "") == "text"]
-        rewritten = "".join(parts).strip()
-        return rewritten or None
-    except Exception:
-        return None
+    raise NotImplementedError("_rewrite_with_llm — LLM rewriting 구현하기")
 
 
 def preprocess(query: str, *, rewrite: bool = False) -> PreprocessedQuery:
-    normalized = _normalize(query)
-    if not normalized:
-        raise ValueError("Empty query after normalization")
+    """정규화 후 (선택적으로) LLM rewriting 적용.
 
-    if rewrite:
-        candidate = _rewrite_with_llm(normalized)
-        if candidate:
-            return PreprocessedQuery(
-                original=query, processed=candidate, rewritten=True
-            )
-
-    return PreprocessedQuery(original=query, processed=normalized, rewritten=False)
+    TODO:
+      1. _normalize → 빈 문자열이면 ValueError
+      2. rewrite=True 이고 _rewrite_with_llm 결과가 있으면 그걸 processed 로
+      3. 아니면 정규화된 텍스트가 processed
+      4. PreprocessedQuery 반환
+    """
+    raise NotImplementedError("preprocess — 전처리 파이프라인 구현하기")

@@ -1,11 +1,10 @@
-"""SQLAlchemy-backed log store for query/answer cycles."""
+"""SQLAlchemy-backed log store for query/answer cycles.
+
+명세 5.1 — 직접 구현해보세요.
+"""
 
 from __future__ import annotations
 
-import json
-import uuid
-from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -28,6 +27,8 @@ class Base(DeclarativeBase):
 
 
 class QueryLog(Base):
+    """명세 5.1 의 로그 스키마 (+ metrics JSON 컬럼)."""
+
     __tablename__ = "query_logs"
 
     log_id = Column(String, primary_key=True)
@@ -42,84 +43,68 @@ class QueryLog(Base):
     response_time_ms = Column(Integer, nullable=False)
     top_score = Column(Float, nullable=True)
     user_feedback = Column(JSON, nullable=True)
-    metrics = Column(JSON, nullable=True)   # full QueryMetrics dump
+    metrics = Column(JSON, nullable=True)   # QueryMetrics.to_dict() 통째로 저장
 
 
 class LogStore:
     def __init__(self, db_url: str | None = None) -> None:
-        self._engine = create_engine(db_url or settings.LOG_DB_URL, future=True)
-        Base.metadata.create_all(self._engine)
+        """create_engine + create_all 로 테이블 자동 생성.
+
+        TODO:
+          - self._engine = create_engine(db_url or settings.LOG_DB_URL, future=True)
+          - Base.metadata.create_all(self._engine)
+        """
+        raise NotImplementedError("LogStore.__init__")
 
     def record(self, payload: dict[str, Any]) -> str:
-        log_id = payload.get("log_id") or str(uuid.uuid4())
-        row = QueryLog(
-            log_id=log_id,
-            timestamp=payload.get("timestamp") or datetime.now(timezone.utc),
-            user_query=payload["user_query"],
-            processed_query=payload["processed_query"],
-            retrieval_source=payload["retrieval_source"],
-            retrieved_chunks=_jsonable(payload.get("retrieved_chunks", [])),
-            similarity_scores=_jsonable(payload.get("similarity_scores", [])),
-            generated_answer=payload["generated_answer"],
-            sources_cited=_jsonable(payload.get("sources_cited", [])),
-            response_time_ms=int(payload.get("response_time_ms", 0)),
-            top_score=payload.get("top_score"),
-            user_feedback=payload.get("user_feedback"),
-            metrics=_jsonable(payload.get("metrics")),
-        )
-        with Session(self._engine) as session:
-            session.add(row)
-            session.commit()
-        return log_id
+        """한 사이클을 영속화. log_id 가 없으면 UUID 로 생성해 반환.
+
+        TODO:
+          - log_id = payload.get("log_id") or str(uuid.uuid4())
+          - timestamp 기본값: datetime.now(timezone.utc)
+          - retrieved_chunks / similarity_scores / sources_cited / metrics 는
+            _jsonable() 로 직렬화 (dataclass / 비-JSON 객체 모두 안전하게)
+          - QueryLog 인스턴스를 만들어 session.add + commit
+          - log_id 반환
+        """
+        raise NotImplementedError("LogStore.record")
 
     def get(self, log_id: str) -> dict[str, Any] | None:
-        with Session(self._engine) as session:
-            row = session.get(QueryLog, log_id)
-            if row is None:
-                return None
-            return _row_to_dict(row)
+        """단일 로그를 dict 로 반환. 없으면 None.
+
+        TODO:
+          - Session(self._engine).get(QueryLog, log_id)
+          - _row_to_dict 로 변환
+        """
+        raise NotImplementedError("LogStore.get")
 
     def attach_feedback(self, log_id: str, feedback: dict[str, Any]) -> bool:
-        with Session(self._engine) as session:
-            row = session.get(QueryLog, log_id)
-            if row is None:
-                return False
-            row.user_feedback = feedback
-            session.commit()
-            return True
+        """추후 사용자 피드백을 부착 (5.2 의 future-learning hook).
+
+        TODO:
+          - 해당 row.user_feedback = feedback; commit
+          - 성공 True, row 없으면 False
+        """
+        raise NotImplementedError("LogStore.attach_feedback")
 
 
 def _jsonable(value: Any) -> Any:
-    if value is None:
-        return None
-    if is_dataclass(value):
-        return asdict(value)
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, dict):
-        return {k: _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    # Fall back to str so we never fail to log because of an exotic value.
-    try:
-        return json.loads(json.dumps(value, default=str))
-    except Exception:
-        return str(value)
+    """dataclass / 비-JSON 값까지 안전하게 JSON 직렬화 가능한 형태로 변환.
+
+    TODO (방어적 처리):
+      - None → None
+      - dataclass → asdict
+      - list/tuple → 재귀
+      - dict → 재귀
+      - 원시 타입 (str/int/float/bool) → 그대로
+      - 그 외 → json.dumps(default=str) 후 loads, 실패하면 str()
+    """
+    raise NotImplementedError("_jsonable")
 
 
 def _row_to_dict(row: QueryLog) -> dict[str, Any]:
-    return {
-        "log_id": row.log_id,
-        "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-        "user_query": row.user_query,
-        "processed_query": row.processed_query,
-        "retrieval_source": row.retrieval_source,
-        "retrieved_chunks": row.retrieved_chunks,
-        "similarity_scores": row.similarity_scores,
-        "generated_answer": row.generated_answer,
-        "sources_cited": row.sources_cited,
-        "response_time_ms": row.response_time_ms,
-        "top_score": row.top_score,
-        "user_feedback": row.user_feedback,
-        "metrics": row.metrics,
-    }
+    """QueryLog row → dict 변환.
+
+    TODO: 컬럼들을 그대로 dict 에 담아 반환 (timestamp 는 isoformat).
+    """
+    raise NotImplementedError("_row_to_dict")

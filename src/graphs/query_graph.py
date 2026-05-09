@@ -6,55 +6,52 @@
 그래프 구조:
 
     START
-      |
-      v
-    [preprocess]                  # 2.1 / 2.2
-      |
-      v
-    [embed_query]                 # 2.3
-      |
-      v
-    [retrieve]                    # 3.3 (Top-K + threshold check)
-      |
-      | (threshold 충족? -> rag_generate / 미충족 -> web_search)
-      +----------------+
-      |                |
-      v                v
-    [rag_generate]   [web_search] # 4.1A / 4.2-1
-                       |
-                       v
-                    [web_filter]  # 4.2-2
-                       |
-                       v
-                    [web_generate]# 4.2-3
-                       |
-      +----------------+
-      |
-      v
-    [build_response]              # 4.3 (citations / final shape)
-      |
-      v
-    [log]                         # 5.1
-      |
-      v
+      │
+      ▼
+    [preprocess]                 # 2.1 / 2.2
+      │
+      ▼
+    [embed_query]                # 2.3
+      │
+      ▼
+    [retrieve]                   # 3.3 (Top-K + threshold)
+      │
+      │ (충족? → rag_generate / 미충족 → web_search)
+      ├──────────────┐
+      ▼              ▼
+    [rag_generate] [web_search]  # 4.1 / 4.2-1
+                     │
+                     ▼
+                  [web_filter]   # 4.2-2
+                     │
+                     ▼
+                  [web_generate] # 4.2-3
+                     │
+      ┌──────────────┘
+      ▼
+    [build_response]             # 4.3
+      │
+      ▼
+    [log]                        # 5.1
+      │
+      ▼
      END
+
+build_graph() wiring 은 그대로 두고 노드 함수만 채워보세요.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import asdict
-from datetime import datetime, timezone
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from config import settings
 from src.knowledge.knowledge_base import KnowledgeBase
 from src.knowledge.retriever import RetrievalResult, Retriever
 from src.knowledge.vector_store import RetrievedChunk, VectorStore
 from src.logging.log_store import LogStore
-from src.observability.metrics import LengthStats, QueryMetrics, ScoreStats
+from src.observability.metrics import QueryMetrics
 from src.query import query_embedder, query_preprocessor
 from src.response import rag_generator, web_filter, web_search_agent
 from src.response.response_builder import Citation, FinalResponse
@@ -72,7 +69,7 @@ class QueryState(TypedDict, total=False):
     pre: query_preprocessor.PreprocessedQuery
     embedding: list[float]
     retrieval: RetrievalResult
-    chunks_for_prompt: list[RetrievedChunk]    # rag_chunks 또는 web_chunks
+    chunks_for_prompt: list[RetrievedChunk]
     web_raw: list[WebResult]
     web_filtered: list[WebResult]
     answer_text: str
@@ -90,6 +87,7 @@ class QueryState(TypedDict, total=False):
 # ---------- helpers ----------
 
 def _stage(state: QueryState, name: str, fn) -> Any:
+    """노드 안에서 단일 작업을 측정해 metrics.stage_ms 에 누적."""
     metrics = state["metrics"]
     t0 = time.perf_counter()
     try:
@@ -100,218 +98,141 @@ def _stage(state: QueryState, name: str, fn) -> Any:
 
 
 def _format_web_context(results: list[WebResult]) -> list[RetrievedChunk]:
-    out: list[RetrievedChunk] = []
-    for i, r in enumerate(results):
-        out.append(
-            RetrievedChunk(
-                chunk_id=f"web-{i}",
-                content=r.snippet,
-                metadata={
-                    "source_file": r.title or r.url,
-                    "page_number": "web",
-                    "source_path": r.url,
-                },
-                similarity_score=r.score,
-            )
-        )
-    return out
+    """WebResult → RetrievedChunk 모양 변환 (build_prompt 재사용용).
+
+    TODO: response_builder._format_web_context 와 같은 동작.
+    """
+    raise NotImplementedError("_format_web_context (query_graph)")
 
 
 def _doc_citations(chunks: list[RetrievedChunk]) -> list[Citation]:
-    cites: list[Citation] = []
-    seen: set[tuple[str, Any]] = set()
-    for c in chunks:
-        src = str(c.metadata.get("source_file", "unknown"))
-        page = c.metadata.get("page_number", "?")
-        key = (src, page)
-        if key in seen:
-            continue
-        seen.add(key)
-        cites.append(
-            Citation(
-                kind="doc",
-                label=f"{src} p.{page}",
-                locator=str(c.metadata.get("source_path", src)),
-            )
-        )
-    return cites
+    """TODO: response_builder._doc_citations 와 같은 동작."""
+    raise NotImplementedError("_doc_citations (query_graph)")
 
 
 def _web_citations(results: list[WebResult]) -> list[Citation]:
-    return [Citation(kind="web", label=r.title or r.url, locator=r.url) for r in results]
+    """TODO: response_builder._web_citations 와 같은 동작."""
+    raise NotImplementedError("_web_citations (query_graph)")
 
 
-# ---------- nodes ----------
+# ---------- nodes (TODO: 구현 채우기) ----------
 
 def node_preprocess(state: QueryState) -> dict[str, Any]:
-    """2.1 / 2.2 — 정규화 + (선택) LLM 기반 Query Rewriting."""
-    query = state["user_query"]
-    rewrite = state.get("rewrite", False)
-    pre = _stage(state, "preprocess",
-                 lambda: query_preprocessor.preprocess(query, rewrite=rewrite))
-    metrics = state["metrics"]
-    metrics.query_chars = len(query)
-    metrics.processed_chars = len(pre.processed)
-    metrics.rewritten = pre.rewritten
-    return {"pre": pre}
+    """2.1 / 2.2.
+
+    TODO:
+      - _stage(state, "preprocess", lambda: query_preprocessor.preprocess(query, rewrite=...))
+      - metrics.query_chars / processed_chars / rewritten 갱신
+      - return {"pre": pre}
+    """
+    raise NotImplementedError("node_preprocess")
 
 
 def node_embed_query(state: QueryState) -> dict[str, Any]:
-    """2.3 — 문서와 동일한 임베딩 모델로 질문을 벡터화."""
-    pre = state["pre"]
-    embedding = _stage(state, "query_embed", lambda: query_embedder.embed_query(pre.processed))
-    state["metrics"].embedding_dimension = len(embedding)
-    return {"embedding": embedding}
+    """2.3.
+
+    TODO:
+      - _stage(state, "query_embed", lambda: query_embedder.embed_query(pre.processed))
+      - metrics.embedding_dimension 갱신
+      - return {"embedding": embedding}
+    """
+    raise NotImplementedError("node_embed_query")
 
 
 def node_retrieve(state: QueryState) -> dict[str, Any]:
-    """3.3 — Top-K Semantic Retrieval + 2.4 threshold check."""
-    retriever = state["retriever"]
-    embedding = state["embedding"]
-    retrieval: RetrievalResult = _stage(state, "retrieve", lambda: retriever.retrieve(embedding))
+    """3.3 + 2.4 (검색 + threshold 판정).
 
-    metrics = state["metrics"]
-    metrics.threshold = retriever.threshold
-    metrics.top_k = retriever.top_k
-    metrics.chunks_retrieved = len(retrieval.chunks)
-    metrics.threshold_met = retrieval.threshold_met
-    metrics.similarity = ScoreStats.from_values([c.similarity_score for c in retrieval.chunks])
-    metrics.retrieved_chunk_lengths = LengthStats.from_strings(
-        [c.content for c in retrieval.chunks]
-    )
-    return {"retrieval": retrieval}
+    TODO:
+      - _stage(state, "retrieve", lambda: retriever.retrieve(embedding))
+      - metrics.threshold/top_k/chunks_retrieved/threshold_met/similarity/retrieved_chunk_lengths 갱신
+      - return {"retrieval": retrieval}
+    """
+    raise NotImplementedError("node_retrieve")
 
 
 def node_rag_generate(state: QueryState) -> dict[str, Any]:
-    """4.1 — RAG Context Injection 으로 LLM 답변 생성."""
-    retrieval = state["retrieval"]
-    chunks = list(retrieval.chunks)
-    prompt = rag_generator.build_prompt(state["user_query"], chunks)
-    state["metrics"].prompt_chars = len(prompt)
-    state["metrics"].retrieval_source = "rag"
+    """4.1 — RAG context injection 으로 LLM 답변 생성.
 
-    ans = _stage(state, "llm_generate",
-                 lambda: rag_generator.generate(state["user_query"], chunks))
-    return {
-        "chunks_for_prompt": chunks,
-        "answer_text": ans.text,
-        "answer_provider": ans.provider,
-        "answer_model": ans.model,
-    }
+    TODO:
+      - rag_generator.build_prompt → metrics.prompt_chars / retrieval_source="rag"
+      - _stage(state, "llm_generate", lambda: rag_generator.generate(query, chunks))
+      - return {"chunks_for_prompt": chunks, "answer_text", "answer_provider", "answer_model"}
+    """
+    raise NotImplementedError("node_rag_generate")
 
 
 def node_web_search(state: QueryState) -> dict[str, Any]:
-    """4.2-1 — Tavily / SerpAPI 호출."""
-    raw = _stage(state, "web_search",
-                 lambda: web_search_agent.search(
-                     state["user_query"], top_k=settings.WEB_SEARCH_TOP_K))
-    state["metrics"].web_results_raw = len(raw)
-    state["metrics"].retrieval_source = "web"
-    return {"web_raw": raw}
+    """4.2-1 — Tavily/SerpAPI 호출.
+
+    TODO:
+      - _stage(state, "web_search", lambda: web_search_agent.search(query))
+      - metrics.web_results_raw / retrieval_source="web" 갱신
+      - return {"web_raw": raw}
+    """
+    raise NotImplementedError("node_web_search")
 
 
 def node_web_filter(state: QueryState) -> dict[str, Any]:
-    """4.2-2 — 스팸/광고/짧은 스니펫 제거."""
-    filtered = _stage(state, "web_filter",
-                      lambda: web_filter.filter_results(state["web_raw"]))
-    state["metrics"].web_results_kept = len(filtered)
-    return {"web_filtered": filtered}
+    """4.2-2.
+
+    TODO:
+      - _stage(state, "web_filter", lambda: web_filter.filter_results(state["web_raw"]))
+      - metrics.web_results_kept 갱신
+      - return {"web_filtered": filtered}
+    """
+    raise NotImplementedError("node_web_filter")
 
 
 def node_web_generate(state: QueryState) -> dict[str, Any]:
-    """4.2-3 — 웹 컨텍스트로 LLM 답변 생성."""
-    web_chunks = _format_web_context(state["web_filtered"])
-    prompt = rag_generator.build_prompt(state["user_query"], web_chunks)
-    state["metrics"].prompt_chars = len(prompt)
+    """4.2-3.
 
-    ans = _stage(state, "llm_generate",
-                 lambda: rag_generator.generate(state["user_query"], web_chunks))
-    return {
-        "chunks_for_prompt": web_chunks,
-        "answer_text": ans.text,
-        "answer_provider": ans.provider,
-        "answer_model": ans.model,
-    }
+    TODO:
+      - _format_web_context → build_prompt → _stage("llm_generate", generate)
+      - metrics.prompt_chars 갱신
+      - return {"chunks_for_prompt", "answer_text", "answer_provider", "answer_model"}
+    """
+    raise NotImplementedError("node_web_generate")
 
 
 def node_build_response(state: QueryState) -> dict[str, Any]:
-    """4.3 — 답변 + 출처를 FinalResponse 로 패키징."""
-    metrics = state["metrics"]
-    metrics.answer_chars = len(state["answer_text"])
-    metrics.llm_provider = state["answer_provider"]
-    metrics.llm_model = state["answer_model"]
+    """4.3 — citations + FinalResponse 패키징, metrics.total_ms 마감.
 
-    retrieval = state["retrieval"]
-    if metrics.retrieval_source == "rag":
-        citations = _doc_citations(state["chunks_for_prompt"])
-        chunks = list(retrieval.chunks)
-        web_results: list[WebResult] = []
-    else:
-        citations = _web_citations(state.get("web_filtered", []))
-        chunks = list(retrieval.chunks)   # 임계 미만이지만 참고용으로 보존
-        web_results = state.get("web_filtered", [])
-
-    metrics.total_ms = int((time.perf_counter() - state["started_at"]) * 1000)
-
-    response = FinalResponse(
-        answer=state["answer_text"],
-        retrieval_source=metrics.retrieval_source,
-        citations=citations,
-        chunks=chunks,
-        web_results=web_results,
-        similarity_scores=[c.similarity_score for c in retrieval.chunks],
-        response_time_ms=metrics.total_ms,
-        model=state["answer_model"],
-        provider=state["answer_provider"],
-        metrics=metrics,
-    )
-    return {"response": response}
+    TODO:
+      - metrics.answer_chars / llm_provider / llm_model 채우기
+      - retrieval_source 에 따라 citation 종류 결정
+      - metrics.total_ms = perf_counter() - state["started_at"] 변환
+      - FinalResponse 생성 후 return {"response": response}
+    """
+    raise NotImplementedError("node_build_response")
 
 
 def node_log(state: QueryState) -> dict[str, Any]:
-    """5.1 — 한 사이클 전체를 로그 DB 에 기록."""
-    response = state["response"]
-    pre = state["pre"]
-    log_store = state["log_store"]
+    """5.1 — log_store.record 로 한 사이클 영속화.
 
-    payload = {
-        "timestamp": datetime.now(timezone.utc),
-        "user_query": pre.original,
-        "processed_query": pre.processed,
-        "retrieval_source": response.retrieval_source,
-        "retrieved_chunks": [
-            {
-                "chunk_id": c.chunk_id,
-                "content": c.content,
-                "metadata": c.metadata,
-                "similarity_score": c.similarity_score,
-            }
-            for c in response.chunks
-        ],
-        "similarity_scores": response.similarity_scores,
-        "generated_answer": response.answer,
-        "sources_cited": [asdict(c) for c in response.citations],
-        "response_time_ms": response.response_time_ms,
-        "top_score": state["retrieval"].top_score,
-        "metrics": response.metrics.to_dict(),
-    }
-    log_id = log_store.record(payload)
-    return {"log_id": log_id}
+    TODO: payload dict 구성 후
+      - log_id = log_store.record(payload)
+      - return {"log_id": log_id}
+    payload 구성은 명세 5.1 의 스키마 참고.
+    """
+    raise NotImplementedError("node_log")
 
 
-# ---------- conditional edges ----------
+# ---------- conditional edges (TODO) ----------
 
 def _route_by_threshold(state: QueryState) -> str:
-    """2.4 분기: 임계치 충족 -> rag / 미충족 -> web."""
-    retrieval = state["retrieval"]
-    if retrieval.threshold_met and retrieval.chunks:
-        return "rag_generate"
-    return "web_search"
+    """2.4 분기.
+
+    TODO:
+      - retrieval.threshold_met 이고 chunks 가 비어있지 않으면 "rag_generate"
+      - 아니면 "web_search"
+    """
+    raise NotImplementedError("_route_by_threshold")
 
 
-# ---------- graph factory ----------
+# ---------- graph factory (frame 으로 유지) ----------
 
 def build_graph():
+    """Layer 2 ~ 5 의 LangGraph wiring — 그대로 두고 노드만 채우면 동작."""
     g: StateGraph = StateGraph(QueryState)
 
     g.add_node("preprocess", node_preprocess)
@@ -328,7 +249,6 @@ def build_graph():
     g.add_edge("preprocess", "embed_query")
     g.add_edge("embed_query", "retrieve")
 
-    # 2.4 threshold 분기
     g.add_conditional_edges(
         "retrieve", _route_by_threshold,
         {"rag_generate": "rag_generate", "web_search": "web_search"},
@@ -366,17 +286,11 @@ def run(
     retriever: Retriever | None = None,
     log_store: LogStore | None = None,
 ) -> QueryState:
-    """그래프를 invoke 해 Layer 2 ~ 5 전체를 실행한다."""
-    store = store or VectorStore()
-    retriever = retriever or Retriever(kb=KnowledgeBase(store=store))
-    log_store = log_store or LogStore()
+    """그래프 invoke. 노드들이 채워지면 그대로 동작.
 
-    initial: QueryState = {
-        "user_query": user_query,
-        "rewrite": rewrite,
-        "retriever": retriever,
-        "log_store": log_store,
-        "metrics": QueryMetrics(),
-        "started_at": time.perf_counter(),
-    }
-    return get_graph().invoke(initial)
+    TODO:
+      - 의존성 default 채우기 (store, retriever, log_store)
+      - initial state (user_query, rewrite, retriever, log_store, metrics, started_at)
+      - get_graph().invoke(initial) 결과 반환
+    """
+    raise NotImplementedError("query_graph.run")

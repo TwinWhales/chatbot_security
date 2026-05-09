@@ -1,4 +1,7 @@
-"""Web search fallback agent (Tavily / SerpAPI)."""
+"""Web search fallback agent (Tavily / SerpAPI).
+
+명세 4.2-1 — 직접 구현해보세요. 키 없으면 빈 리스트 반환.
+"""
 
 from __future__ import annotations
 
@@ -16,65 +19,34 @@ class WebResult:
 
 
 def _search_tavily(query: str, top_k: int) -> list[WebResult]:
-    if not settings.TAVILY_API_KEY:
-        return []
-    try:
-        from tavily import TavilyClient  # type: ignore
-    except ImportError:
-        return []
+    """Tavily API 호출.
 
-    client = TavilyClient(api_key=settings.TAVILY_API_KEY)
-    raw = client.search(query=query, max_results=top_k, search_depth="basic")
-    out: list[WebResult] = []
-    for item in raw.get("results", []):
-        out.append(
-            WebResult(
-                title=item.get("title", ""),
-                url=item.get("url", ""),
-                snippet=item.get("content", "") or item.get("snippet", ""),
-                score=float(item.get("score", 0.0) or 0.0),
-            )
-        )
-    return out
+    TODO:
+      - settings.TAVILY_API_KEY 없으면 []
+      - tavily.TavilyClient(api_key=...).search(query, max_results=top_k, search_depth="basic")
+      - 결과의 results 리스트를 WebResult 로 매핑
+        (title, url, content/snippet, score)
+    """
+    raise NotImplementedError("_search_tavily")
 
 
 def _search_serpapi(query: str, top_k: int) -> list[WebResult]:
-    if not settings.SERPAPI_API_KEY:
-        return []
-    try:
-        import requests  # serpapi has its own SDK but requests is universally available
-    except ImportError:
-        return []
+    """SerpAPI 호출.
 
-    resp = requests.get(
-        "https://serpapi.com/search",
-        params={
-            "q": query,
-            "api_key": settings.SERPAPI_API_KEY,
-            "num": top_k,
-        },
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    out: list[WebResult] = []
-    for item in (data.get("organic_results") or [])[:top_k]:
-        out.append(
-            WebResult(
-                title=item.get("title", ""),
-                url=item.get("link", ""),
-                snippet=item.get("snippet", ""),
-            )
-        )
-    return out
+    TODO:
+      - settings.SERPAPI_API_KEY 없으면 []
+      - requests.get("https://serpapi.com/search", params={...})
+      - organic_results 의 상위 top_k 를 WebResult 로 매핑
+    """
+    raise NotImplementedError("_search_serpapi")
 
 
 def search(query: str, top_k: int | None = None) -> list[WebResult]:
-    k = top_k or settings.WEB_SEARCH_TOP_K
-    provider = settings.WEB_SEARCH_PROVIDER.lower()
+    """provider 라우팅.
 
-    if provider == "tavily":
-        return _search_tavily(query, k)
-    if provider == "serpapi":
-        return _search_serpapi(query, k)
-    return []
+    TODO:
+      - top_k 기본값: settings.WEB_SEARCH_TOP_K
+      - settings.WEB_SEARCH_PROVIDER 에 따라 _search_tavily / _search_serpapi
+      - 그 외 provider 면 []
+    """
+    raise NotImplementedError("search")

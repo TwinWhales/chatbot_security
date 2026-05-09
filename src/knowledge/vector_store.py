@@ -1,18 +1,15 @@
 """ChromaDB-backed vector store.
 
-The store is intentionally thin: it owns persistence and CRUD against a
-single Chroma collection. Higher-level concerns (filtering, threshold
-checks, prompt assembly) live in retriever / knowledge_base / response.
+명세 3.1 / 1.10 — 직접 구현해보세요.
+
+설계 원칙: **저장은 storage 가, 정책은 retrieval 이.**
+이 모듈은 CRUD 만, threshold 같은 정책 판정은 retriever.py 에 둠.
 """
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable
-
-import chromadb
-from chromadb.config import Settings as ChromaSettings
 
 from config import settings
 
@@ -26,22 +23,22 @@ class RetrievedChunk:
 
 
 class VectorStore:
-    """Wraps a single ChromaDB collection."""
+    """ChromaDB 단일 컬렉션 위의 thin wrapper."""
 
     def __init__(
         self,
         persist_dir: str | None = None,
         collection_name: str | None = None,
     ) -> None:
-        self._client = chromadb.PersistentClient(
-            path=persist_dir or settings.CHROMA_PERSIST_DIR,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-        self._collection = self._client.get_or_create_collection(
-            name=collection_name or settings.CHROMA_COLLECTION,
-            # Cosine distance ⇒ similarity = 1 - distance, matching the spec.
-            metadata={"hnsw:space": "cosine"},
-        )
+        """ChromaDB PersistentClient + get_or_create_collection.
+
+        TODO:
+          - chromadb.PersistentClient(path=persist_dir or settings.CHROMA_PERSIST_DIR)
+          - chromadb.config.Settings(anonymized_telemetry=False) 권장
+          - collection 의 metadata 에 {"hnsw:space": "cosine"} 지정 (명세의 cosine similarity)
+          - self._client, self._collection 에 보관
+        """
+        raise NotImplementedError("VectorStore.__init__")
 
     # ---------- writes ----------
 
@@ -52,31 +49,32 @@ class VectorStore:
         metadatas: list[dict[str, Any]],
         ids: list[str] | None = None,
     ) -> list[str]:
-        if not (len(contents) == len(embeddings) == len(metadatas)):
-            raise ValueError("contents, embeddings, metadatas must align")
-        if ids is None:
-            ids = [str(uuid.uuid4()) for _ in contents]
-        # Chroma rejects empty-list metadata values; sanitize defensively.
-        cleaned = [_sanitize_metadata(m) for m in metadatas]
-        self._collection.add(
-            documents=contents,
-            embeddings=embeddings,
-            metadatas=cleaned,
-            ids=ids,
-        )
-        return ids
+        """청크 N 개를 한 번에 저장. ids 없으면 UUID 로 생성.
+
+        TODO:
+          - len 일치 검증
+          - ids = ids or [str(uuid.uuid4()) for _ in contents]
+          - metadata 의 None / list / dict 값은 Chroma 가 거부하니 sanitize
+            (str, int, float, bool 만 통과시키고 나머지는 str() 로 변환)
+          - self._collection.add(documents, embeddings, metadatas, ids)
+          - ids 반환
+        """
+        raise NotImplementedError("VectorStore.add")
 
     def delete(self, ids: Iterable[str]) -> None:
-        self._collection.delete(ids=list(ids))
+        """ID 목록으로 청크 삭제.
+
+        TODO: self._collection.delete(ids=list(ids))
+        """
+        raise NotImplementedError("VectorStore.delete")
 
     def reset(self) -> None:
-        """Drop the collection — useful for tests and reindexing."""
-        name = self._collection.name
-        self._client.delete_collection(name)
-        self._collection = self._client.get_or_create_collection(
-            name=name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        """컬렉션을 완전히 비운다 (테스트/재인덱싱용).
+
+        TODO:
+          - 컬렉션 이름 백업 → delete_collection → get_or_create_collection
+        """
+        raise NotImplementedError("VectorStore.reset")
 
     # ---------- reads ----------
 
@@ -86,52 +84,19 @@ class VectorStore:
         top_k: int,
         where: dict[str, Any] | None = None,
     ) -> list[RetrievedChunk]:
-        result = self._collection.query(
-            query_embeddings=[embedding],
-            n_results=top_k,
-            where=where,
-        )
-        # Chroma returns parallel lists keyed by query index; we only sent one.
-        ids = (result.get("ids") or [[]])[0]
-        docs = (result.get("documents") or [[]])[0]
-        metas = (result.get("metadatas") or [[]])[0]
-        dists = (result.get("distances") or [[]])[0]
+        """질문 벡터로 Top-K 검색.
 
-        chunks: list[RetrievedChunk] = []
-        for chunk_id, doc, meta, dist in zip(ids, docs, metas, dists):
-            chunks.append(
-                RetrievedChunk(
-                    chunk_id=chunk_id,
-                    content=doc or "",
-                    metadata=dict(meta or {}),
-                    similarity_score=_distance_to_similarity(dist),
-                )
-            )
-        return chunks
+        TODO:
+          - self._collection.query(query_embeddings=[embedding], n_results=top_k, where=where)
+          - 결과의 ids/documents/metadatas/distances 를 zip
+          - 거리 → 유사도 변환: 1 - distance, [0, 1] 로 clamp
+          - RetrievedChunk 의 list 로 변환해 반환
+        """
+        raise NotImplementedError("VectorStore.query")
 
     def count(self) -> int:
-        return self._collection.count()
+        """컬렉션 안의 청크 수.
 
-
-def _distance_to_similarity(distance: float | None) -> float:
-    if distance is None:
-        return 0.0
-    # Cosine distance in Chroma is in [0, 2]; clamp the similarity to [0, 1].
-    sim = 1.0 - float(distance)
-    if sim < 0.0:
-        sim = 0.0
-    if sim > 1.0:
-        sim = 1.0
-    return sim
-
-
-def _sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for k, v in meta.items():
-        if v is None:
-            continue
-        if isinstance(v, (str, int, float, bool)):
-            out[k] = v
-        else:
-            out[k] = str(v)
-    return out
+        TODO: self._collection.count()
+        """
+        raise NotImplementedError("VectorStore.count")

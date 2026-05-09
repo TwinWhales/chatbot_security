@@ -1,11 +1,7 @@
 """RAG 시스템 CLI 엔트리포인트 (LangGraph 기반).
 
-실행 흐름은 두 개의 LangGraph StateGraph 로 분리되어 있다:
-
-- src/graphs/ingestion_graph.py  : Layer 1 (Data Ingestion)
-- src/graphs/query_graph.py      : Layer 2 ~ 5 (Query / Knowledge / Response / Logging)
-
-이 파일은 단순히 그래프를 invoke 하고 결과를 콘솔/JSON 으로 출력한다.
+argparse 골격은 frame 으로 유지하고, 각 _cmd_* 함수의 본문을 직접 채워보세요.
+서브커맨드는 두 그래프를 invoke 하는 thin layer 입니다.
 
 서브커맨드:
     ingest <path>        — Layer 1 그래프 실행
@@ -17,9 +13,7 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 # 어떤 위치에서 실행되어도 src 패키지가 import 되도록 보정.
@@ -35,110 +29,50 @@ from src.logging.log_store import LogStore  # noqa: E402
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
-    store = VectorStore()
-    final = ingestion_graph.run(args.path, store=store)
-    metrics = final["metrics"]
-    out = {
-        "source_file": metrics.source_file,
-        "file_type": metrics.file_type,
-        "pages_extracted": metrics.pages_after_clean,
-        "chunks_written": metrics.chunks_written,
-        "used_ocr": final.get("used_ocr", False),
-        "metrics": metrics.to_dict(),
-    }
-    print(json.dumps(out, ensure_ascii=False, indent=2))
-    return 0
+    """ingestion_graph.run() 을 호출하고 metrics 를 JSON 으로 출력.
+
+    TODO:
+      - VectorStore 인스턴스 생성
+      - ingestion_graph.run(args.path, store=store)
+      - final state 의 metrics 를 dict 로 변환 후 json.dumps 출력
+      - return 0
+    """
+    raise NotImplementedError("_cmd_ingest")
 
 
 def _cmd_ask(args: argparse.Namespace) -> int:
-    store = VectorStore()
-    retriever = Retriever(kb=KnowledgeBase(store=store))
-    log_store = LogStore()
+    """query_graph.run() 을 호출하고 답변/citation/timings 를 출력.
 
-    final = query_graph.run(
-        args.question,
-        rewrite=args.rewrite,
-        store=store,
-        retriever=retriever,
-        log_store=log_store,
-    )
-    response = final["response"]
-    log_id = final["log_id"]
-    retrieval = final["retrieval"]
-
-    if args.json:
-        out = {
-            "log_id": log_id,
-            "answer": response.answer,
-            "retrieval_source": response.retrieval_source,
-            "top_score": retrieval.top_score,
-            "citations": [asdict(c) for c in response.citations],
-            "model": response.model,
-            "provider": response.provider,
-            "response_time_ms": response.response_time_ms,
-            "metrics": response.metrics.to_dict(),
-        }
-        print(json.dumps(out, ensure_ascii=False, indent=2))
-    else:
-        print(f"=== Answer (source: {response.retrieval_source}) ===")
-        print(response.answer)
-        print()
-        print(f"top_score={retrieval.top_score:.3f}  threshold={settings.SIMILARITY_THRESHOLD}")
-        if response.citations:
-            print("Sources:")
-            for c in response.citations:
-                print(f"  - [{c.kind}] {c.label}  ({c.locator})")
-        stage = response.metrics.stage_ms
-        if stage:
-            parts = ", ".join(f"{k}={v}ms" for k, v in stage.items())
-            print(f"Stages: {parts}")
-        print(f"\n(log_id={log_id}, model={response.model}, total={response.response_time_ms} ms)")
-    return 0
+    TODO:
+      - VectorStore + Retriever + LogStore 의존성 구성
+      - query_graph.run(args.question, rewrite=args.rewrite, store=..., retriever=..., log_store=...)
+      - final state 의 response 를 args.json 여부에 따라 사람용/JSON 형식으로 출력
+      - 사람용은 답변 + top_score + citations + 노드별 timing + log_id 표시
+      - return 0
+    """
+    raise NotImplementedError("_cmd_ask")
 
 
 def _cmd_stats(_: argparse.Namespace) -> int:
-    store = VectorStore()
-    log_store = LogStore()
-    routes = analytics.route_counts(log_store)
-    print(json.dumps(
-        {
-            "vector_store": {
-                "collection": settings.CHROMA_COLLECTION,
-                "chunks": store.count(),
-            },
-            "logs": {
-                "total": routes.total,
-                "rag": routes.rag,
-                "web": routes.web,
-                "avg_latency_ms": analytics.average_latency_ms(log_store),
-            },
-        },
-        ensure_ascii=False,
-        indent=2,
-    ))
-    return 0
+    """벡터 스토어 청크 수 + 로그 route 카운트 + 평균 latency 출력.
+
+    TODO:
+      - analytics.route_counts(log_store) / average_latency_ms(log_store)
+      - VectorStore.count() 도 포함
+      - json.dumps 로 출력
+    """
+    raise NotImplementedError("_cmd_stats")
 
 
 def _cmd_metrics(_: argparse.Namespace) -> int:
-    log_store = LogStore()
-    store = VectorStore()
-    report = analytics.full_report(log_store)
-    report["vector_store"] = {
-        "collection": settings.CHROMA_COLLECTION,
-        "chunks": store.count(),
-        "embedding_model": settings.EMBEDDING_MODEL,
-        "embedding_dimension": settings.EMBEDDING_DIMENSION,
-    }
-    report["config"] = {
-        "similarity_threshold": settings.SIMILARITY_THRESHOLD,
-        "top_k": settings.TOP_K,
-        "chunk_size": settings.CHUNK_SIZE,
-        "chunk_overlap": settings.CHUNK_OVERLAP,
-        "llm_model": settings.LLM_MODEL,
-        "llm_provider": settings.LLM_PROVIDER,
-    }
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0
+    """analytics.full_report 결과에 vector_store 정보와 config 스냅샷을 덧붙여 출력.
+
+    TODO:
+      - report = analytics.full_report(log_store)
+      - report["vector_store"] / report["config"] 채우기
+      - json.dumps 로 출력
+    """
+    raise NotImplementedError("_cmd_metrics")
 
 
 def main(argv: list[str] | None = None) -> int:
