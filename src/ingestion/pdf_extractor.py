@@ -1,7 +1,6 @@
 """pdfplumber-based PDF text extractor.
 
-Returns one entry per page so we can preserve page numbers in metadata
-and decide per-page whether OCR is needed (some PDFs are partly scanned).
+명세 1.3 — 직접 구현해보세요.
 """
 
 from __future__ import annotations
@@ -17,21 +16,24 @@ class PageText:
 
 
 def extract(path: str | Path) -> list[PageText]:
-    # Lazy import so non-PDF code paths (and tests) don't require pdfplumber.
-    import pdfplumber
+    """PDF 의 각 페이지에서 텍스트를 추출한다.
 
-    pages: list[PageText] = []
-    with pdfplumber.open(str(path)) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
-            try:
-                text = page.extract_text() or ""
-            except Exception:
-                text = ""
-            pages.append(PageText(page_number=i, text=text))
-    return pages
+    TODO:
+      - pdfplumber 를 함수 내부에서 lazy import
+      - pdfplumber.open(path) 로 PDF 열기
+      - pdf.pages 를 enumerate(start=1) 로 순회
+      - page.extract_text() 결과를 PageText 로 감싸 list 로 반환
+      - 페이지별 try/except 로 파손된 페이지가 전체를 막지 않게 처리
+    """
+    raise NotImplementedError("extract(path) — pdfplumber 페이지별 텍스트 추출 구현하기")
 
 
 def looks_empty(pages: list[PageText]) -> bool:
-    """True when extraction yielded essentially nothing — caller should OCR."""
-    total = sum(len(p.text.strip()) for p in pages)
-    return total < 20
+    """추출 결과가 사실상 비어있는지 판정한다.
+
+    그래프의 conditional edge 가 이 결과로 OCR 분기 여부를 결정한다.
+
+    TODO:
+      - 모든 페이지의 text.strip() 길이 합이 임계값(예: 20) 미만이면 True
+    """
+    raise NotImplementedError("looks_empty(pages) — 빈 추출 판정 구현하기")

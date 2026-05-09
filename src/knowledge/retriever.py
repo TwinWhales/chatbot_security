@@ -1,8 +1,9 @@
 """Top-K semantic retrieval with similarity-threshold gating.
 
-The threshold check happens here (not inside the vector store) because
-"is this good enough to use as RAG context?" is a retrieval-policy
-question, not a storage question.
+명세 3.3 + 2.4 — 직접 구현해보세요.
+
+Threshold 판정 (RAG/Web 분기) 의 단일 출처. query_graph 의 conditional edge
+가 RetrievalResult.threshold_met 만 보고 분기한다.
 """
 
 from __future__ import annotations
@@ -39,14 +40,13 @@ class Retriever:
         query_embedding: list[float],
         filt: Filter | None = None,
     ) -> RetrievalResult:
-        chunks = self.kb.search(query_embedding, top_k=self.top_k, filt=filt)
+        """Top-K 검색 후 임계치 충족 여부를 판정해 반환.
 
-        if not chunks:
-            return RetrievalResult(chunks=[], threshold_met=False, top_score=0.0)
-
-        top_score = max(c.similarity_score for c in chunks)
-        return RetrievalResult(
-            chunks=chunks,
-            threshold_met=top_score >= self.threshold,
-            top_score=top_score,
-        )
+        TODO:
+          1. self.kb.search(embedding, top_k, filt) 로 청크 가져오기
+          2. 빈 결과면 RetrievalResult([], False, 0.0) 반환
+          3. top_score = max(c.similarity_score for c in chunks)
+          4. threshold_met = top_score >= self.threshold
+          5. RetrievalResult(chunks, threshold_met, top_score) 반환
+        """
+        raise NotImplementedError("Retriever.retrieve")

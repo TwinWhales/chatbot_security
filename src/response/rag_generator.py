@@ -1,7 +1,6 @@
 """Path A: build the RAG prompt and call the LLM.
 
-The function returns just the answer text; source citation is the caller's
-job (response_builder), so the LLM doesn't need to know about chunk IDs.
+명세 4.1 / 4.3 — 직접 구현해보세요.
 """
 
 from __future__ import annotations
@@ -21,76 +20,69 @@ class GeneratedAnswer:
 
 
 def _format_context(chunks: Sequence[RetrievedChunk]) -> str:
-    blocks: list[str] = []
-    for i, c in enumerate(chunks, start=1):
-        src = c.metadata.get("source_file", "unknown")
-        page = c.metadata.get("page_number", "?")
-        blocks.append(
-            f"[Context {i}] (source: {src}, p.{page})\n{c.content}"
-        )
-    return "\n\n".join(blocks)
+    """검색된 청크들을 LLM 컨텍스트 문자열로 포맷.
+
+    TODO:
+      - 청크마다 "[Context i] (source: <source_file>, p.<page>)\\n<content>" 블록
+      - 블록 사이는 \\n\\n 로 구분
+    """
+    raise NotImplementedError("_format_context")
 
 
 def build_prompt(query: str, chunks: Sequence[RetrievedChunk]) -> str:
-    context = _format_context(chunks) if chunks else "(no context)"
-    return (
-        "다음은 관련 문서에서 검색된 내용입니다:\n\n"
-        f"{context}\n\n"
-        "위 내용을 바탕으로 다음 질문에 답변하세요. "
-        "답변에 사용한 출처를 반드시 표기하세요.\n\n"
-        f"질문: {query}"
-    )
+    """명세 4.1 의 한국어 템플릿으로 프롬프트 구성.
+
+    TODO: 다음 형식의 단일 문자열을 반환
+        다음은 관련 문서에서 검색된 내용입니다:
+
+        {_format_context(chunks)}
+
+        위 내용을 바탕으로 다음 질문에 답변하세요.
+        답변에 사용한 출처를 반드시 표기하세요.
+
+        질문: {query}
+    """
+    raise NotImplementedError("build_prompt")
 
 
 def _call_anthropic(prompt: str) -> str:
-    import anthropic  # type: ignore
+    """Anthropic SDK 로 LLM 호출.
 
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    msg = client.messages.create(
-        model=settings.LLM_MODEL,
-        max_tokens=settings.LLM_MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    parts = [b.text for b in msg.content if getattr(b, "type", "") == "text"]
-    return "".join(parts).strip()
+    TODO:
+      - anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+      - client.messages.create(model, max_tokens, messages=[{"role":"user","content":prompt}])
+      - 응답 content 의 text 블록만 join 해 반환
+    """
+    raise NotImplementedError("_call_anthropic")
 
 
 def _call_openai(prompt: str) -> str:
-    from openai import OpenAI  # type: ignore
+    """OpenAI Chat Completion 호출.
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    resp = client.chat.completions.create(
-        model=settings.LLM_MODEL,
-        max_tokens=settings.LLM_MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return (resp.choices[0].message.content or "").strip()
+    TODO:
+      - OpenAI(api_key=settings.OPENAI_API_KEY)
+      - client.chat.completions.create(model, max_tokens, messages=[...])
+      - choices[0].message.content 반환
+    """
+    raise NotImplementedError("_call_openai")
 
 
 def _call_stub(prompt: str, chunks: Sequence[RetrievedChunk]) -> str:
-    """Offline fallback so the pipeline still completes without API keys."""
-    if not chunks:
-        return "[stub] No retrieved context and no LLM configured."
-    preview = chunks[0].content[:300].replace("\n", " ")
-    return (
-        "[stub answer - no LLM API key configured]\n"
-        f"Top context: {preview}..."
-    )
+    """API 키가 없을 때의 폴백 — 파이프라인이 끊기지 않도록 가짜 답변.
+
+    TODO:
+      - 청크가 없으면 "[stub] No retrieved context and no LLM configured."
+      - 있으면 첫 청크 미리보기를 포함한 stub 메시지
+    """
+    raise NotImplementedError("_call_stub")
 
 
 def generate(query: str, chunks: Sequence[RetrievedChunk]) -> GeneratedAnswer:
-    prompt = build_prompt(query, chunks)
-    provider = settings.LLM_PROVIDER.lower()
+    """provider 라우팅 후 답변 생성.
 
-    if provider == "anthropic" and settings.ANTHROPIC_API_KEY:
-        return GeneratedAnswer(
-            text=_call_anthropic(prompt), model=settings.LLM_MODEL, provider="anthropic"
-        )
-    if provider == "openai" and settings.OPENAI_API_KEY:
-        return GeneratedAnswer(
-            text=_call_openai(prompt), model=settings.LLM_MODEL, provider="openai"
-        )
-
-    return GeneratedAnswer(
-        text=_call_stub(prompt, chunks), model="stub", provider="stub"
-    )
+    TODO:
+      - prompt = build_prompt(query, chunks)
+      - settings.LLM_PROVIDER 와 키 유무에 따라 _call_anthropic / _call_openai / _call_stub
+      - GeneratedAnswer(text, model=settings.LLM_MODEL or "stub", provider=...)
+    """
+    raise NotImplementedError("generate")

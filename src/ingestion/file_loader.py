@@ -1,8 +1,10 @@
-"""File ingestion entrypoint: copy upload to ./data/raw and classify it."""
+"""File ingestion entrypoint: copy upload to ./data/raw and classify it.
+
+명세 1.1 / 1.2 — 직접 구현해보세요.
+"""
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,35 +18,28 @@ DOCX_EXTS = {".docx"}
 
 @dataclass
 class LoadedFile:
-    path: Path        # canonical location under ./data/raw
+    path: Path        # data/raw 안의 정규화된 위치
     file_type: str    # "pdf" | "txt" | "md" | "docx" | "unknown"
 
 
 def classify(path: Path) -> str:
-    ext = path.suffix.lower()
-    if ext in PDF_EXTS:
-        return "pdf"
-    if ext == ".docx":
-        return "docx"
-    if ext == ".md" or ext == ".markdown":
-        return "md"
-    if ext == ".txt":
-        return "txt"
-    return "unknown"
+    """확장자로 file_type 을 결정한다.
+
+    TODO:
+      - path.suffix.lower() 를 PDF_EXTS / TEXT_EXTS / DOCX_EXTS 와 비교
+      - 매칭되지 않으면 "unknown"
+    """
+    raise NotImplementedError("classify(path) — 확장자 기반 분류 구현하기")
 
 
 def load(source: str | Path) -> LoadedFile:
-    """Copy a file into ./data/raw (if it isn't already there) and classify."""
-    src = Path(source).expanduser().resolve()
-    if not src.is_file():
-        raise FileNotFoundError(f"Not a file: {src}")
+    """파일을 ./data/raw 로 복사하고 LoadedFile 로 감싼다.
 
-    raw_dir = Path(settings.RAW_DIR).resolve()
-    if src.parent == raw_dir:
-        dest = src
-    else:
-        dest = raw_dir / src.name
-        if dest.resolve() != src:
-            shutil.copy2(src, dest)
-
-    return LoadedFile(path=dest, file_type=classify(dest))
+    TODO:
+      1. Path(source).resolve() — 절대 경로화
+      2. 존재하지 않으면 FileNotFoundError
+      3. settings.RAW_DIR 안에 이미 있으면 복사 생략
+      4. 그 외엔 shutil.copy2 로 복사
+      5. classify(dest) 로 file_type 결정 후 LoadedFile 반환
+    """
+    raise NotImplementedError("load(source) — raw 디렉토리 복사 + classify 구현하기")
