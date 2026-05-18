@@ -90,5 +90,14 @@ collected: 2026-05-18
   범위 내에서 사용. 유료/구독 콘텐츠는 특히 주의.
 - 로그인 세션 파일 (`data/.tryhackme_session.json`) 은 절대 커밋하지 말 것
   (이미 `.gitignore` 에 등록).
-- 페이지 DOM 셀렉터는 사이트가 개편되면 깨질 수 있으니, 첫 호출 시 한 번
-  눈으로 확인 후 잡으면 좋다.
+- 페이지 DOM 셀렉터는 사이트가 개편되면 깨질 수 있다. 첫 실행 시 한 두 곳
+  조정이 필요할 수 있다 — 대표적인 의심 포인트:
+  - `fetch_path` / `fetch_module` 의 `a[href*="/module/"]` / `a[href*="/room/"]`
+    셀렉터가 사이드바·추천 영역까지 잡을 수 있음 → 결과가 이상하면
+    부모 컨테이너로 한정 (예: `main a[href*="/room/"]`)
+  - `fetch_room_content` 의 `main` 선택자가 nav/footer 까지 포함하면
+    `_strip_chrome` 휴리스틱을 더 강하게 다듬어야 함
+  - `aria-expanded="false"` 버튼 클릭으로 task 를 펼치는 부분 — TryHackMe
+    가 다른 mechanism 으로 바꿨으면 여기서 본문이 빌 수 있음
+- 디버깅 팁: `cmd_login` 의 `headless=False` 를 임시로 `cmd_crawl` 의
+  `_load_context` 에도 적용해 페이지를 눈으로 보며 selector 잡기.
