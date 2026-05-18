@@ -1,144 +1,111 @@
-# RAG 시스템 — 전체 개요
+# forensicagent — 포렌식 자동 분류 CLI 에이전트
 
-관리자가 업로드한 문서를 벡터 DB 에 저장하고, 사용자 질문에 대해 의미론적
-검색 + LLM 답변을 생성하는 **5-Layer RAG 파이프라인**이다.
-유사도가 임계치 미만이면 자동으로 웹 검색 폴백으로 분기하며, 모든 사이클은
-로그 DB 에 기록된다.
+사용자가 포렌식 문제 디렉토리에서 `forensicagent` 를 실행하면, 로컬 LLM
+(Ollama) 이 증거를 식별하고 적절한 분석 도구를 RAG 로 선별·실행해서
+도구별 의심 항목을 자동 추출, 리포트로 제시한다.
 
-전체 실행 흐름은 두 개의 **LangGraph StateGraph** 로 구현되어 있어 노드/엣지/
-조건부 분기가 코드에 그대로 드러난다.
-
----
-
-## 시스템 구성 (5-Layer ↔ LangGraph 매핑)
-
-| 명세 Layer | 역할 | 디렉토리 | 그래프 노드 |
-|---|---|---|---|
-| L1 — Data Ingestion | 업로드 → 추출 → 정제 → 청킹 → 임베딩 → 저장 | `src/ingestion/` | `src/graphs/ingestion_graph.py` 의 노드들 |
-| L2 — User Query Processing | 전처리 → 임베딩 | `src/query/` | `preprocess`, `embed_query` |
-| L3 — Central Knowledge Engine | 벡터 DB / KB / Top-K + Threshold | `src/knowledge/` | `retrieve` |
-| L4 — AI Response Intelligence | RAG / Web Fallback / 답변 조합 | `src/response/` | `rag_generate` / `web_search` → `web_filter` → `web_generate` / `build_response` |
-| L5 — Logging & Future Learning | 모든 사이클 영속화, 분석 | `src/logging/` | `log` |
-| (cross-cutting) | 측정 (시간/카운트/스코어) | `src/observability/` | 모든 노드에서 stage_ms 누적 |
+분석가가 50+ 개 포렌식 도구를 다 외워서 돌릴 필요 없이, **"증거 → 도구 →
+의심 항목 → 리포트"** 의 triage 사이클을 한 명령으로 끝내는 것이 목표.
 
 ---
 
-## 두 개의 그래프
+## 시스템 구성 (6 모듈 + 측정)
 
-### 1. Ingestion Graph — `src/graphs/ingestion_graph.py`
+| 모듈 | 역할 | 디렉토리 |
+|---|---|---|
+| CLI | Typer + Rich 진입점, 인터랙티브 UX, 모듈 오케스트레이션 | `forensicagent/cli/` |
+| Scanner | CWD 재귀 스캔. magic bytes + 확장자 + 파일명 패턴으로 증거 식별 | `forensicagent/scanner/` |
+| Selector | 2단계 하이브리드. (1) 결정론 메타데이터 필터 → (2) LLM 우선순위 | `forensicagent/selector/` |
+| Executor | subprocess 격리 실행, 타임아웃, 도구별 어댑터, 결과 파일 저장 | `forensicagent/executor/` |
+| Analyzer | 도구 출력 → suspicious_indicators 룰 + LLM 하이브리드 추출 | `forensicagent/analyzer/` |
+| Reporter | Rich 터미널 + JSON/MD 동시 저장 | `forensicagent/reporter/` |
+| RAG | 도구 YAML 메타데이터 인덱싱 + lookup (ChromaDB) | `forensicagent/rag/` |
+| (cross-cutting) | Stopwatch, StageTimings, percentile — 모든 모듈에서 측정 | `forensicagent/observability/` |
+
+각 모듈은 다른 모듈의 출력 dict 를 입력으로 받는 순수 함수 위주이고,
+**무거운 의존성 (ollama 클라이언트, magic, sentence-transformers, chromadb)
+은 함수 내부에서 lazy import** 한다 (CLI 부팅 속도 보존).
+
+---
+
+## 흐름
 
 ```
-START → load_file → classify
-                       │
-        (PDF?)─┬──→ pdf_extract ─(추출 성공?)─→ clean ─→ chunk ─→ embed ─→ tag ─→ store ─→ END
-               │                       └─→ ocr ─┘
-               └──→ text_read ────────────────→ clean
+$ cd ~/ctf/forensics-challenge-03/
+$ forensicagent
+
+CWD 표시 → Scanner (증거 인벤토리)
+        → Selector (실행 계획)        ─ 사용자 승인
+        → Executor (도구 N 개 실행, 진행 상황 실시간)
+        → Analyzer (도구별 의심 항목 추출, 병렬 가능)
+        → Reporter (터미널 + JSON + MD)
 ```
 
-- 분기 1 (`classify`): 파일 타입에 따라 PDF 경로 / 비-PDF 경로
-- 분기 2 (`pdf_extract` 후): pdfplumber 결과가 사실상 비어 있으면 OCR 폴백
-
-### 2. Query Graph — `src/graphs/query_graph.py`
-
-```
-START → preprocess → embed_query → retrieve
-                                      │
-                  (threshold 충족?)─┬─→ rag_generate ──┐
-                                    │                  ├─→ build_response → log → END
-                                    └─→ web_search → web_filter → web_generate ─┘
-```
-
-- 분기 (`retrieve` 후): top_score ≥ SIMILARITY_THRESHOLD 이면 RAG, 아니면 웹
-
-각 노드는 `IngestState` / `QueryState` (TypedDict) 를 부분 갱신하는 순수 함수다.
-무거운 의존성(pdfplumber, pytesseract, anthropic, tavily)은 노드 내부에서 lazy import.
+전 사이클의 시간/카운트/severity 분포는 observability 가 한 곳에 모아
+리포트에 그대로 영속화된다 (메모리 원칙: **수치/성능은 처음부터 끝까지
+측정 가능하게**).
 
 ---
 
 ## 디렉토리 인덱스
 
-| 경로 | 책임 | CLAUDE.md |
-|---|---|---|
-| `config/` | 전역 설정 (env-override 가능) | [`config/CLAUDE.md`](config/CLAUDE.md) |
-| `src/ingestion/` | Layer 1 모듈들 (file_loader, pdf_extractor, ocr_processor, text_reader, text_cleaner, chunker, embedder, metadata_tagger) | [`src/ingestion/CLAUDE.md`](src/ingestion/CLAUDE.md) |
-| `src/query/` | Layer 2 모듈들 (전처리, 임베딩) | [`src/query/CLAUDE.md`](src/query/CLAUDE.md) |
-| `src/knowledge/` | Layer 3 모듈들 (vector_store, knowledge_base, retriever) | [`src/knowledge/CLAUDE.md`](src/knowledge/CLAUDE.md) |
-| `src/response/` | Layer 4 모듈들 (rag_generator, web_search_agent, web_filter, response_builder) | [`src/response/CLAUDE.md`](src/response/CLAUDE.md) |
-| `src/logging/` | Layer 5 모듈들 (log_store, analytics) | [`src/logging/CLAUDE.md`](src/logging/CLAUDE.md) |
-| `src/observability/` | Stopwatch, Metrics dataclass, percentile | [`src/observability/CLAUDE.md`](src/observability/CLAUDE.md) |
-| `src/graphs/` | LangGraph StateGraph 두 개 | [`src/graphs/CLAUDE.md`](src/graphs/CLAUDE.md) |
-| `seed_docs/` | 초기 지식 베이스용 원본 문서 모음 (사람이 손으로 채움) | [`seed_docs/CLAUDE.md`](seed_docs/CLAUDE.md) |
-| `seed_docs/tryhackme/` | TryHackMe Learn 크롤러 산출물 트리 (크롤러가 덮어씀) | [`seed_docs/tryhackme/CLAUDE.md`](seed_docs/tryhackme/CLAUDE.md) |
-| `scripts/` | 런타임이 아닌 보조 도구 (크롤러 등) | [`scripts/CLAUDE.md`](scripts/CLAUDE.md) |
-| `data/raw/` | `file_loader.load()` 가 자동 복사하는 원본 사본 | (settings.RAW_DIR) |
-| `data/chroma_db/` | ChromaDB persist 디렉토리 (벡터 + 메타) | (settings.CHROMA_PERSIST_DIR) |
-| 루트 | `main.py`, `smoke_test.py`, `requirements.txt`, `README.md` | (이 파일) |
+| 경로 | 책임 |
+|---|---|
+| `forensicagent/` | 런타임 패키지 (6 모듈 + observability + rag) |
+| `forensicagent/config.py` | env-override 가능한 전역 설정 (Ollama URL, 임베딩 모델, 타임아웃, 경로) |
+| `scripts/crawlers/` | 도구 메타데이터 작성용 도메인 자료 크롤러 (TryHackMe, CyberDefenders, DFIR Report, EZTools, HackTricks) |
+| `tools_metadata/` | 50+ 개 도구의 YAML 메타데이터 (사람이 작성). 인덱싱 입력 |
+| `seed_docs/` | 크롤러 산출물 (보조 도메인 자료 — 도구 카탈로그 보강용) |
 
 ---
 
-## 실행 방법
+## Ollama 로컬 LLM 제약 (반드시 인지)
+
+- **JSON 출력 신뢰성**: `format: "json"` 강제. 파싱 실패 시 1회 재시도 → 룰 fallback.
+- **컨텍스트 길이**: 8K~128K. Volatility/대용량 출력은 사전 필터링 후 LLM 투입.
+- **속도**: 8B 기준 분석 1건당 5~30초. 도구 7 개면 1~5분 — 병렬 + spinner UX 로 체감 개선.
+- **도메인 지식 약함**: 포렌식 지식은 RAG (suspicious_indicators) 로 보강.
+- 모델 후보: `qwen2.5:14b` (KR + 추론 균형), `llama3.1:8b/70b`, `mistral-nemo:12b`.
+
+---
+
+## 실행 방법 (Phase 1 완료 후 활성화)
 
 ```bash
-pip install -r requirements.txt           # langgraph 포함
-python main.py ingest path/to/doc.pdf     # 파일 1개 인덱싱
-python main.py ingest seed_docs/          # 디렉토리 통째 인덱싱 (초기 시드)
-python main.py ask "질문"                  # query_graph.invoke()
-python main.py stats                      # 간단 요약
-python main.py metrics                    # 전체 성능 / 품질 리포트
+pip install -r requirements.txt
+pip install -e .            # (Phase 1 에서 pyproject.toml 작성 후)
+
+forensicagent              # 인터랙티브 분석 (기본)
+forensicagent --auto       # 승인 없이 자동
+forensicagent --quick      # estimated_runtime: short 만
+forensicagent --tools t1,t2 # 특정 도구 강제
+forensicagent --dry-run    # 계획만 출력
+forensicagent doctor       # 환경 점검 (도구 설치 여부)
+forensicagent tools list   # 사용 가능한 도구
 ```
-
-API 키 (ANTHROPIC_API_KEY, TAVILY_API_KEY) 가 없을 때도 그래프 자체는 동작하며,
-LLM 노드는 stub 답변을, 웹 검색 노드는 빈 결과를 반환한다 — 오프라인 개발과
-스모크 테스트에 활용된다.
-
-### 데이터 흐름 (어느 디렉토리에 무엇이 쌓이나)
-
-```
-seed_docs/  ─(사람)─→  ingest 명령  ─→  data/raw/  ─→  파이프라인  ─→  data/chroma_db/
-(원천 입력)            (file_loader가 복사)  (원본 사본)                  (벡터 + 메타)
-```
-
-- `seed_docs/` — 초기 지식 베이스 시드. 사람이 직접 PDF/MD/DOCX 를 넣어두는 자리.
-  자세한 컨벤션은 [`seed_docs/CLAUDE.md`](seed_docs/CLAUDE.md) 참고.
-- `data/raw/` — `file_loader.load()` 가 ingest 시점에 자동으로 복사한 원본 사본.
-  재인덱싱 / citation 원문 추적에 사용된다.
-- `data/chroma_db/` — ChromaDB persist 디렉토리. 청크 [텍스트 + 임베딩 + metadata]
-  가 cosine 거리 인덱스로 저장된다.
-
-관리자 페이지를 통한 단건 업로드는 ingest 명령 한 번에 대응되고,
-시스템 초기화 / 일괄 보강은 `seed_docs/` 를 통째로 ingest 하는 식으로 한다.
 
 ---
 
-## 측정 (Observability)
+## 비목표
 
-피드백 메모리에 기록한 원칙: **수치/성능을 처음부터 끝까지 측정 가능하게 한다.**
-
-각 그래프 노드는 시작/종료 시각을 측정해 `metrics.stage_ms` 에 누적한다.
-한 사이클이 끝나면 `metrics.total_ms` 와 함께 다음이 모두 채워진다:
-
-- 시간: 노드별 ms, 전체 ms
-- 카운트: 파일 바이트, 페이지 수, 청크 수, 임베딩 차원, 답변/프롬프트 char
-- 품질: similarity {top, mean, median, min, max, stdev}, threshold_met, route
-- 폴백: web_results {raw, kept}
-
-이 모든 값은 `QueryLog.metrics` JSON 컬럼에 영속화되고, `analytics.full_report()`
-가 latency p50/p95/p99 와 stage 별 평균까지 계산해 CLI `metrics` 명령으로 노출된다.
+이 프로젝트가 **하지 않는** 것:
+- 침해 사고 전체 시나리오 자동 재구성 (분석가가 리포트 보고 판단)
+- 도구 결과 간 상관관계 분석
+- 새로운 익스플로잇/악성코드 탐지 (알려진 의심 패턴만)
+- 증거 무결성 검증 (격리 랩 가정)
+- 실시간 모니터링 (사후 분석 전용)
 
 ---
 
-## 스모크 테스트
+## 현재 상태 (2026-05-19)
 
-```bash
-python smoke_test.py
-```
+이전의 RAG 챗봇 보안 시스템에서 forensicagent 로 프로젝트를 전환한 직후.
+재사용 가능한 자산만 남기고 정리 완료:
 
-LangGraph 가 설치되어 있으면 실행 가능. 다음을 검증한다:
+- `forensicagent/observability/metrics.py` — Stopwatch / StageTimings /
+  ScoreStats / LengthStats / percentile (도메인 dataclass 는 각 모듈에서 자체 정의)
+- `forensicagent/rag/{vector_store,embedder}.py` — skeleton (NotImplementedError),
+  도구 YAML 인덱싱에 그대로 활용 가능
+- `scripts/crawlers/` — 5 개 크롤러 (도구 메타데이터 작성 보조)
 
-1. `ingestion_graph.run()` 의 모든 노드 (`file_load → text_read → clean → chunk → embed → tag → store_write`) 가 metric 에 등장
-2. `query_graph.run()` 의 RAG 경로 노드 (`preprocess → query_embed → retrieve → llm_generate`)
-3. 임계치를 인위적으로 올렸을 때 web 경로 노드 (`web_search → web_filter → llm_generate`) 로 분기
-4. 로그 DB 가 metrics JSON 까지 round-trip
-5. analytics 가 stage 별 latency 와 route 비율을 집계
-
-오프라인용 stub 임베더 (32-d 해시 기반) 로 무거운 ML 의존성 없이 동작한다.
+다음 단계는 명세의 Phase 1 (패키징/CLI/Ollama 래퍼/doctor) — 아직 미시작.
