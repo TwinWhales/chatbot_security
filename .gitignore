@@ -155,5 +155,8 @@ Thumbs.db
 data/processed/
 data/raw/*
 !data/raw/sample.txt
+data/chroma_db/
+data/logs.db
+data/.tryhackme_session.json
 
 **/**.pyc

@@ -31,11 +31,21 @@ from src.logging.log_store import LogStore  # noqa: E402
 def _cmd_ingest(args: argparse.Namespace) -> int:
     """ingestion_graph.run() 을 호출하고 metrics 를 JSON 으로 출력.
 
+    args.path 가 파일이면 1회, 디렉토리면 안의 지원 확장자(.pdf/.txt/.md/
+    .docx) 를 모두 순회하며 N 회 호출한다. `seed_docs/` 를 통째로 인덱싱
+    하는 시나리오를 지원한다.
+
     TODO:
-      - VectorStore 인스턴스 생성
-      - ingestion_graph.run(args.path, store=store)
-      - final state 의 metrics 를 dict 로 변환 후 json.dumps 출력
-      - return 0
+      - VectorStore 인스턴스 생성 (한 번만 — 모든 파일이 같은 컬렉션에 들어감)
+      - p = Path(args.path)
+        - p.is_file() 면: ingestion_graph.run(p, store=store) 한 번
+        - p.is_dir() 면: 지원 확장자 파일만 골라 정렬 후 순회
+            * 각 파일마다 ingestion_graph.run(file, store=store)
+            * 실패한 파일은 에러 메시지만 출력하고 다음 파일로 계속
+      - 결과 출력:
+        - 파일 1개: final state 의 metrics 를 json.dumps
+        - 디렉토리: 파일별 {source, metrics, chunk_ids} 의 list 로 묶어 json.dumps
+      - return 0  (전체 실패 시에만 1)
     """
     raise NotImplementedError("_cmd_ingest")
 
@@ -79,8 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="rag", description="RAG system CLI (LangGraph-based)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_ing = sub.add_parser("ingest", help="Run the ingestion StateGraph on a file")
-    p_ing.add_argument("path", help="Path to a file to ingest")
+    p_ing = sub.add_parser("ingest", help="Run the ingestion StateGraph on a file or directory")
+    p_ing.add_argument(
+        "path",
+        help="Path to a file or directory. If a directory, all supported files "
+             "(.pdf/.txt/.md/.docx) inside are ingested in sequence — useful "
+             "for seeding the knowledge base from seed_docs/.",
+    )
     p_ing.set_defaults(func=_cmd_ingest)
 
     p_ask = sub.add_parser("ask", help="Run the query StateGraph on a question")

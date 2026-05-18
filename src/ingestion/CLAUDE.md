@@ -10,6 +10,10 @@
   복사하지 않음) 하고 `LoadedFile(path, file_type)` 반환.
 - `classify(path)` — 확장자 기반: `pdf` / `docx` / `md` / `txt` / `unknown`.
 - 파일이 존재하지 않으면 `FileNotFoundError`.
+- 입력 경로의 출처는 두 갈래: (1) 관리자 페이지 업로드, (2) `seed_docs/`
+  같은 초기 시드 디렉토리. 둘 다 `load()` 가 동일하게 처리하므로, 디렉토리
+  단위 일괄 ingest 는 `main.py _cmd_ingest` 가 파일 순회 후 본 모듈을 N 회
+  호출하는 식으로 동작한다 (루트 `CLAUDE.md` 의 "데이터 흐름" 섹션 참고).
 
 ### `pdf_extractor.py` — 1.3 (PDF 텍스트 추출)
 - `extract(path) -> list[PageText]` — pdfplumber 의 `pages` 를 순회하며

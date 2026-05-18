@@ -67,6 +67,11 @@ START → preprocess → embed_query → retrieve
 | `src/logging/` | Layer 5 모듈들 (log_store, analytics) | [`src/logging/CLAUDE.md`](src/logging/CLAUDE.md) |
 | `src/observability/` | Stopwatch, Metrics dataclass, percentile | [`src/observability/CLAUDE.md`](src/observability/CLAUDE.md) |
 | `src/graphs/` | LangGraph StateGraph 두 개 | [`src/graphs/CLAUDE.md`](src/graphs/CLAUDE.md) |
+| `seed_docs/` | 초기 지식 베이스용 원본 문서 모음 (사람이 손으로 채움) | [`seed_docs/CLAUDE.md`](seed_docs/CLAUDE.md) |
+| `seed_docs/tryhackme/` | TryHackMe Learn 크롤러 산출물 트리 (크롤러가 덮어씀) | [`seed_docs/tryhackme/CLAUDE.md`](seed_docs/tryhackme/CLAUDE.md) |
+| `scripts/` | 런타임이 아닌 보조 도구 (크롤러 등) | [`scripts/CLAUDE.md`](scripts/CLAUDE.md) |
+| `data/raw/` | `file_loader.load()` 가 자동 복사하는 원본 사본 | (settings.RAW_DIR) |
+| `data/chroma_db/` | ChromaDB persist 디렉토리 (벡터 + 메타) | (settings.CHROMA_PERSIST_DIR) |
 | 루트 | `main.py`, `smoke_test.py`, `requirements.txt`, `README.md` | (이 파일) |
 
 ---
@@ -74,16 +79,34 @@ START → preprocess → embed_query → retrieve
 ## 실행 방법
 
 ```bash
-pip install -r requirements.txt          # langgraph 포함
-python main.py ingest path/to/doc.pdf    # ingestion_graph.invoke()
-python main.py ask "질문"                 # query_graph.invoke()
-python main.py stats                     # 간단 요약
-python main.py metrics                   # 전체 성능 / 품질 리포트
+pip install -r requirements.txt           # langgraph 포함
+python main.py ingest path/to/doc.pdf     # 파일 1개 인덱싱
+python main.py ingest seed_docs/          # 디렉토리 통째 인덱싱 (초기 시드)
+python main.py ask "질문"                  # query_graph.invoke()
+python main.py stats                      # 간단 요약
+python main.py metrics                    # 전체 성능 / 품질 리포트
 ```
 
 API 키 (ANTHROPIC_API_KEY, TAVILY_API_KEY) 가 없을 때도 그래프 자체는 동작하며,
 LLM 노드는 stub 답변을, 웹 검색 노드는 빈 결과를 반환한다 — 오프라인 개발과
 스모크 테스트에 활용된다.
+
+### 데이터 흐름 (어느 디렉토리에 무엇이 쌓이나)
+
+```
+seed_docs/  ─(사람)─→  ingest 명령  ─→  data/raw/  ─→  파이프라인  ─→  data/chroma_db/
+(원천 입력)            (file_loader가 복사)  (원본 사본)                  (벡터 + 메타)
+```
+
+- `seed_docs/` — 초기 지식 베이스 시드. 사람이 직접 PDF/MD/DOCX 를 넣어두는 자리.
+  자세한 컨벤션은 [`seed_docs/CLAUDE.md`](seed_docs/CLAUDE.md) 참고.
+- `data/raw/` — `file_loader.load()` 가 ingest 시점에 자동으로 복사한 원본 사본.
+  재인덱싱 / citation 원문 추적에 사용된다.
+- `data/chroma_db/` — ChromaDB persist 디렉토리. 청크 [텍스트 + 임베딩 + metadata]
+  가 cosine 거리 인덱스로 저장된다.
+
+관리자 페이지를 통한 단건 업로드는 ingest 명령 한 번에 대응되고,
+시스템 초기화 / 일괄 보강은 `seed_docs/` 를 통째로 ingest 하는 식으로 한다.
 
 ---
 
