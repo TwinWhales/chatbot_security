@@ -7,13 +7,13 @@ forensicagent 의 rag/ 는 **도구 YAML 메타데이터의 lookup-heavy 검색*
 
 설계 원칙: **저장은 storage 가, 정책은 retrieval 이.**
 이 모듈은 CRUD + 의미 검색만, threshold/필터 정책은 호출자가 결정.
-
-직접 구현해보세요.
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 from forensicagent import config as settings
@@ -27,6 +27,26 @@ class RetrievedChunk:
     chunk_id: str
 
 
+# ChromaDB 메타데이터는 scalar 만 받는다 (str/int/float/bool).
+# list/dict/None 같은 값은 거부되므로 sanitize 단계에서 변환.
+_SCALAR_TYPES = (str, int, float, bool)
+
+
+def _sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+    """Chroma 가 허용하는 scalar 만 통과시키고 나머지는 str() 로."""
+    clean: dict[str, Any] = {}
+    for k, v in meta.items():
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            clean[k] = v
+        elif isinstance(v, _SCALAR_TYPES):
+            clean[k] = v
+        else:
+            clean[k] = str(v)
+    return clean
+
+
 class VectorStore:
     """ChromaDB 단일 컬렉션 위의 thin wrapper."""
 
@@ -35,15 +55,23 @@ class VectorStore:
         persist_dir: str | None = None,
         collection_name: str | None = None,
     ) -> None:
-        """ChromaDB PersistentClient + get_or_create_collection.
+        # Lazy import — chromadb 는 무겁고 CLI 부팅 시간에 영향을 준다.
+        import chromadb
+        from chromadb.config import Settings as ChromaSettings
 
-        TODO:
-          - chromadb.PersistentClient(path=persist_dir or settings.CHROMA_PERSIST_DIR)
-          - chromadb.config.Settings(anonymized_telemetry=False) 권장
-          - collection 의 metadata 에 {"hnsw:space": "cosine"} 지정 (명세의 cosine similarity)
-          - self._client, self._collection 에 보관
-        """
-        raise NotImplementedError("VectorStore.__init__")
+        persist = persist_dir or settings.CHROMA_PERSIST_DIR
+        Path(persist).mkdir(parents=True, exist_ok=True)
+
+        self._client = chromadb.PersistentClient(
+            path=persist,
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+        self._collection_name = collection_name or settings.CHROMA_COLLECTION
+        # cosine space — 명세에서 cosine similarity 사용 명시.
+        self._collection = self._client.get_or_create_collection(
+            name=self._collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
 
     # ---------- writes ----------
 
@@ -54,32 +82,41 @@ class VectorStore:
         metadatas: list[dict[str, Any]],
         ids: list[str] | None = None,
     ) -> list[str]:
-        """청크 N 개를 한 번에 저장. ids 없으면 UUID 로 생성.
+        """청크 N 개를 한 번에 저장. ids 없으면 UUID 로 생성."""
+        n = len(contents)
+        if not (len(embeddings) == n and len(metadatas) == n):
+            raise ValueError(
+                f"length mismatch: contents={n}, embeddings={len(embeddings)}, "
+                f"metadatas={len(metadatas)}"
+            )
+        if ids is None:
+            ids = [str(uuid.uuid4()) for _ in range(n)]
+        elif len(ids) != n:
+            raise ValueError(f"ids length {len(ids)} != contents length {n}")
 
-        TODO:
-          - len 일치 검증
-          - ids = ids or [str(uuid.uuid4()) for _ in contents]
-          - metadata 의 None / list / dict 값은 Chroma 가 거부하니 sanitize
-            (str, int, float, bool 만 통과시키고 나머지는 str() 로 변환)
-          - self._collection.add(documents, embeddings, metadatas, ids)
-          - ids 반환
-        """
-        raise NotImplementedError("VectorStore.add")
+        clean_metas = [_sanitize_metadata(m) for m in metadatas]
+        self._collection.add(
+            documents=contents,
+            embeddings=embeddings,
+            metadatas=clean_metas,
+            ids=ids,
+        )
+        return ids
 
     def delete(self, ids: Iterable[str]) -> None:
-        """ID 목록으로 청크 삭제.
-
-        TODO: self._collection.delete(ids=list(ids))
-        """
-        raise NotImplementedError("VectorStore.delete")
+        id_list = list(ids)
+        if not id_list:
+            return
+        self._collection.delete(ids=id_list)
 
     def reset(self) -> None:
-        """컬렉션을 완전히 비운다 (테스트/재인덱싱용).
-
-        TODO:
-          - 컬렉션 이름 백업 → delete_collection → get_or_create_collection
-        """
-        raise NotImplementedError("VectorStore.reset")
+        """컬렉션을 완전히 비운다 (테스트/재인덱싱용)."""
+        name = self._collection_name
+        self._client.delete_collection(name=name)
+        self._collection = self._client.get_or_create_collection(
+            name=name,
+            metadata={"hnsw:space": "cosine"},
+        )
 
     # ---------- reads ----------
 
@@ -91,17 +128,33 @@ class VectorStore:
     ) -> list[RetrievedChunk]:
         """질문 벡터로 Top-K 검색.
 
-        TODO:
-          - self._collection.query(query_embeddings=[embedding], n_results=top_k, where=where)
-          - 결과의 ids/documents/metadatas/distances 를 zip
-          - 거리 → 유사도 변환: 1 - distance, [0, 1] 로 clamp
-          - RetrievedChunk 의 list 로 변환해 반환
+        cosine distance ∈ [0, 2] 를 유사도 = 1 - distance 로 변환하고
+        [0, 1] 범위로 클램프한다 (Chroma 는 가끔 음수 distance 를 반환).
         """
-        raise NotImplementedError("VectorStore.query")
+        result = self._collection.query(
+            query_embeddings=[embedding],
+            n_results=top_k,
+            where=where,
+        )
+
+        # Chroma 는 [[...]] 처럼 1-batch 의 nested list 로 반환.
+        ids = (result.get("ids") or [[]])[0]
+        docs = (result.get("documents") or [[]])[0]
+        metas = (result.get("metadatas") or [[]])[0]
+        dists = (result.get("distances") or [[]])[0]
+
+        chunks: list[RetrievedChunk] = []
+        for cid, doc, meta, dist in zip(ids, docs, metas, dists):
+            sim = max(0.0, min(1.0, 1.0 - float(dist)))
+            chunks.append(
+                RetrievedChunk(
+                    content=doc or "",
+                    metadata=dict(meta or {}),
+                    similarity_score=sim,
+                    chunk_id=cid,
+                )
+            )
+        return chunks
 
     def count(self) -> int:
-        """컬렉션 안의 청크 수.
-
-        TODO: self._collection.count()
-        """
-        raise NotImplementedError("VectorStore.count")
+        return int(self._collection.count())

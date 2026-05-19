@@ -4,72 +4,75 @@
 **같은 임베딩 모델**을 써야 의미 검색이 동작한다. 그 일치를 코드 구조로
 강제하기 위해 인덱서와 셀렉터가 모두 이 모듈을 import 한다.
 
-직접 구현해보세요.
+모델 라우팅: `settings.EMBEDDING_MODEL` 이 `openai:` 로 시작하면 OpenAI
+API 백엔드, 아니면 로컬 sentence-transformers.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Iterable
+from typing import Iterable, Protocol
 
 from forensicagent import config as settings
 
 
-class _SentenceTransformerBackend:
-    """sentence-transformers 기반 로컬 임베딩 백엔드.
+class _EmbeddingBackend(Protocol):
+    def embed(self, texts: list[str]) -> list[list[float]]: ...
 
-    TODO:
-      - __init__(self, model_name): SentenceTransformer 로드
-      - embed(self, texts) -> list[list[float]]: model.encode 후 .tolist()
-    """
+
+class _SentenceTransformerBackend:
+    """sentence-transformers 기반 로컬 임베딩."""
 
     def __init__(self, model_name: str) -> None:
-        raise NotImplementedError("_SentenceTransformerBackend.__init__")
+        from sentence_transformers import SentenceTransformer  # lazy
+
+        self._model = SentenceTransformer(model_name)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError("_SentenceTransformerBackend.embed")
+        # convert_to_numpy=True 가 기본; .tolist() 로 JSON 직렬화 가능하게.
+        vectors = self._model.encode(texts, convert_to_numpy=True)
+        return [v.tolist() for v in vectors]
 
 
 class _OpenAIBackend:
-    """OpenAI API 기반 임베딩 백엔드.
+    """OpenAI API 기반 임베딩.
 
-    TODO:
-      - __init__: settings.OPENAI_API_KEY 검증, OpenAI client 생성
-      - embed(texts): client.embeddings.create(model, input=texts) 결과를 list[list[float]] 로
+    모델명 표기: `openai:text-embedding-3-small` → 실제 호출은 `text-embedding-3-small`.
     """
 
     def __init__(self, model_name: str) -> None:
-        raise NotImplementedError("_OpenAIBackend.__init__")
+        from openai import OpenAI  # lazy
+
+        if not settings.OPENAI_API_KEY:
+            raise RuntimeError(
+                "OPENAI_API_KEY is empty — set the env var or switch "
+                "FORENSICAGENT_EMBEDDING_MODEL to a local model."
+            )
+        self._model = model_name.removeprefix("openai:")
+        self._client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError("_OpenAIBackend.embed")
+        resp = self._client.embeddings.create(model=self._model, input=texts)
+        return [item.embedding for item in resp.data]
 
 
 @lru_cache(maxsize=1)
-def _get_backend():
-    """settings.EMBEDDING_MODEL 에 따라 적절한 백엔드를 반환한다.
-
-    TODO:
-      - 모델명이 "openai:" 로 시작하면 _OpenAIBackend, 아니면 _SentenceTransformerBackend
-      - lru_cache(1) 로 프로세스 단위 싱글턴
-    """
-    raise NotImplementedError("_get_backend — provider 라우팅 구현하기")
+def _get_backend() -> _EmbeddingBackend:
+    """프로세스당 1회만 모델을 로드."""
+    model_name = settings.EMBEDDING_MODEL
+    if model_name.startswith("openai:"):
+        return _OpenAIBackend(model_name)
+    return _SentenceTransformerBackend(model_name)
 
 
 def embed_texts(texts: Iterable[str]) -> list[list[float]]:
-    """배치 임베딩.
-
-    TODO:
-      - 빈 입력은 [] 반환
-      - 그 외엔 _get_backend().embed(list(texts))
-    """
-    raise NotImplementedError("embed_texts — 배치 호출 구현하기")
+    """배치 임베딩. 빈 입력은 [] 반환."""
+    text_list = list(texts)
+    if not text_list:
+        return []
+    return _get_backend().embed(text_list)
 
 
 def embed_text(text: str) -> list[float]:
-    """단일 텍스트 임베딩 — embed_texts 위에 thin wrapper.
-
-    TODO:
-      - return embed_texts([text])[0]
-    """
-    raise NotImplementedError("embed_text — 단일 호출 구현하기")
+    """단일 텍스트 임베딩."""
+    return embed_texts([text])[0]
