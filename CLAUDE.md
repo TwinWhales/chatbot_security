@@ -97,15 +97,94 @@ forensicagent tools list   # 사용 가능한 도구
 
 ---
 
-## 현재 상태 (2026-05-19)
+## 현재 상태 (2026-05-19, Phase 1-5 완료)
 
-이전의 RAG 챗봇 보안 시스템에서 forensicagent 로 프로젝트를 전환한 직후.
-재사용 가능한 자산만 남기고 정리 완료:
+Phase 1-5 의 모든 코드가 들어왔고 전 파이프라인이 end-to-end 로 동작한다
+(Scanner → Selector → Executor → Analyzer → Reporter, JSON + MD 리포트
+생성까지). README.md 가 사용자/협업자용 정식 문서.
 
-- `forensicagent/observability/metrics.py` — Stopwatch / StageTimings /
-  ScoreStats / LengthStats / percentile (도메인 dataclass 는 각 모듈에서 자체 정의)
-- `forensicagent/rag/{vector_store,embedder}.py` — skeleton (NotImplementedError),
-  도구 YAML 인덱싱에 그대로 활용 가능
-- `scripts/crawlers/` — 5 개 크롤러 (도구 메타데이터 작성 보조)
+**커밋 타임라인**
 
-다음 단계는 명세의 Phase 1 (패키징/CLI/Ollama 래퍼/doctor) — 아직 미시작.
+| Commit | 내용 |
+|---|---|
+| `cf867c7` | refactor: pivot from RAG chatbot to forensicagent CLI |
+| `4c53835` | feat: Phase 1 (CLI/Ollama/doctor) + Scanner + rag TODO 채움 |
+| `af437ce` | feat: Phase 3-5 (Selector/Executor/Analyzer/Reporter + 3 YAML) |
+
+**실제로 동작 검증된 흐름**
+- `python -m forensicagent --help / doctor / tools list / tools info <id>`
+- `python -m forensicagent --no-llm --auto --path <dir>` end-to-end 실행 →
+  도구 미설치라 skipped 이지만 Reporter 가 정상 JSON+MD 생성
+- 합성 `echo_tool` 어댑터로 success 경로 + Analyzer Case A 검증
+- 룰 매처 (`sigma_rule_hit` specific + 키워드 AND fallback) 단위 검증
+
+**남은 큰 덩어리** (코드 아닌 노가다 / 실험)
+- 도구 YAML 3 → 50 개 (사람 손)
+- `tests/` 비어 있음 — 단위 테스트 미작성
+- 모든 도구가 `GenericAdapter` 사용. 출력이 매우 비표준인 도구는 specialized
+  adapter 필요할 수 있음
+- Phase 6: CyberDefenders / BlueTeamLabs 평가 데이터셋 실험
+
+---
+
+## 다음 세션 재개 노트
+
+다음 세션을 열면 바로 다음 중 하나로 진입하면 된다 (우선순위 순):
+
+1. **도구 YAML 확장**. 현재 `tools_metadata/{chainsaw,volatility3,regripper}.yaml`
+   3 개. 다음 후보 (포렌식 도메인 가치 높은 순):
+   - `yara` — 메모리 / 파일 시그니처 매칭. `applicable_evidence_types:
+     [memory_dump, disk_image, unknown]` 다양.
+   - `plaso` (log2timeline.py + psort.py) — 슈퍼 타임라인.
+   - `tshark` — pcap 분석. wireshark 대체 CLI.
+   - `exiftool` — 파일 메타데이터, 디스크 이미지 안의 사진 등.
+   - `binwalk` — 펌웨어/디스크 임베디드 객체 추출.
+   - `strings` + `floss` — 바이너리 문자열 추출.
+   - `KAPE` — Windows artifact collector.
+   - `bulk_extractor` — 디스크 이미지에서 PII/네트워크 정보.
+   - `MFTECmd` (EZTools) — NTFS MFT 파싱.
+   - `RECmd` (EZTools) — 레지스트리 batch.
+   YAML 1 개 추가 = 코드 변경 없이 CLI 가 자동 인지. `scripts/crawlers/` 에
+   이미 EZTools / HackTricks 크롤러가 있어 도메인 자료는 끌어올 수 있다.
+
+2. **단위 테스트 작성** (`tests/` 디렉토리).
+   - `tests/test_detectors.py` — 9 magic 시그니처 + 정규식 매처 (bytes
+     fixture 로).
+   - `tests/test_filter.py` — 합성 Inventory + ToolMetadata 로 evidence_type
+     교집합 검증.
+   - `tests/test_rules.py` — `sigma_rule_hit` specific matcher, `run_key_unusual_binary`,
+     fallback substring matcher (이미 직접 검증 통과한 케이스를 픽스 처리).
+   - `tests/test_runner.py` — `subprocess.Popen` 을 mock 또는 `cmd /c echo` /
+     `bash -c "sleep 999"` 로 timeout 분기 확인.
+   - `pyproject.toml` 에 `[tool.pytest.ini_options]` 이미 설정됨.
+
+3. **specialized adapter 추가**. 출력이 비표준인 도구가 나오면
+   `executor/adapter.py` 의 `GenericAdapter` 를 상속해 `parse_output`
+   오버라이드. `register_adapter("tool_id", MyAdapter)` 로 부팅 시 등록 —
+   `forensicagent/__init__.py` 에 등록 hook 한 줄 추가하는 형태가 깔끔.
+
+4. **Phase 6 평가**. CyberDefenders Blue Team Labs 같은 공개 케이스 1~2 개
+   다운로드해서 `forensicagent --auto --path <case>` 돌리고, JSON 리포트의
+   findings 를 분석가 workup 과 매칭. precision/recall 30~50 건 골든 셋
+   만들기.
+
+**자주 잊는 것 / 함정**
+
+- 사용자 머신 (Windows) 의 콘솔 codepage 는 **cp949**. Rich 출력이 `|`
+  pipe 로 리다이렉트되면 한글이 깨진다. 정상 동작이고 인터랙티브
+  터미널에서는 멀쩡함. em-dash (`—`) 같은 비-cp949 문자를 출력 경로 (Table
+  title 등) 에 넣으면 `UnicodeEncodeError` 로 실제 크래시 — docstring 안에는
+  자유롭게 써도 됨.
+- `forensicagent doctor` 는 ollama / sentence-transformers / python-magic /
+  chromadb 가 다 깔려야 OK. 그냥 코드 import 검증만 하려면 `pip install
+  pyyaml pydantic typer rich` 만 있으면 충분. 전 파이프라인 `--no-llm` 으로는
+  돌아간다.
+- `TOOLS_METADATA_DIR` 의 우선순위: env var → `~/.forensicagent/tools` →
+  repo cwd 의 `tools_metadata/`. CLI 의 fallback 로직이 자동.
+- `git log --oneline cf867c7..HEAD` 가 forensicagent 작업분 전체.
+
+**최근 메모리 (외부 메모리 시스템)**
+- `project_forensicagent_pivot.md` — 프로젝트 전환 (2026-05-19)
+- `feedback_metrics.md` — "수치/성능을 처음부터 끝까지 측정 가능하게" 원칙
+- `project_data_collection_sprint.md` — TryHackMe 수집 sprint (5/25 마감,
+  승환 담당). 도구 메타데이터 작성 보조로 재활용 가능.
