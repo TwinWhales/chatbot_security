@@ -134,14 +134,28 @@ def _fetch(url: str, *, timeout: float, retries: int) -> str | None:
 
 
 def _strip_html(html: str) -> tuple[str, str]:
-    """(title, text). bs4 lazy import."""
+    """(title, text). bs4 lazy import.
+
+    선택자 우선순위 (WordPress / GitBook / generic 순):
+      1. div.entry-content-wrapper, div.entry-content (WordPress, DFIR Report 등)
+      2. article.post / div.post-content (WP 변형)
+      3. <article> / <main> / <body> (semantic fallback)
+    """
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")
     title = soup.title.text.strip() if soup.title else ""
 
-    # Try semantic main/article first; fall back to body.
-    main = soup.find("article") or soup.find("main") or soup.find("body") or soup
+    main = (
+        soup.find("div", class_="entry-content-wrapper")
+        or soup.find("div", class_="entry-content")
+        or soup.find("article", class_="post")
+        or soup.find("div", class_="post-content")
+        or soup.find("article")
+        or soup.find("main")
+        or soup.find("body")
+        or soup
+    )
     for s in main(["script", "style", "noscript", "nav", "footer", "header"]):
         s.decompose()
     text = main.get_text(separator="\n", strip=True)

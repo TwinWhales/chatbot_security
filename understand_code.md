@@ -226,6 +226,78 @@ ls seed_docs/
 
 ---
 
+## 부록: 1차 인제스션 실행 결과 (2026-05-19)
+
+코드가 어떻게 동작하는지 *읽는* 것과 *실제로 돌려본 것* 은 다른 지식이라
+한 번 돌려보며 부딪힌 실제 이슈와 통계를 남긴다.
+
+**산출물 수치**
+
+```
+seed_docs/
+├── cyberdefenders/  69 docs   →  1379 RAG chunks  ✅
+├── dfirreport/      14 docs   →   598 RAG chunks  ✅ (재크롤 후)
+├── eztools/         32 docs   →   522 RAG chunks  ✅
+└── hacktricks/     828 docs   →   828 RAG chunks  ⚠️ (105자 404 placeholder)
+                  --------------- ----------
+                    943 docs        3327 chunks 인덱싱됨
+
+tools_metadata/_draft/             0 YAML (Stage 2 진행 중)
+seed_docs/_indicator_candidates/   0 YAML (Stage 4a 대기 중)
+eval/goldenset/                    0 JSON (Stage 4b 대기 중)
+```
+
+**1차 시도에서 부딪힌 4 개의 실패와 그 의미**
+
+1. `ModuleNotFoundError: forensicagent` — `subprocess.Popen` 으로 띄운
+   `scripts/*.py` 는 패키지 모듈이 아니라 sys.path 에 repo root 가 없다.
+   `run_all.py:_run_module()` 에서 PYTHONPATH 를 명시 주입해 해결. 코드 변경
+   = `subprocess.Popen(..., env=env)` 한 줄.
+
+2. DFIR Report 본문 미추출 (424 chars placeholder) — 1차 파서는 `<article>`
+   / `<main>` 만 찾았는데 DFIR Report 는 WordPress 의 `div.entry-content-wrapper`
+   안에 본문이 있다. `_strip_html` 의 선택자 우선순위에 WordPress 클래스를
+   prepend. 재크롤 후 평균 30K chars 로 회복.
+
+3. HackTricks 도메인 이전 — `book.hacktricks.xyz` → `book.hacktricks.wiki`
+   변경 + 동시에 URL 경로 구조도 변경 (`/src/AI/...` 페이지가 wiki 에는 다른
+   곳에 있음). 우리는 도메인만 rewrite 했고 경로는 그대로라 828 페이지 전부
+   404 받음. RAG 인덱스에 들어가긴 했지만 내용이 "Document not found" 라
+   실질 가치 0. 향후 wiki 의 sidebar 트리를 분석해서 URL 매핑이 필요.
+
+4. Ollama python lib 0.6.2 의 응답 shape — `client.list()` 가 dict 가 아니라
+   Pydantic `ListResponse` 를 반환. 0.4 시절 dict 코드는 빈 모델 이름 리스트를
+   만들어 `is_available()` 가 잘못된 경고를 냈다. 양쪽 모두 지원하도록 보강
+   (`getattr(m, "model", None) or getattr(m, "name", None) or ...`).
+
+**그리고 결정적 한계: Ollama 의 기본 `num_ctx=4096`**
+
+7B 모델 + CPU 추론은 단순히 *느린 게* 아니라, 기본 4096 토큰 컨텍스트로 로드
+되어 14KB EZTools 매뉴얼 + 시스템 프롬프트가 거의 다 차고 출력에 여유가 없다.
+실제 첫 호출 결과가 `json_chat parse attempt 1/2 failed: Unterminated string
+starting at line 88 column 18 (char 3510)` — 모델이 JSON 의 string 값을 쓰는
+도중 토큰 한도에 도달해서 응답이 잘렸다.
+
+수정: `OllamaClient` 에 `num_ctx` / `num_predict` 매개변수 추가. 기본값
+`num_ctx=16384`, `num_predict=2048`. env var `FORENSICAGENT_LLM_NUM_CTX` 로
+GPU/RAM 상황에 맞춰 조정 가능. **다음 재실행부터 적용됨** (현재 백그라운드
+실행은 수정 전 코드라 의미 있는 결과 안 나올 가능성 큼).
+
+**얻은 교훈**
+
+- 크롤러는 단순해 보여도 사이트별로 0~3 개의 미세한 셀렉터 함정이 있다.
+  HackTricks 처럼 SPA + 도메인 이전이 겹치면 단순 substring rewrite 로는
+  부족.
+- 로컬 LLM 으로 강제 JSON 추출을 할 때 첫 번째 적이 컨텍스트 길이다. Ollama
+  의 기본 4096 은 RAG 가 아니라 *short prompt* 에 맞춰져 있어, ETL 용으로는
+  반드시 늘려야 한다.
+- subprocess 로 ETL stage 를 분리하면 import 격리는 얻지만 sys.path 가 함정.
+- *Stage 1 (크롤) + Stage 3 (RAG) 자체는 GPU 없이도 30분 안에 끝난다* —
+  포렌식 도메인 코퍼스를 한 번에 인덱싱하는 인프라는 이미 동작 가능.
+  Stage 2/4 (LLM 추출) 만 GPU 가 강력하게 권장됨.
+
+---
+
 ## 변경할 때 어디부터 손대나 (cheatsheet)
 
 | 하고 싶은 일 | 손대는 파일 |

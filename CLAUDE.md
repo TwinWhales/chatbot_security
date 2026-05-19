@@ -97,11 +97,15 @@ forensicagent tools list   # 사용 가능한 도구
 
 ---
 
-## 현재 상태 (2026-05-19, Phase 1-5 완료)
+## 현재 상태 (2026-05-19, Phase 1-5 완료 + 1차 인제스션)
 
 Phase 1-5 의 모든 코드가 들어왔고 전 파이프라인이 end-to-end 로 동작한다
 (Scanner → Selector → Executor → Analyzer → Reporter, JSON + MD 리포트
-생성까지). README.md 가 사용자/협업자용 정식 문서.
+생성까지). README.md / understand_code.md 가 사용자/협업자용 정식 문서.
+
+추가로 sample.txt (1085 URL) 의 1차 인제스션을 실행했다 — Stage 1 (크롤) +
+Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환경
+이라 진행 중인 채로 백그라운드 큐에 남아 있음.
 
 **커밋 타임라인**
 
@@ -110,6 +114,8 @@ Phase 1-5 의 모든 코드가 들어왔고 전 파이프라인이 end-to-end �
 | `cf867c7` | refactor: pivot from RAG chatbot to forensicagent CLI |
 | `4c53835` | feat: Phase 1 (CLI/Ollama/doctor) + Scanner + rag TODO 채움 |
 | `af437ce` | feat: Phase 3-5 (Selector/Executor/Analyzer/Reporter + 3 YAML) |
+| `95a327d` | docs: README + CLAUDE.md resume notes |
+| `659f820` | feat: sample.txt ingestion pipeline (4 stages, parallel) |
 
 **실제로 동작 검증된 흐름**
 - `python -m forensicagent --help / doctor / tools list / tools info <id>`
@@ -118,8 +124,21 @@ Phase 1-5 의 모든 코드가 들어왔고 전 파이프라인이 end-to-end �
 - 합성 `echo_tool` 어댑터로 success 경로 + Analyzer Case A 검증
 - 룰 매처 (`sigma_rule_hit` specific + 키워드 AND fallback) 단위 검증
 
+**1차 인제스션 산출물 (in seed_docs/ + ChromaDB)**
+
+| 도메인 | 크롤 docs | RAG chunks | 상태 |
+|---|---:|---:|---|
+| cyberdefenders | 69 | 1379 | ✅ 정상 |
+| dfirreport | 14 | 598 | ✅ WP selector 수정 후 재크롤 |
+| eztools | 32 | 522 | ✅ raw github text |
+| hacktricks | 828 | 828 | ⚠️ 모두 404 (도메인 이전, URL 구조 불일치) |
+| **합계** | **943** | **3327** | |
+
 **남은 큰 덩어리** (코드 아닌 노가다 / 실험)
-- 도구 YAML 3 → 50 개 (사람 손)
+- Stage 2/4 LLM 추출 — 백그라운드 큐 진행 중이지만 CPU 추론이라 비현실적
+  소요 (호출당 ~1시간). GPU 환경에서 `num_ctx=16384` 설정 후 재실행 필요.
+- HackTricks wiki URL 구조 매핑 (828 docs 의 실제 본문 회수)
+- 도구 YAML 3 → 50 개 (Stage 2 가 성공하면 +32 자동, 나머지는 사람 손)
 - `tests/` 비어 있음 — 단위 테스트 미작성
 - 모든 도구가 `GenericAdapter` 사용. 출력이 매우 비표준인 도구는 specialized
   adapter 필요할 수 있음

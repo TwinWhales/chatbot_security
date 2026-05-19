@@ -1,0 +1,13 @@
+{
+  "input": "sample.txt",
+  "stats": {
+    "dfirreport": {
+      "total": 14,
+      "cached": 0,
+      "fetched": 14,
+      "failed": 0,
+      "elapsed_s": 12.121355800016318,
+      "failed_urls": []
+    }
+  }
+}

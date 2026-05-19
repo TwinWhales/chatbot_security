@@ -179,6 +179,23 @@ JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
 | `cf867c7` | refactor: pivot from RAG chatbot to forensicagent CLI — 챗봇 폐기, 재사용 자산 (observability, vector_store, embedder, crawler) 만 forensicagent/ 로 이전 |
 | `4c53835` | feat: Phase 1 + Scanner + RAG TODOs — pyproject, Typer CLI, Ollama 래퍼, doctor, Scanner, rag/{vector_store,embedder} TODO 채움 |
 | `af437ce` | feat: Phase 3-5 — Pydantic 도구 스키마 + 3 YAML, Selector, Executor, Analyzer, Reporter, CLI 본 파이프라인 연결 |
+| `659f820` | feat: sample.txt ingestion pipeline (4 stages, parallel) — Stage 1 크롤 + Stage 3 RAG + Stage 2/4 LLM 추출 |
+
+## 1차 인제스션 실행 결과 (2026-05-19)
+
+`sample.txt` 1085 URL 을 처음으로 돌린 결과:
+
+| Stage | 상태 | 산출물 |
+|---|---|---|
+| 1 (crawl) | ✅ 성공 | seed_docs/{cd:69, dfir:14, eztools:32, hacktricks:828} = **943 docs** |
+| 3 (RAG) | ✅ 성공 | ChromaDB collections seed_*: cd=1379, dfir=598, eztools=522, hacktricks=828 = **3327 chunks** |
+| 2/4a/4b (LLM) | ⏳ pending | qwen2.5:7b 가 CPU 추론 + `num_ctx=4096` 기본값 → 출력 잘림 + 호출당 1시간. 코드 수정 (`num_ctx=16384`, `num_predict=2048` 옵션 주입) 후 GPU 있는 환경에서 재시도 필요 |
+
+발견된 한계와 처리:
+- **HackTricks 도메인 이전**: `book.hacktricks.xyz` → `book.hacktricks.wiki`. URL_REWRITES 로 도메인은 맞췄지만 wiki 의 URL 구조가 달라 828개 모두 404 placeholder (105 chars). 페이지 수는 많지만 본문이 비어 RAG 컨텐츠로서의 가치는 없음. 향후 wiki 구조 매핑 필요.
+- **DFIR Report WordPress selector**: 1차 시도 시 `<article>` / `<main>` 으로는 본문이 안 잡혀 424 chars placeholder 만 추출. `div.entry-content-wrapper` 선택자 추가 후 재크롤 → 평균 30K chars 정상 추출.
+- **Ollama python lib 0.6.2 의 Pydantic 응답**: `client.list()` 가 dict 가 아닌 `ListResponse` 객체를 반환. `is_available()` 가 잘못 빈 모델 리스트를 만들어 경고가 났음. 양쪽 모두 지원하도록 수정.
+- **subprocess PYTHONPATH**: scripts/*.py 는 패키지가 아니라 `python scripts/foo.py` 호출 시 repo root 가 sys.path 에 없음. run_all.py 가 env 에 PYTHONPATH 명시 주입하도록 수정.
 
 ---
 

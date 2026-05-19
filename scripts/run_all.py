@@ -40,9 +40,19 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _run_module(args: list[str]) -> int:
-    """Spawn a child Python process so each stage has clean import state."""
+    """Spawn a child Python process so each stage has clean import state.
+
+    Inject PYTHONPATH=repo_root so `import forensicagent` works from any
+    script under scripts/ (which isn't itself a package).
+    """
+    import os
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        f"{REPO_ROOT}{os.pathsep}{existing}" if existing else str(REPO_ROOT)
+    )
     cmd = [sys.executable, *args]
-    proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT))
+    proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT), env=env)
     return proc.wait()
 
 

@@ -49,11 +49,26 @@ class OllamaClient:
         base_url: str | None = None,
         model: str | None = None,
         temperature: float | None = None,
+        num_ctx: int | None = None,
+        num_predict: int | None = None,
     ) -> None:
         self.base_url = base_url or settings.LLM_BASE_URL
         self.model = model or settings.LLM_MODEL
         self.temperature = (
             temperature if temperature is not None else settings.LLM_TEMPERATURE
+        )
+        # Ollama 기본 num_ctx 는 4096 — DFIR / EZTools 매뉴얼은 그것보다 훨씬
+        # 큼. 16K 컨텍스트로 띄워야 입력 + 시스템 + JSON 출력 다 들어간다.
+        # GPU/RAM 여유에 따라 env 로 조정 가능.
+        import os
+        self.num_ctx = (
+            num_ctx if num_ctx is not None
+            else int(os.getenv("FORENSICAGENT_LLM_NUM_CTX", "16384"))
+        )
+        # JSON 출력은 ToolMetadata 한 건 기준 ~1500 토큰 정도면 충분.
+        self.num_predict = (
+            num_predict if num_predict is not None
+            else int(os.getenv("FORENSICAGENT_LLM_NUM_PREDICT", "2048"))
         )
 
     # ---------- low level ----------
@@ -80,11 +95,30 @@ class OllamaClient:
             return False, str(e)
 
         try:
-            models = client.list()
+            resp = client.list()
         except Exception as e:  # noqa: BLE001
             return False, f"cannot reach ollama at {self.base_url}: {e}"
 
-        names = [m.get("name", "") for m in models.get("models", [])]
+        # ollama python lib changed shape between versions:
+        #   < 0.4: dict with {"models": [{"name": "..."}]}
+        #   >= 0.5: Pydantic ListResponse with .models = [Model(model="...")]
+        models_iter = (
+            resp.models if hasattr(resp, "models")
+            else (resp.get("models", []) if isinstance(resp, dict) else [])
+        )
+        names: list[str] = []
+        for m in models_iter:
+            # New shape: Model(model="qwen2.5:7b", ...)
+            # Old shape: {"name": "qwen2.5:7b"}
+            name = (
+                getattr(m, "model", None)
+                or getattr(m, "name", None)
+                or (m.get("name") or m.get("model") if isinstance(m, dict) else None)
+                or ""
+            )
+            if name:
+                names.append(name)
+
         if self.model not in names and not any(
             n.startswith(self.model.split(":")[0] + ":") for n in names
         ):
@@ -117,6 +151,8 @@ class OllamaClient:
                     "temperature": (
                         temperature if temperature is not None else self.temperature
                     ),
+                    "num_ctx": self.num_ctx,
+                    "num_predict": self.num_predict,
                 },
             )
         except Exception as e:  # noqa: BLE001
