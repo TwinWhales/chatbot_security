@@ -1,0 +1,67 @@
+tool_id: chainsaw
+display_name: Chainsaw
+version_supported: ">=2.0"
+
+category: log_analysis
+subcategory: windows_event_log
+
+applicable_evidence_types:
+  - evtx_log
+
+platform:
+  - windows
+  - linux
+  - macos
+
+input_format:
+  - .evtx
+
+output_format: json
+output_size_estimate: small
+parallelizable: true
+estimated_runtime: short
+
+install_check:
+  command: "chainsaw --version"
+  expected_pattern: "chainsaw"
+
+command_templates:
+  - name: "Sigma hunt with bundled rules"
+    template: "chainsaw hunt {evidence_path} -s {sigma_path} --mapping {mapping_path} --json"
+    when: "evtx 로그에서 알려진 위협 패턴 탐지가 필요할 때 (대부분의 기본 사용)."
+  - name: "Search by event id"
+    template: "chainsaw search {evidence_path} -e {event_ids} --json"
+    when: "특정 Event ID 만 빠르게 보고 싶을 때."
+
+usage_description: |
+  Chainsaw 는 Windows EVTX 로그를 빠르게 파싱하고 Sigma 룰 기반으로
+  위협을 헌팅하는 Rust 도구다. 보안 도메인의 표준 룰셋(sigma-rules)을
+  로드해 의심스러운 로그온 / 권한 상승 / lateral movement 패턴을 식별한다.
+  출력은 JSON 한 줄당 한 매치이며 rule_name, document.Event.System.EventID,
+  document.Event.System.TimeCreated 등이 핵심 필드.
+
+suspicious_indicators:
+  - id: sigma_rule_hit
+    pattern: "JSON 출력에 rule_name 필드가 존재하는 항목"
+    severity_baseline: medium
+    description: "Sigma 룰 매칭은 알려진 위협 패턴"
+  - id: rdp_logon_offhours
+    pattern: "EventID 4624 + LogonType 10 + 비업무 시간"
+    severity_baseline: high
+    description: "비업무 시간 외부 RDP 로그온"
+  - id: brute_force_followed_by_success
+    pattern: "동일 source_ip 에서 EventID 4625 (실패) 다수 후 4624 (성공)"
+    severity_baseline: high
+    description: "Brute force 가 성공으로 끝난 경우"
+  - id: powershell_encoded_command
+    pattern: "EventID 4104 ScriptBlockText 에 -EncodedCommand 또는 base64 블롭"
+    severity_baseline: high
+    description: "인코딩된 PowerShell 명령은 회피 패턴"
+
+known_false_positives:
+  - "관리자가 PowerShell 로 정상 작업 (서명된 스크립트 / known admin)"
+  - "도메인 컨트롤러의 정상 머신 계정 로그온"
+
+reference_urls:
+  - https://github.com/WithSecureLabs/chainsaw
+  - https://github.com/SigmaHQ/sigma

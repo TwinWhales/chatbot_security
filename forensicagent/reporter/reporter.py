@@ -1,0 +1,58 @@
+"""Reporter orchestrator — build + terminal render + file writes."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+
+from rich.console import Console
+
+from forensicagent.analyzer.types import ToolAnalysis
+from forensicagent.executor.types import ExecutionBundle
+from forensicagent.reporter.builder import build
+from forensicagent.reporter.json_out import write_json
+from forensicagent.reporter.md_out import write_md
+from forensicagent.reporter.terminal import render
+from forensicagent.reporter.types import Report
+from forensicagent.scanner.types import Inventory
+from forensicagent.selector.types import Plan
+
+
+def write(
+    *,
+    inventory: Inventory,
+    plan: Plan,
+    execution: ExecutionBundle,
+    analyses: list[ToolAnalysis],
+    started_at: str,
+    working_directory: str,
+    output_dir: str | Path,
+    console: Console | None = None,
+    stage_ms: dict[str, int] | None = None,
+    formats: tuple[str, ...] = ("terminal", "json", "md"),
+) -> tuple[Report, dict[str, Path]]:
+    """리포트 빌드 + 출력. (Report, {format: path}) 반환."""
+    report = build(
+        inventory=inventory,
+        plan=plan,
+        execution=execution,
+        analyses=analyses,
+        started_at=started_at,
+        working_directory=working_directory,
+        stage_ms=stage_ms,
+    )
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    paths: dict[str, Path] = {}
+
+    if "terminal" in formats and console is not None:
+        render(report, console)
+
+    if "json" in formats:
+        paths["json"] = write_json(report, out_dir / f"report_{stamp}.json")
+    if "md" in formats:
+        paths["md"] = write_md(report, out_dir / f"report_{stamp}.md")
+
+    return report, paths

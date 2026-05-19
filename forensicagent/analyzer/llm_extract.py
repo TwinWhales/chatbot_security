@@ -1,0 +1,134 @@
+"""LLM-based finding extraction (Case A / Case B 후처리).
+
+Case A — 출력이 작고 정형 (< ~100KB): 도구 출력 전체를 컨텍스트에 투입.
+Case B — 룰이 추린 의심 라인들을 LLM 으로 자연어 설명 보강.
+
+Severity 결정 가이드라인은 시스템 프롬프트로 강제하고, 모델이 확실하지
+않으면 'low' 로 두라고 지시한다 (명세 2.4).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from forensicagent.analyzer.types import EvidenceRef, Finding, Severity
+from forensicagent.llm import JsonRetryFailed, OllamaClient, OllamaUnavailable
+from forensicagent.llm.ollama_client import ChatMessage
+from forensicagent.tools.schema import ToolMetadata
+
+logger = logging.getLogger(__name__)
+
+
+VALID_SEVERITIES = {"info", "low", "medium", "high", "critical"}
+
+_SEVERITY_GUIDE = (
+    "Severity scale:\n"
+    "  critical — clear compromise evidence (known-bad hash, C2 traffic).\n"
+    "  high     — very abnormal pattern (e.g. lsass unusual parent, "
+    "successful external RDP).\n"
+    "  medium   — suspicious but possibly normal.\n"
+    "  low      — odd but more likely benign.\n"
+    "  info     — context metadata.\n"
+    "When unsure, return severity=\"low\" — under-claim, do not over-claim."
+)
+
+
+def _system_prompt(meta: ToolMetadata) -> str:
+    fp = "\n".join(f" - {x}" for x in meta.known_false_positives) or " - (none listed)"
+    return (
+        f"You are extracting forensic findings from {meta.display_name} output.\n"
+        f"Tool purpose: {meta.usage_description.strip()[:600]}\n"
+        f"Output format: {meta.output_format}.\n\n"
+        f"{_SEVERITY_GUIDE}\n\n"
+        f"Known false positives (do not promote these):\n{fp}\n\n"
+        "Reply with ONLY a JSON object matching this schema:\n"
+        '{ "findings": [\n'
+        '  { "severity": "info|low|medium|high|critical",\n'
+        '    "category": "<short kebab tag, e.g. persistence>",\n'
+        '    "title": "<one short sentence>",\n'
+        '    "description": "<2-3 sentences>",\n'
+        '    "raw_excerpt": "<the line(s) that triggered this>",\n'
+        '    "suggested_followup": "<one short sentence>" }\n'
+        "], \"summary\": \"<one-sentence overall summary>\" }"
+    )
+
+
+def _truncate(text: str, budget_chars: int) -> str:
+    if len(text) <= budget_chars:
+        return text
+    head = text[: budget_chars // 2]
+    tail = text[-budget_chars // 2 :]
+    return f"{head}\n\n... [truncated {len(text) - budget_chars} chars] ...\n\n{tail}"
+
+
+def extract(
+    metadata: ToolMetadata,
+    raw_text: str,
+    *,
+    evidence_path: str = "",
+    budget_chars: int = 12_000,
+    client: OllamaClient | None = None,
+) -> tuple[list[Finding], str, bool, bool]:
+    """LLM 으로 finding 추출.
+
+    Returns:
+        (findings, summary, invoked, failed)
+        invoked: LLM 호출에 도달했는지.
+        failed:  JSON 파싱/Ollama 실패로 빈 결과를 반환했는지.
+    """
+    if not raw_text.strip():
+        return [], "no output", False, False
+
+    client = client or OllamaClient()
+    payload = _truncate(raw_text, budget_chars)
+    try:
+        parsed: Any = client.json_chat(
+            [
+                ChatMessage(role="system", content=_system_prompt(metadata)),
+                ChatMessage(
+                    role="user",
+                    content=f"Tool output:\n```\n{payload}\n```\n\nReturn the JSON now.",
+                ),
+            ],
+            retry=1,
+        )
+    except OllamaUnavailable as e:
+        logger.info("LLM unavailable for %s: %s", metadata.tool_id, e)
+        return [], "", False, True
+    except JsonRetryFailed as e:
+        logger.warning("LLM JSON parse failed for %s: %s", metadata.tool_id, e)
+        return [], "", True, True
+
+    if not isinstance(parsed, dict):
+        logger.warning("LLM response not a dict for %s", metadata.tool_id)
+        return [], "", True, True
+
+    items = parsed.get("findings")
+    if not isinstance(items, list):
+        return [], str(parsed.get("summary", "")), True, True
+
+    out: list[Finding] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        sev = it.get("severity", "low")
+        if sev not in VALID_SEVERITIES:
+            sev = "low"
+        out.append(
+            Finding(
+                severity=sev,  # type: ignore[arg-type]
+                category=str(it.get("category", "anomaly"))[:64],
+                title=str(it.get("title", ""))[:200],
+                description=str(it.get("description", "")),
+                evidence_ref=EvidenceRef(
+                    source_file=evidence_path,
+                    raw_excerpt=str(it.get("raw_excerpt", ""))[:600],
+                ),
+                suggested_followup=str(it.get("suggested_followup", "")),
+                source="llm",
+            )
+        )
+
+    summary = str(parsed.get("summary", "")) if isinstance(parsed.get("summary"), str) else ""
+    return out, summary, True, False

@@ -1,19 +1,14 @@
 """Typer 진입점 — `forensicagent` 명령.
 
-Phase 1 단계라 전체 파이프라인(Selector/Executor/Analyzer/Reporter)이
-아직 stub 이므로, 현재는 다음만 동작한다:
-  * `forensicagent` (default)        — CWD 스캔 + 인벤토리 출력 + 실행 계획 placeholder
-  * `forensicagent doctor`           — 환경 점검
-  * `forensicagent tools list/info`  — 도구 메타데이터 디렉토리 살펴보기
-  * `forensicagent --dry-run`        — 스캔까지만, 실행 안 함
-
-Phase 4+ 에서 Selector/Executor/Analyzer/Reporter 가 채워지면 default
-명령이 전 파이프라인을 돌린다.
+전 파이프라인 흐름 (명세 0.2):
+  Scanner → Selector → (사용자 승인) → Executor → Analyzer → Reporter
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -21,9 +16,16 @@ import typer
 
 from forensicagent import __version__
 from forensicagent import config as settings
+from forensicagent.analyzer import analyze_all
 from forensicagent.cli.doctor import run_doctor
 from forensicagent.cli.ui import console, render_inventory
+from forensicagent.executor import execute
+from forensicagent.llm import OllamaClient
+from forensicagent.reporter import write as write_report
+from forensicagent.reporter.types import now_iso
 from forensicagent.scanner import scan
+from forensicagent.selector import select
+from forensicagent.tools import load_all_tools
 
 app = typer.Typer(
     name="forensicagent",
@@ -41,6 +43,18 @@ def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"forensicagent {__version__}")
         raise typer.Exit(0)
+
+
+def _approve(c, *, auto: bool, prompt: str) -> bool:
+    """interactive approval. --auto 면 항상 True."""
+    if auto:
+        return True
+    if not sys.stdin.isatty():
+        # 비대화형이면 기본 yes (스크립트로 돌릴 때 멈추지 않도록).
+        c.print(f"[dim]{prompt} (non-tty, auto-yes)[/]")
+        return True
+    answer = c.input(prompt).strip().lower()
+    return answer in ("", "y", "yes")
 
 
 @app.callback(invoke_without_command=True)
@@ -62,18 +76,25 @@ def root(
         5, "--max-depth", help="Recursive scan depth limit.", min=1
     ),
     path: Optional[Path] = typer.Option(
-        None,
-        "--path",
+        None, "--path",
         help="Directory to analyze (default: CWD).",
-        exists=False,
-        file_okay=False,
-        dir_okay=True,
+        exists=False, file_okay=False, dir_okay=True,
     ),
+    no_llm: bool = typer.Option(
+        False, "--no-llm",
+        help="Skip LLM ranking and LLM analysis (deterministic only).",
+    ),
+    output_dir: Optional[Path] = typer.Option(
+        None, "--output-dir",
+        help="Where to write tool outputs + report (default: ./forensicagent_output).",
+    ),
+    timeout: int = typer.Option(
+        0, "--timeout",
+        help="Per-tool timeout seconds (0 = use config default).",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
     version: bool = typer.Option(
-        False,
-        "--version",
-        callback=_version_callback,
-        is_eager=True,
+        False, "--version", callback=_version_callback, is_eager=True,
         help="Print version and exit.",
     ),
 ) -> None:
@@ -81,39 +102,135 @@ def root(
     if ctx.invoked_subcommand is not None:
         return
 
+    if verbose:
+        logging.basicConfig(
+            level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+        )
+
     target = (path or Path(os.getcwd())).resolve()
     c = console()
     c.print(f"[bold]forensicagent[/] {__version__}")
     c.print(f"[*] 작업 디렉토리: {target}")
 
-    # ----- Scan -----
+    started_at = now_iso()
+    stage_ms: dict[str, int] = {}
+
+    # ---------- 1. Scanner ----------
     c.print("[*] 증거 스캔 중...")
-    inv = scan(target, max_depth=max_depth)
+    inv = scan(target, max_depth=max_depth, stage_ms=stage_ms)
     if not inv.evidence_list:
         c.print("[yellow]식별된 증거가 없습니다.[/]")
         raise typer.Exit(0)
-
     c.print(render_inventory(inv))
     c.print(
         f"[*] 스캔 완료: {inv.scanned_files} 파일 검사, "
-        f"{len(inv.evidence_list)} 증거 식별."
+        f"{len(inv.evidence_list)} 증거 식별 "
+        f"(소요 {stage_ms.get('scan_walk', 0) + stage_ms.get('scan_detect', 0)} ms)."
     )
 
-    # ----- Selector / Executor / Analyzer / Reporter (Phase 4+) -----
+    # ---------- 2. Selector ----------
+    tools_dir = Path(settings.TOOLS_METADATA_DIR)
+    # Fallback: 만약 사용자 ~/.forensicagent/tools 가 비어 있으면 repo 내 tools_metadata/.
+    if not tools_dir.exists() or not any(tools_dir.glob("*.y*ml")):
+        repo_tools = Path.cwd() / "tools_metadata"
+        if repo_tools.exists() and any(repo_tools.glob("*.y*ml")):
+            tools_dir = repo_tools
+    tool_metas = load_all_tools(tools_dir)
+    if not tool_metas:
+        c.print(
+            f"[yellow]경고: 도구 메타데이터가 없습니다 ({tools_dir}). "
+            "tools_metadata/*.yaml 을 추가하세요.[/]"
+        )
+        raise typer.Exit(2)
+
+    forced = [t.strip() for t in tools.split(",") if t.strip()] if tools else []
     c.print(
-        "\n[yellow][!] Selector/Executor/Analyzer/Reporter 모듈은 아직 미구현 "
-        "(Phase 4+).[/]"
+        f"[*] 도구 풀: {len(tool_metas)} 개 ({tools_dir}). "
+        f"증거 기반 선별 시작..."
     )
-    if dry_run:
-        c.print("[dim]--dry-run: stopping after scan.[/]")
+    client = None if no_llm else OllamaClient()
+    plan = select(
+        inv,
+        tool_metas,
+        quick=quick,
+        force_tools=forced or None,
+        use_llm=not no_llm,
+        client=client,
+        stage_ms=stage_ms,
+    )
+
+    if not plan.selected_tools:
+        c.print("[yellow]적용 가능한 도구가 없습니다.[/]")
         raise typer.Exit(0)
 
-    forced = [t.strip() for t in tools.split(",")] if tools else []
-    plan_msg = (
-        f"forced tools={forced}" if forced else
-        ("quick mode" if quick else ("auto mode" if auto else "interactive"))
+    c.print(f"\n[*] 적용 가능한 도구 {len(plan.selected_tools)} 개 선별됨:")
+    for i, sel in enumerate(plan.selected_tools, 1):
+        c.print(
+            f"  {i}. [bold]{sel.tool_id}[/] "
+            f"(prio={sel.priority}, runtime={sel.estimated_runtime}, "
+            f"targets={len(sel.target_evidence)})"
+        )
+        c.print(f"     [dim]{sel.reason}[/]")
+    if plan.llm_used:
+        msg = "LLM 우선순위 보강 ok" if not plan.llm_fallback else "LLM 실패 → 기본 우선순위 fallback"
+        c.print(f"[dim]({msg})[/]")
+
+    if dry_run:
+        c.print("\n[dim]--dry-run: stopping after plan.[/]")
+        raise typer.Exit(0)
+
+    if not _approve(c, auto=auto, prompt="\n계속 진행할까요? [Y/n] "):
+        c.print("[yellow]사용자 취소.[/]")
+        raise typer.Exit(0)
+
+    # ---------- 3. Executor ----------
+    out_dir = (output_dir or Path.cwd() / settings.OUTPUT_DIR_NAME).resolve()
+    raw_out_dir = out_dir / "raw"
+    c.print(f"\n[*] 도구 실행 중 (output → {out_dir})...")
+    bundle = execute(
+        plan,
+        tool_metas,
+        output_dir=raw_out_dir,
+        timeout_sec=(timeout or None),
+        console=c,
+        stage_ms=stage_ms,
     )
-    c.print(f"[dim]plan placeholder ({plan_msg}) — wire up in Phase 4.[/]")
+
+    success_n = sum(1 for r in bundle.results if r.status == "success")
+    fail_n = sum(1 for r in bundle.results if r.status in ("failed", "timeout"))
+    skip_n = sum(1 for r in bundle.results if r.status == "skipped")
+    c.print(
+        f"[*] 실행 완료: success={success_n}, failed={fail_n}, skipped={skip_n}"
+    )
+
+    # ---------- 4. Analyzer ----------
+    c.print("[*] 의심항목 추출 중...")
+    analyses = analyze_all(
+        bundle.results,
+        tool_metas,
+        use_llm=not no_llm,
+        client=client,
+        stage_ms=stage_ms,
+    )
+
+    # ---------- 5. Reporter ----------
+    c.print("[*] 리포트 생성 중...\n")
+    report, paths = write_report(
+        inventory=inv,
+        plan=plan,
+        execution=bundle,
+        analyses=analyses,
+        started_at=started_at,
+        working_directory=str(target),
+        output_dir=out_dir,
+        console=c,
+        stage_ms=stage_ms,
+    )
+
+    if paths:
+        c.print("")
+        for fmt, p in paths.items():
+            c.print(f"[green]리포트 저장됨 ({fmt}):[/] {p}")
 
 
 @app.command("doctor")
@@ -130,21 +247,17 @@ def doctor_cmd(
 @tools_app.command("list")
 def tools_list() -> None:
     """List tool metadata YAMLs found in tools_metadata_dir."""
-    tdir = Path(settings.TOOLS_METADATA_DIR)
+    # 우선순위: user dir → repo cwd fallback.
+    candidates = [Path(settings.TOOLS_METADATA_DIR), Path.cwd() / "tools_metadata"]
     c = console()
-    if not tdir.exists():
-        c.print(
-            f"[yellow]tools_metadata_dir not found:[/] {tdir}\n"
-            "Create it and drop *.yaml files, or set FORENSICAGENT_TOOLS_DIR."
-        )
-        raise typer.Exit(0)
-    yamls = sorted(list(tdir.glob("*.yaml")) + list(tdir.glob("*.yml")))
-    if not yamls:
-        c.print(f"[yellow]no YAML files in[/] {tdir}")
-        raise typer.Exit(0)
-    c.print(f"[bold]tool metadata in {tdir}:[/]")
-    for y in yamls:
-        c.print(f"  - {y.name}")
+    for tdir in candidates:
+        yamls = sorted(list(tdir.glob("*.yaml")) + list(tdir.glob("*.yml"))) if tdir.exists() else []
+        if yamls:
+            c.print(f"[bold]tool metadata in {tdir}:[/]")
+            for y in yamls:
+                c.print(f"  - {y.name}")
+            return
+    c.print(f"[yellow]no YAMLs found in: {', '.join(map(str, candidates))}[/]")
 
 
 @tools_app.command("info")
@@ -152,13 +265,14 @@ def tools_info(
     tool_id: str = typer.Argument(..., help="Tool ID (matches YAML filename stem).")
 ) -> None:
     """Print contents of tool metadata YAML."""
-    tdir = Path(settings.TOOLS_METADATA_DIR)
-    for ext in (".yaml", ".yml"):
-        f = tdir / f"{tool_id}{ext}"
-        if f.exists():
-            console().print(f.read_text(encoding="utf-8"))
-            return
-    console().print(f"[red]not found:[/] {tool_id} in {tdir}")
+    candidates = [Path(settings.TOOLS_METADATA_DIR), Path.cwd() / "tools_metadata"]
+    for tdir in candidates:
+        for ext in (".yaml", ".yml"):
+            f = tdir / f"{tool_id}{ext}"
+            if f.exists():
+                console().print(f.read_text(encoding="utf-8"))
+                return
+    console().print(f"[red]not found:[/] {tool_id}")
     raise typer.Exit(1)
 
 

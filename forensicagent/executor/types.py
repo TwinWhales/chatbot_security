@@ -1,0 +1,60 @@
+"""Executor output types — 명세 2.3 의 실행 결과 묶음."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Literal, Optional
+
+ExecStatus = Literal["success", "failed", "timeout", "skipped"]
+
+
+@dataclass
+class ExecutionResult:
+    tool_id: str
+    target_evidence: str = ""           # 1 tool x 1 evidence per record
+    status: ExecStatus = "skipped"
+    command_executed: str = ""
+    stdout_path: str = ""               # 항상 파일 경로. inline 금지.
+    stderr_path: str = ""
+    exit_code: int = 0
+    duration_seconds: float = 0.0
+    output_format: str = "text"
+    output_size_bytes: int = 0
+    error_message: str = ""             # status != success 일 때 사람이 읽는 요약
+
+    # parsed_output 는 어댑터가 가벼운 dict 로 변환했을 때만 채움.
+    # 대용량 raw 출력은 stdout_path 로만 노출하고 inline 화 X (명세 2.3).
+    parsed_output: Optional[dict[str, Any]] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool_id": self.tool_id,
+            "target_evidence": self.target_evidence,
+            "status": self.status,
+            "command_executed": self.command_executed,
+            "stdout_path": self.stdout_path,
+            "stderr_path": self.stderr_path,
+            "exit_code": self.exit_code,
+            "duration_seconds": self.duration_seconds,
+            "output_format": self.output_format,
+            "output_size_bytes": self.output_size_bytes,
+            "error_message": self.error_message,
+            "parsed_output": self.parsed_output,
+        }
+
+
+@dataclass
+class ExecutionBundle:
+    results: list[ExecutionResult] = field(default_factory=list)
+    output_dir: str = ""                 # 모든 stdout/stderr 가 저장된 루트
+    parallel_max: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "output_dir": self.output_dir,
+            "parallel_max": self.parallel_max,
+            "results": [r.to_dict() for r in self.results],
+        }
+
+    def for_tool(self, tool_id: str) -> list[ExecutionResult]:
+        return [r for r in self.results if r.tool_id == tool_id]
