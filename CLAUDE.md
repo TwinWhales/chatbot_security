@@ -131,11 +131,11 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
 
 | 도메인 | 크롤 docs | RAG chunks | 상태 |
 |---|---:|---:|---|
-| cyberdefenders | 69 | 1379 | ✅ 정상 |
+| cyberdefenders | 69 | 1,379 | ✅ 정상 |
 | dfirreport | 14 | 598 | ✅ WP selector 수정 후 재크롤 |
 | eztools | 32 | 522 | ✅ raw github text |
-| hacktricks | 828 | 828 | 🔄 재크롤 중 (URL 매핑 수정 후, 백그라운드) |
-| **합계** | **943** | **3327** | (재크롤 후 chunks 수 크게 증가 예상) |
+| hacktricks | 828 | **12,662** | ✅ wiki URL 매핑 수정 후 재크롤 + 재인덱싱 (95% 본문 회수) |
+| **합계** | **943** | **15,161** | |
 
 **도구 풀 (tools_metadata/)**
 
