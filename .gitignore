@@ -159,4 +159,24 @@ data/chroma_db/
 data/logs.db
 data/.tryhackme_session.json
 
+# forensicagent: crawled raw data is large; manifest only is committed
+seed_docs/cyberdefenders/*.json
+seed_docs/dfirreport/*.json
+seed_docs/eztools/*.json
+seed_docs/hacktricks/*.json
+seed_docs/_indicator_candidates/
+
+# Per-tool execution outputs (generated each run)
+forensicagent_output/
+
+# RAG database (regeneratable from seed_docs)
+.forensicagent/
+
+# Tool YAML drafts (LLM output - human review pending)
+tools_metadata/_draft/
+tools_metadata/_failures/
+
+# Phase 6 evaluation golden set (LLM extracted)
+eval/goldenset/
+
 **/**.pyc
