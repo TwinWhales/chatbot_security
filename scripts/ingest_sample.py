@@ -193,8 +193,11 @@ def _eztools_raw_url(blob_url: str) -> str:
 
 # Live URL rewrites for sites that moved hosts. Keys are substring matches.
 URL_REWRITES: list[tuple[str, str]] = [
-    # HackTricks: book.hacktricks.xyz → book.hacktricks.wiki (2025+ migration)
-    ("book.hacktricks.xyz", "book.hacktricks.wiki"),
+    # HackTricks: book.hacktricks.xyz/src/X → book.hacktricks.wiki/en/X.html
+    # 도메인 이전 + path 재구조화 (/src/ → /en/) + 끝 .html 보강이 모두 필요.
+    # 단순 호스트 rewrite 만 했던 1차 실행에서 828 페이지 전부 404 반환되어
+    # placeholder (105 chars) 만 RAG 에 들어갔던 문제 해결.
+    ("book.hacktricks.xyz/src/", "book.hacktricks.wiki/en/"),
 ]
 
 
@@ -202,6 +205,15 @@ def _rewrite_url(url: str) -> str:
     out = url
     for old, new in URL_REWRITES:
         out = out.replace(old, new)
+    # HackTricks wiki 는 mdBook 기반이라 .html 확장자가 있어야 본문이 렌더된다.
+    if "book.hacktricks.wiki/" in out and not out.endswith(".html"):
+        # 경로의 마지막 segment 가 확장자 없으면 .html 추가.
+        # (예: /en/AI/AI-Deep-Learning → /en/AI/AI-Deep-Learning.html)
+        from urllib.parse import urlparse
+        p = urlparse(out)
+        last = p.path.rsplit("/", 1)[-1] if p.path else ""
+        if "." not in last:
+            out = out + ".html"
     return out
 
 

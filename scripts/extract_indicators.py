@@ -37,7 +37,7 @@ For each detection idea in the post, output an indicator with:
   * pattern: ONE line describing what to look for in tool output
   * severity_baseline: info|low|medium|high|critical  (bias low when unsure)
   * description: 1 short sentence
-  * tool_hint: which DFIR tool category would surface this — one of:
+  * tool_hint: which DFIR tool category would surface this - one of:
               evtx (events), volatility (memory), regripper (registry),
               tshark (pcap), yara (signatures), plaso (timeline),
               browser (browser artifacts), eztools (windows artifacts),
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         if status == "ollama_down":
             break
 
-    print(f"\n[ind] {time.perf_counter() - start:.1f}s total — {counts}")
+    print(f"\n[ind] {time.perf_counter() - start:.1f}s total - {counts}")
     print(f"  candidates → {OUT_DIR}")
     return 0
 

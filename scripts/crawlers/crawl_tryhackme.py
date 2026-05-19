@@ -5,7 +5,7 @@
 처리된다.
 
 사용:
-    # 1회 — 브라우저 띄워 수동 로그인 후 세션 저장
+    # 1회 - 브라우저 띄워 수동 로그인 후 세션 저장
     python scripts/crawl_tryhackme.py login
 
     # 본 수집 (path / module / room URL 혼합 가능)
@@ -203,7 +203,7 @@ def fetch_path(ctx, url: str) -> tuple[ParentRef, list[ParentRef]]:
         title = _safe_text(page, "h1").strip() or path_slug
         path_ref = ParentRef(kind="path", slug=path_slug, title=title, url=url)
 
-        # path 페이지의 module 링크들 — /module/<slug>
+        # path 페이지의 module 링크들 - /module/<slug>
         hrefs = page.eval_on_selector_all(
             'a[href*="/module/"]',
             "els => els.map(e => e.getAttribute('href'))",
@@ -300,7 +300,7 @@ def fetch_room_content(ctx, room: RoomRef) -> str:
         except Exception:
             pass
 
-        # 본문 영역 — main 우선, 없으면 body
+        # 본문 영역 - main 우선, 없으면 body
         html = page.evaluate("""
             () => {
                 const main = document.querySelector('main')
@@ -356,7 +356,7 @@ def resolve_targets(ctx, urls: list[str]) -> list[RoomRef]:
                     try:
                         module_ref, rooms = fetch_module(ctx, m_stub.url)
                     except Exception as exc:
-                        print(f"    [warn] module fetch 실패: {m_stub.url} — {exc}",
+                        print(f"    [warn] module fetch 실패: {m_stub.url} - {exc}",
                               file=sys.stderr)
                         continue
                     for r in rooms:
@@ -376,7 +376,7 @@ def resolve_targets(ctx, urls: list[str]) -> list[RoomRef]:
             else:
                 print(f"  [warn] 인식 불가 URL: {url}", file=sys.stderr)
         except Exception as exc:
-            print(f"  [warn] target 해석 실패: {url} — {exc}", file=sys.stderr)
+            print(f"  [warn] target 해석 실패: {url} - {exc}", file=sys.stderr)
 
     return [by_slug[s] for s in insertion_order]
 
@@ -393,7 +393,7 @@ def _accumulate_room(
         bucket[r.slug] = r
         order.append(r.slug)
         return
-    # parents 합치기 (중복 제거 — kind+slug 기준)
+    # parents 합치기 (중복 제거 - kind+slug 기준)
     for p in parents:
         if not any(pp.kind == p.kind and pp.slug == p.slug for pp in existing.parents):
             existing.parents.append(p)
@@ -419,7 +419,7 @@ def _detect_tags(room: RoomRef) -> list[str]:
 # === 마크다운 출력 ===
 
 def _yaml_scalar(s: str) -> str:
-    """YAML scalar — 특수문자 있으면 quote."""
+    """YAML scalar - 특수문자 있으면 quote."""
     if s is None:
         return '""'
     s = str(s)
@@ -553,7 +553,7 @@ def cmd_crawl(args: argparse.Namespace) -> int:
     with sync_playwright() as p:
         browser, ctx = _load_context(p)
         try:
-            print(f"[1/3] target 해석 — {len(args.urls)} URL")
+            print(f"[1/3] target 해석 - {len(args.urls)} URL")
             rooms = resolve_targets(ctx, args.urls)
             print(f"   → unique room {len(rooms)} 개")
 
@@ -561,7 +561,7 @@ def cmd_crawl(args: argparse.Namespace) -> int:
                 print("수집할 room 이 없습니다. URL 또는 셀렉터를 확인하세요.")
                 return 1
 
-            # 부모 메타 (_path.md / _module.md) — primary 위치 기준 1회씩
+            # 부모 메타 (_path.md / _module.md) - primary 위치 기준 1회씩
             print(f"[2/3] 부모 메타 기록")
             written_paths: set[str] = set()
             written_modules: set[tuple[str, ...]] = set()
@@ -602,7 +602,7 @@ def cmd_crawl(args: argparse.Namespace) -> int:
                 try:
                     body = fetch_room_content(ctx, r)
                 except Exception as exc:
-                    print(f"  [{i}/{len(rooms)}] FAIL {r.slug} — {exc}",
+                    print(f"  [{i}/{len(rooms)}] FAIL {r.slug} - {exc}",
                           file=sys.stderr)
                     continue
                 dest = _write_room(r, body)

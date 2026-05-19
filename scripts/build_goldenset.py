@@ -61,7 +61,7 @@ Rules:
     volatility3, regripper, yara, plaso, mftecmd, evtxecmd, recmd, tshark,
     sysmon, eric-zimmerman-tools, kape, sleuthkit, autopsy, ftk-imager.
   * If a category of evidence is only inferred (not explicitly mentioned),
-    still include it — but mark inferred ones honestly via the "_inferred"
+    still include it - but mark inferred ones honestly via the "_inferred"
     field of "tools_used" / not at all in evidence_types_present if you are
     not >70% sure.
   * Keep arrays short and high-signal.
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         if status == "ollama_down":
             break
 
-    print(f"\n[gold] {time.perf_counter() - start:.1f}s total — {counts}")
+    print(f"\n[gold] {time.perf_counter() - start:.1f}s total - {counts}")
     print(f"  goldenset → {OUT_DIR}")
     return 0
 

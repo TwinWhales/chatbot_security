@@ -167,11 +167,25 @@ class OllamaClient:
         *,
         temperature: float | None = None,
         retry: int = 1,
+        format_schema: dict[str, Any] | None = None,
     ) -> dict[str, Any] | list[Any]:
         """JSON 강제 응답. 파싱 실패 시 retry 번 재시도 후 JsonRetryFailed.
 
+        Args:
+            format_schema: 있으면 Ollama 의 structured output 기능 사용
+                (`format=<json_schema_dict>`). 모델 출력이 schema 의 필드명,
+                타입, required 를 그대로 따르도록 *강제* 됨. 일반적으로
+                `MyPydanticModel.model_json_schema()` 결과를 그대로 넘긴다.
+                None 이면 `format="json"` 만 사용 (필드명 자유).
+
         format="json" 옵션과 함께, 시스템 메시지를 마지막에 한 줄 더 박아
         모델이 산문 답변을 섞지 않도록 강제한다.
+
+        Schema 강제와 단순 JSON 의 trade-off:
+            * 강제: 필드명/타입 보장 → Stage 2 처럼 우리 Pydantic 검증 통과
+              확률이 크게 오른다. 단점은 모델이 추론 시간 더 쓰고, 컨텍스트
+              한도에 더 빨리 닿을 수 있음.
+            * 비강제: 모델이 자기 자연스러운 키로 응답해서 매핑 필요.
         """
         try:
             client = self._client()
@@ -185,6 +199,10 @@ class OllamaClient:
         last_raw = ""
         last_err = ""
 
+        # Ollama python >=0.4 accepts dict for `format` for JSON-Schema-constrained
+        # generation. Fall back to "json" string otherwise.
+        format_arg: Any = format_schema if format_schema is not None else "json"
+
         for attempt in range(attempts):
             msgs = list(base_msgs)
             if attempt > 0:
@@ -194,7 +212,7 @@ class OllamaClient:
                         "role": "user",
                         "content": (
                             "Your previous reply could not be parsed as JSON. "
-                            "Reply ONLY with a single valid JSON value — no prose, "
+                            "Reply ONLY with a single valid JSON value - no prose, "
                             "no markdown fences, no commentary."
                         ),
                     }
@@ -203,13 +221,15 @@ class OllamaClient:
                 resp = client.chat(
                     model=self.model,
                     messages=msgs,
-                    format="json",
+                    format=format_arg,
                     options={
                         "temperature": (
                             temperature
                             if temperature is not None
                             else self.temperature
                         ),
+                        "num_ctx": self.num_ctx,
+                        "num_predict": self.num_predict,
                     },
                 )
             except Exception as e:  # noqa: BLE001

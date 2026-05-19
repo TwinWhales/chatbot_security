@@ -41,7 +41,7 @@ FAIL_DIR = Path("tools_metadata/_failures")
 
 
 # These map EZTools manual filenames to roughly applicable evidence types.
-# It's a hint to the LLM — if it sees the manual is about "amcacheparser",
+# It's a hint to the LLM - if it sees the manual is about "amcacheparser",
 # we want applicable_evidence_types to include registry_hive. The LLM may
 # override based on actual manual content.
 _EVIDENCE_HINTS: dict[str, list[str]] = {
@@ -152,6 +152,11 @@ def seed_one(
     title = doc.get("title", slug)
     hint = _EVIDENCE_HINTS.get(slug, ["unknown"])
 
+    # Ollama 의 structured output 으로 ToolMetadata schema 를 *강제* 한다.
+    # 1차 실행에서 32개 모두 schema_failed (LLM 이 자기 자연스러운 키로 응답)
+    # 했던 문제의 근본 해결. Pydantic schema dict 를 그대로 ollama 에 전달.
+    schema = ToolMetadata.model_json_schema()
+
     try:
         parsed = client.json_chat(
             [
@@ -159,6 +164,7 @@ def seed_one(
                 ChatMessage(role="user", content=_user_msg(slug, title, content, hint)),
             ],
             retry=1,
+            format_schema=schema,
         )
     except OllamaUnavailable as e:
         return slug, "ollama_down"
@@ -244,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
             break
 
     print(
-        f"\n[seed] done in {time.perf_counter() - start:.1f}s — "
+        f"\n[seed] done in {time.perf_counter() - start:.1f}s - "
         f"written={counts['written']} cached={counts['cached']} "
         f"llm_failed={counts['llm_failed']} schema_failed={counts['schema_failed']}"
     )
