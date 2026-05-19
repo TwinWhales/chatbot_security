@@ -1,0 +1,72 @@
+tool_id: amcacheparser
+display_name: AmcacheParser
+version_supported: ">=1.0"
+
+category: registry_analysis
+subcategory: amcache
+
+applicable_evidence_types:
+  - registry_hive
+
+platform:
+  - windows
+  - linux
+
+input_format:
+  - Amcache.hve
+
+output_format: csv
+output_size_estimate: small
+parallelizable: true
+estimated_runtime: short
+
+install_check:
+  command: "AmcacheParser.exe"
+  expected_pattern: "AmcacheParser"
+
+command_templates:
+  - name: "Parse Amcache.hve to CSV"
+    template: "AmcacheParser.exe -f {evidence_path} --csv {output_dir} -i"
+    when: "Amcache.hve 표준 분석 - 설치 프로그램 + InventoryApplicationFile 의 unassociated entries (정체 불명 실행파일) 모두 추출. -i 는 Programs entries 포함."
+  - name: "Filter by hash blacklist"
+    template: "AmcacheParser.exe -f {evidence_path} --csv {output_dir} -w {known_bad_sha1_list}"
+    when: "TI feed 의 known-bad SHA1 hash 리스트로 필터 - 매칭되는 entry 만 출력."
+
+usage_description: |
+  AmcacheParser 는 Windows Amcache.hve 파서. Amcache 는 Application
+  Compatibility 용 등록 정보지만 forensic 가치는 매우 높다 - 실행된 모든
+  바이너리의 SHA1 해시 + 파일 경로 + 마지막 실행 시각이 기록된다 (PE 자체가
+  삭제돼도 남음). DFIR 핵심 아티팩트 중 하나. 출력 CSV 의 핵심 컬럼:
+  FileKeyLastWriteTimestamp, SHA1, ApplicationName, FullPath, Size.
+  Unassociated entries (Programs 와 매핑 안 된 행) 가 가장 의심 가치 높음 -
+  비공식 설치 프로그램 / portable / malware 가 여기 잡힘.
+
+suspicious_indicators:
+  - id: amcache_unassociated_in_temp
+    pattern: "Unassociated entry + FullPath 가 %TEMP% / %APPDATA% / Public / Downloads"
+    severity_baseline: high
+    description: "정식 설치 안된 + 임시 경로에서 실행된 바이너리. malware 첫 의심 위치."
+  - id: amcache_sha1_known_bad
+    pattern: "SHA1 이 VirusTotal / abuse.ch / MalwareBazaar 의 known-malware 매칭"
+    severity_baseline: critical
+    description: "Hash IoC 직접 매치. 즉시 격리 대상."
+  - id: amcache_deleted_executable
+    pattern: "Amcache 에 entry 는 있는데 디스크에는 FullPath 가 없음 (삭제됨)"
+    severity_baseline: high
+    description: "실행 후 흔적 삭제. anti-forensics 또는 일시적 dropper."
+  - id: amcache_signing_status_invalid
+    pattern: "PEAFileSigner / IsPeFile + 디지털 서명 invalid 또는 없음 + Program Files 외 경로"
+    severity_baseline: medium
+    description: "미서명 바이너리가 표준 경로 밖에서 실행"
+  - id: amcache_credential_dump_tool
+    pattern: "ApplicationName 또는 FullPath 가 mimikatz / procdump / lsass / nltest / lazagne 등"
+    severity_baseline: critical
+    description: "알려진 자격증명 / 정찰 도구 실행 흔적"
+
+known_false_positives:
+  - "PowerShell / Sysmon / WSL / WinPE 등 OEM 미서명 정상 도구"
+  - "사용자가 의도적으로 다운로드 후 실행한 portable 유틸리티 (보안 도구, IT 진단 등)"
+
+reference_urls:
+  - https://github.com/EricZimmerman/AmcacheParser
+  - https://www.ssi.gouv.fr/uploads/2019/01/anssi-coriin_2019-analysis_amcache.pdf
