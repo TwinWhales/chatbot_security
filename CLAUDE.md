@@ -116,6 +116,9 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
 | `af437ce` | feat: Phase 3-5 (Selector/Executor/Analyzer/Reporter + 3 YAML) |
 | `95a327d` | docs: README + CLAUDE.md resume notes |
 | `659f820` | feat: sample.txt ingestion pipeline (4 stages, parallel) |
+| `601d0c7` | fix: 4 ingestion bugs (PYTHONPATH / WP selector / Ollama Pydantic / num_ctx) |
+| `5d8595b` | fix+test: Stage 2 JSON Schema 강제 + 89 단위 테스트 + Stage 4a 분석기 + HackTricks URL 매핑 |
+| `cb87549` | feat: 5 hand-written EZTools YAMLs - 도구 풀 3 → 8 |
 
 **실제로 동작 검증된 흐름**
 - `python -m forensicagent --help / doctor / tools list / tools info <id>`
@@ -131,8 +134,27 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
 | cyberdefenders | 69 | 1379 | ✅ 정상 |
 | dfirreport | 14 | 598 | ✅ WP selector 수정 후 재크롤 |
 | eztools | 32 | 522 | ✅ raw github text |
-| hacktricks | 828 | 828 | ⚠️ 모두 404 (도메인 이전, URL 구조 불일치) |
-| **합계** | **943** | **3327** | |
+| hacktricks | 828 | 828 | 🔄 재크롤 중 (URL 매핑 수정 후, 백그라운드) |
+| **합계** | **943** | **3327** | (재크롤 후 chunks 수 크게 증가 예상) |
+
+**도구 풀 (tools_metadata/)**
+
+| 도구 | 카테고리 | indicators | 작성자 |
+|---|---|---:|---|
+| chainsaw | log_analysis | 4 | 사람 (Phase 3-5 reference) |
+| volatility3 | memory_analysis | 4 | 사람 |
+| regripper | registry_analysis | 4 | 사람 |
+| mftecmd | disk_analysis | 5 | 사람 (밤샘 보강) |
+| evtxecmd | log_analysis | 6 | 사람 |
+| recmd | registry_analysis | 7 | 사람 |
+| pecmd | disk_analysis | 5 | 사람 |
+| amcacheparser | registry_analysis | 5 | 사람 |
+| **합계** | **8 도구** | **40** | |
+
+**테스트 커버리지**
+
+- `tests/` 89 통과 (1.94s): detectors (46) + filter (11) + rules (11) + chunks (21)
+- LLM / 네트워크 / GPU 의존성 없는 결정론 단위 테스트만
 
 **남은 큰 덩어리** (코드 아닌 노가다 / 실험)
 - Stage 2/4 LLM 추출 — 백그라운드 큐 진행 중이지만 CPU 추론이라 비현실적

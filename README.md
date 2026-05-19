@@ -180,6 +180,9 @@ JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
 | `4c53835` | feat: Phase 1 + Scanner + RAG TODOs — pyproject, Typer CLI, Ollama 래퍼, doctor, Scanner, rag/{vector_store,embedder} TODO 채움 |
 | `af437ce` | feat: Phase 3-5 — Pydantic 도구 스키마 + 3 YAML, Selector, Executor, Analyzer, Reporter, CLI 본 파이프라인 연결 |
 | `659f820` | feat: sample.txt ingestion pipeline (4 stages, parallel) — Stage 1 크롤 + Stage 3 RAG + Stage 2/4 LLM 추출 |
+| `601d0c7` | fix: 4 ingestion bugs (PYTHONPATH / WP selector / Ollama Pydantic shape / num_ctx) |
+| `5d8595b` | fix+test: Stage 2 JSON Schema 강제 + 89 단위 테스트 + Stage 4a 분석기 + HackTricks URL 매핑 |
+| `cb87549` | feat: hand-written 5 EZTools YAMLs (mftecmd / evtxecmd / recmd / pecmd / amcacheparser) — 도구 풀 3 → 8 |
 
 ## 1차 인제스션 실행 결과 (2026-05-19)
 
