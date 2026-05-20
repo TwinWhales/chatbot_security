@@ -127,7 +127,7 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
 - 합성 `echo_tool` 어댑터로 success 경로 + Analyzer Case A 검증
 - 룰 매처 (`sigma_rule_hit` specific + 키워드 AND fallback) 단위 검증
 
-**1차 인제스션 산출물 (in seed_docs/ + ChromaDB)**
+**1차 인제스션 산출물 (in seed_docs/ + ChromaDB + eval/)**
 
 | 도메인 | 크롤 docs | RAG chunks | 상태 |
 |---|---:|---:|---|
@@ -135,7 +135,16 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
 | dfirreport | 14 | 598 | ✅ WP selector 수정 후 재크롤 |
 | eztools | 32 | 522 | ✅ raw github text |
 | hacktricks | 828 | **12,662** | ✅ wiki URL 매핑 수정 후 재크롤 + 재인덱싱 (95% 본문 회수) |
-| **합계** | **943** | **15,161** | |
+| **RAG 합계** | **943** | **15,161** | |
+
+**LLM 추출 산출물**
+
+| Stage | 결과 | 비고 |
+|---|---|---|
+| 2 (EZTools → YAML) | 0/32 valid | LLM 이 strict 22-필드 schema 안 따라옴. `format_schema=` 수정 후 재시도 필요 |
+| 4a (CD blog → indicators) | **69/69 candidates** | 299 indicators 추출, 20개 자동 매핑 (chainsaw 15 / regripper 4 / volatility3 1) |
+| 4b (DFIR → goldenset) | **14/14 cases** | Phase 6 평가용. case_summary + tools_used + ttps (MITRE) + key_iocs |
+| Stage 4b 평균 추출 결과 | 3 tools / 4 ttps / 3 iocs per case | qwen2.5:7b @ CPU, 25분/건, 5.8 시간 소요 |
 
 **도구 풀 (tools_metadata/)**
 
