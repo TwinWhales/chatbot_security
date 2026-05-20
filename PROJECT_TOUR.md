@@ -510,6 +510,64 @@ forensicagent --version
 
 ---
 
-## 7. 한 줄 결론
+## 7. 이 프로젝트는 끝났는가? — 종결 판단
+
+엔지니어링 측면에서는 **사실상 끝났다**. 솔직하게 정리.
+
+### 7-1 끝났다고 봐도 되는 근거
+
+| 영역 | 상태 |
+|---|---|
+| **명세 충족도** | Phase 1-5 코드 완성. 명세에 있던 6 모듈 + observability + rag + tools + llm 모두 구현 |
+| **동작 검증** | 합성 evidence + echo_tool 어댑터로 end-to-end 흐름 확인 / 89 단위 테스트 1.94초 통과 |
+| **자료** | 도구 8개 / RAG 15K chunks / goldenset 14 case / indicator 후보 299 |
+| **문서** | README + CLAUDE + understand_code + PROJECT_TOUR 4 문서로 코드/실행/패키징/다음단계 다 커버 |
+| **재현성** | `pip install -e .` 한 줄로 새 머신에 동작. wheel 빌드 가능 |
+| **확장성** | YAML 1 파일 추가 = 새 도구. 어댑터 hook + indicator matcher hook 도 있음 |
+
+학기 프로젝트 / 포트폴리오 기준이라면 **충분히 완료** 라고 자신 있게 말할 수 있는 수준.
+
+### 7-2 남은 게 있다면, 그것은 "코드" 가 아니라 "데이터/평가"
+
+| 카테고리 | 항목 | 필수? |
+|---|---|---|
+| 데이터 보강 | 도구 YAML 8 → 30+ (yara, plaso, tshark, ...) | ❌ optional |
+| 데이터 보강 | Stage 4a 의 unmapped 279 indicators 수동 검수/병합 | ❌ optional |
+| 데이터 보강 | HackTricks 39 wiki 미존재 페이지 정리 | ❌ 사소함 |
+| 평가 | Phase 6 - goldenset 14 case 로 precision/recall 측정 | ⚠️ 보고서/논문 쓸 거면 필요 |
+| 미해결 (작은) | Stage 2 를 fixed code (`format_schema=`) 로 한 번 더 돌려서 valid YAML 나오는지 검증 | ⚠️ 호기심 차원 |
+| optional 폴리시 | specialized adapter (Volatility 의 비정형 출력 등) | ❌ optional, GenericAdapter 로도 동작 |
+
+> **즉, "더 하면 좋은 일" 은 있어도 "안 하면 안 되는 일" 은 없다.**
+
+### 7-3 언제 진짜 끝났다고 선언할까 - 3 가지 기준
+
+본인 용도에 맞춰 골라잡으면 된다:
+
+1. **MVP 종료 (지금)**
+   "동작하는 forensic triage CLI 가 있다" 가 목표였다면 → 종료. 코드/문서/데이터 모두 일관된 스냅샷 상태.
+
+2. **데모 종료**
+   한 번이라도 실제 포렌식 도구 (volatility3 / chainsaw / RegRipper 등) 를
+   설치하고 진짜 evidence 로 돌려서 finding 이 나오는 시연을 마치면 → 그 시연 결과 잡고 종료.
+   - 추가 작업: 도구 PATH 설정 + CTF/연습용 evidence 다운로드 + 1 회 실행 + 스크린샷.
+
+3. **연구/평가 종료**
+   Phase 6 measurement (goldenset precision/recall) 까지 → 그 수치 잡고 종료.
+   - 추가 작업: `eval/goldenset/*.json` 의 14 case 의 `evidence_types_present` /
+     `tools_used` 를 forensicagent 가 같은 evidence 받았을 때 출력하는 것과 비교.
+   - 평가 스크립트 1 개 추가 작성 필요 (~100 줄), Phase 6 의 핵심 산출물.
+
+수업 / 포트폴리오 / 논문 어느 용도냐에 따라 1 / 2 / 3 골라잡고, 추가 데이터/도구 보강은 "끝난 후 점진 개선" 으로 두면 깔끔.
+
+### 7-4 정리
+
+**지금 멈춰도 손 부끄럽지 않은 상태.** 깃 트리는 깨끗하고, 테스트는 통과하고, 문서는 충분하고, 데이터는 인덱싱 끝났고, 코드는 모듈 분리가 깨끗하다.
+
+다음 세션을 열어도 부담 없이 어디서든 이어 갈 수 있고, 그냥 여기서 멈추고 보고서/포트폴리오로 정리해도 된다. 결정은 본인이 정한 종결 기준 (위 § 7-3 의 1 / 2 / 3) 에 달려 있다.
+
+---
+
+## 8. 한 줄 결론
 
 forensicagent 는 **이미 동작하는** CLI agent 다. 남은 일은 거의 *데이터 노가다* + *평가* 와 *모델 가속* 의 영역이지, 코드 추가가 아니다. 그래서 다음 세션은 어디서든 자연스럽게 이어 갈 수 있다.
