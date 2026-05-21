@@ -1,0 +1,97 @@
+{
+  "errors": [],
+  "generated_at": "2026-05-21T08:09:50Z",
+  "metrics": {
+    "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py": {
+      "CONFIDENCE.HIGH": 3,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 2,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 353,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 3,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 2,
+      "SEVERITY.MEDIUM": 1,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 353,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "19 import shutil\n20 import subprocess\n21 import sys\n",
+      "col_offset": 0,
+      "end_col_offset": 17,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Consider possible security implications associated with the subprocess module.",
+      "line_number": 20,
+      "line_range": [
+        20
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess",
+      "test_id": "B404",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "260     try:\n261         subprocess.run(\n262             [sys.executable, \"-m\", \"pip\", \"install\", spec.pip_package],\n263             check=True,\n264         )\n265         return True\n",
+      "col_offset": 8,
+      "end_col_offset": 9,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 261,
+      "line_range": [
+        261,
+        262,
+        263,
+        264
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    },
+    {
+      "code": "284         # urllib \uac00 stdlib \ub77c\uc11c \ucd94\uac00 \uc758\uc874\uc131 \uc5c6\uc74c. \ud070 \ud30c\uc77c\uc5d0\ub3c4 OK.\n285         with urllib.request.urlopen(spec.zip_url) as resp, tmp_path.open(\"wb\") as f:\n286             shutil.copyfileobj(resp, f)\n",
+      "col_offset": 13,
+      "end_col_offset": 49,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 22,
+        "link": "https://cwe.mitre.org/data/definitions/22.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+      "line_number": 285,
+      "line_range": [
+        285
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+      "test_id": "B310",
+      "test_name": "blacklist"
+    }
+  ]
+}

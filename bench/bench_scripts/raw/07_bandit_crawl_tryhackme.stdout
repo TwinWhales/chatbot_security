@@ -1,0 +1,118 @@
+{
+  "errors": [],
+  "generated_at": "2026-05-21T08:10:37Z",
+  "metrics": {
+    "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\scripts\\crawlers\\crawl_tryhackme.py": {
+      "CONFIDENCE.HIGH": 4,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 4,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 520,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 4,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 4,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 520,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "177         page.wait_for_load_state(\"networkidle\", timeout=15000)\n178     except Exception:\n179         pass\n180     time.sleep(0.4)\n",
+      "col_offset": 4,
+      "end_col_offset": 12,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\scripts\\crawlers\\crawl_tryhackme.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 178,
+      "line_range": [
+        178,
+        179
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "187             return el.inner_text()\n188     except Exception:\n189         pass\n190     return \"\"\n",
+      "col_offset": 4,
+      "end_col_offset": 12,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\scripts\\crawlers\\crawl_tryhackme.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 188,
+      "line_range": [
+        188,
+        189
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "295                     time.sleep(0.12)\n296                 except Exception:\n297                     pass\n298             # \ud3bc\uce5c \ub4a4 \ucd94\uac00 \uc548\uc815\ud654\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\scripts\\crawlers\\crawl_tryhackme.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 296,
+      "line_range": [
+        296,
+        297
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "299             _wait_ready(page)\n300         except Exception:\n301             pass\n302 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\scripts\\crawlers\\crawl_tryhackme.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 300,
+      "line_range": [
+        300,
+        301
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    }
+  ]
+}

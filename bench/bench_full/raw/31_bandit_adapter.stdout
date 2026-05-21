@@ -1,0 +1,81 @@
+{
+  "errors": [],
+  "generated_at": "2026-05-21T08:10:18Z",
+  "metrics": {
+    "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\executor\\adapter.py": {
+      "CONFIDENCE.HIGH": 2,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 2,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 121,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 2,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 2,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 121,
+      "nosec": 0,
+      "skipped_tests": 0
+    }
+  },
+  "results": [
+    {
+      "code": "21 import shutil\n22 import subprocess\n23 from pathlib import Path\n",
+      "col_offset": 0,
+      "end_col_offset": 17,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\executor\\adapter.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Consider possible security implications associated with the subprocess module.",
+      "line_number": 22,
+      "line_range": [
+        22
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess",
+      "test_id": "B404",
+      "test_name": "blacklist"
+    },
+    {
+      "code": "68                 timeout=10,\n69                 shell=False,\n70                 check=False,\n71             )\n72         except (subprocess.TimeoutExpired, OSError) as e:\n73             return False, f\"install_check failed to run: {e}\"\n74 \n75         haystack = (proc.stdout or \"\") + (proc.stderr or \"\")\n76         if check.expected_pattern in haystack:\n77             return True, f\"{self._meta.tool_id} {check.expected_pattern} found\"\n",
+      "col_offset": 19,
+      "end_col_offset": 13,
+      "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\executor\\adapter.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 78,
+        "link": "https://cwe.mitre.org/data/definitions/78.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "subprocess call - check for execution of untrusted input.",
+      "line_number": 69,
+      "line_range": [
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+      "test_id": "B603",
+      "test_name": "subprocess_without_shell_equals_true"
+    }
+  ]
+}
