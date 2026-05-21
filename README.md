@@ -234,12 +234,41 @@ forensicagent doctor
 설치 안 된 의존성 / Ollama 미접속 / 포렌식 도구(volatility3, chainsaw, ...)
 PATH 미등록을 모두 보여준다.
 
-### 4. 분석 실행
+### 4. 분석 실행 — 두 가지 방식
+
+#### (A) 인터랙티브 REPL — 탐색적 분석
 
 ```bash
 cd /path/to/evidence
-forensicagent                          # 인터랙티브 (기본)
-forensicagent --auto                   # 승인 없이
+forensicagent                          # 인자 없이 + TTY 면 자동 REPL 진입
+# 또는 명시적으로
+forensicagent shell --path /case-03
+
+# REPL 안에서
+forensic> /help                        # 슬래시 명령 목록
+forensic> /scan                        # Scanner
+forensic> /plan                        # Selector
+forensic> /run                         # Executor
+forensic> /analyze                     # Analyzer
+forensic> /report                      # Reporter (JSON+MD)
+forensic> /auto                        # scan -> plan -> run -> analyze -> report 한 번에
+forensic> /show findings               # 직전 결과 다시 보기
+forensic> /set no_llm true             # 옵션 토글
+forensic> /quit
+
+# 자연어도 가능 (LLM 가용 시 — 첫 호출 5~20초)
+forensic> 이 폴더 스캔하고 빠른 도구만 돌려줘
+forensic> 발견된 high severity 만 다시 보여줘
+```
+
+REPL 의 자연어 라우터는 입력을 `{"actions":[...], "message":"..."}` JSON 으로
+변환해 같은 슬래시 핸들러를 호출한다. `--no-llm` 또는 Ollama 부재면 슬래시
+명령 모드로 자동 폴백.
+
+#### (B) One-shot 파이프라인 — 배치 / CI
+
+```bash
+forensicagent --auto                   # 승인 없이 자동
 forensicagent --quick                  # estimated_runtime: short 만
 forensicagent --tools chainsaw,volatility3   # 특정 도구 강제
 forensicagent --dry-run                # 계획만 출력
@@ -247,9 +276,15 @@ forensicagent --no-llm                 # 결정론만 (Selector/Analyzer LLM off
 forensicagent --path /case-03 --output-dir /reports
 ```
 
+> **결정 규칙**: 인자 없이 + TTY = REPL. 플래그 하나라도 있거나 stdin 이
+> 파이프 = one-shot. `forensicagent shell` 은 무조건 REPL.
+
+#### 보조 명령
+
 ```bash
 forensicagent tools list               # 사용 가능한 도구
 forensicagent tools info chainsaw      # YAML 상세
+forensicagent doctor                   # 환경 점검
 forensicagent --version
 ```
 

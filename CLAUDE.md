@@ -97,11 +97,19 @@ forensicagent tools list   # 사용 가능한 도구
 
 ---
 
-## 현재 상태 (2026-05-19, Phase 1-5 완료 + 1차 인제스션)
+## 현재 상태 (2026-05-21, Phase 1-5 완료 + 1차 인제스션 + 인터랙티브 REPL)
 
 Phase 1-5 의 모든 코드가 들어왔고 전 파이프라인이 end-to-end 로 동작한다
 (Scanner → Selector → Executor → Analyzer → Reporter, JSON + MD 리포트
-생성까지). README.md / understand_code.md 가 사용자/협업자용 정식 문서.
+생성까지). README.md / understand_code.md / PROJECT_TOUR.md 가 사용자/협업자용
+정식 문서.
+
+**2026-05-21 추가**: Claude Code 식 인터랙티브 REPL 을 얹었다. 진입점은
+2 갈래 — 인자 없이 + TTY 면 `forensic>` 셸 진입 (`cli/repl.py` 의 슬래시
+명령 디스패처), 플래그 있거나 stdin 이 파이프면 기존 one-shot 파이프라인.
+자연어 입력은 `cli/nl_router.py` 가 `json_chat(format_schema=...)` 로
+`{"actions":[...]}` JSON 으로 변환해 같은 슬래시 핸들러를 호출한다 (`--no-llm`
+또는 Ollama 부재면 자동 폴백).
 
 추가로 sample.txt (1085 URL) 의 1차 인제스션을 실행했다 — Stage 1 (크롤) +
 Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환경
@@ -119,6 +127,7 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
 | `601d0c7` | fix: 4 ingestion bugs (PYTHONPATH / WP selector / Ollama Pydantic / num_ctx) |
 | `5d8595b` | fix+test: Stage 2 JSON Schema 강제 + 89 단위 테스트 + Stage 4a 분석기 + HackTricks URL 매핑 |
 | `cb87549` | feat: 5 hand-written EZTools YAMLs - 도구 풀 3 → 8 |
+| (uncommitted) | feat: 인터랙티브 REPL (cli/repl.py + session.py + nl_router.py) + docs |
 
 **실제로 동작 검증된 흐름**
 - `python -m forensicagent --help / doctor / tools list / tools info <id>`
@@ -126,6 +135,10 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
   도구 미설치라 skipped 이지만 Reporter 가 정상 JSON+MD 생성
 - 합성 `echo_tool` 어댑터로 success 경로 + Analyzer Case A 검증
 - 룰 매처 (`sigma_rule_hit` specific + 키워드 AND fallback) 단위 검증
+- **REPL**: `/help /status /tools /scan /plan /auto /show /quit` 슬래시 + NL
+  라우터의 no_llm 폴백. 라이브 LLM 호출 검증 1회 (qwen2.5:3b @ CPU).
+  Windows cp949 stdin 경계의 surrogate 인코딩 이슈는 `_strip_surrogates`
+  로 방어함.
 
 **1차 인제스션 산출물 (in seed_docs/ + ChromaDB + eval/)**
 
@@ -180,6 +193,15 @@ Stage 3 (RAG) 는 성공, Stage 2/4 (LLM 추출) 는 Ollama 가 GPU 없는 환�
 ## 다음 세션 재개 노트
 
 다음 세션을 열면 바로 다음 중 하나로 진입하면 된다 (우선순위 순):
+
+0. **REPL 자체 다듬기** (가벼움). 라이브 LLM 호출은 1회 검증됨 (영어 + 한국어
+   둘 다 `/scan` 액션으로 잘 라우팅). 추가로 더 다듬을 수 있는 것:
+   - 도메인-특화 시스템 프롬프트 보강 (지금은 일반적 — "memory_dump 가 보이면
+     volatility3 우선 추천" 같은 휴리스틱 주입 가능)
+   - `prompt_toolkit` 로 입력 히스토리/탭 완성/멀티라인 (현재 plain `input()`)
+   - `/show` 가 LLM 으로 자연어 요약 한 줄 만들어주기
+   - `cli/repl.py` + `cli/nl_router.py` 단위 테스트 (`OllamaClient.json_chat`
+     mock 으로). 핸들러 라우팅 + 인자 파싱 + 에러 복귀 확인.
 
 1. **도구 YAML 확장**. 현재 `tools_metadata/{chainsaw,volatility3,regripper}.yaml`
    3 개. 다음 후보 (포렌식 도메인 가치 높은 순):

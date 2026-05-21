@@ -18,6 +18,8 @@ from forensicagent import __version__
 from forensicagent import config as settings
 from forensicagent.analyzer import analyze_all
 from forensicagent.cli.doctor import run_doctor
+from forensicagent.cli.repl import run as run_repl
+from forensicagent.cli.session import SessionOptions, make_session
 from forensicagent.cli.ui import console, render_inventory
 from forensicagent.executor import execute
 from forensicagent.llm import OllamaClient
@@ -55,6 +57,27 @@ def _approve(c, *, auto: bool, prompt: str) -> bool:
         return True
     answer = c.input(prompt).strip().lower()
     return answer in ("", "y", "yes")
+
+
+def _resolve_tools_dir() -> Path:
+    tools_dir = Path(settings.TOOLS_METADATA_DIR)
+    if not tools_dir.exists() or not any(tools_dir.glob("*.y*ml")):
+        repo_tools = Path.cwd() / "tools_metadata"
+        if repo_tools.exists() and any(repo_tools.glob("*.y*ml")):
+            tools_dir = repo_tools
+    return tools_dir
+
+
+def _load_tools_or_exit(c) -> tuple[Path, list]:
+    tools_dir = _resolve_tools_dir()
+    tool_metas = load_all_tools(tools_dir)
+    if not tool_metas:
+        c.print(
+            f"[yellow]경고: 도구 메타데이터가 없습니다 ({tools_dir}). "
+            "tools_metadata/*.yaml 을 추가하세요.[/]"
+        )
+        raise typer.Exit(2)
+    return tools_dir, tool_metas
 
 
 @app.callback(invoke_without_command=True)
@@ -107,8 +130,25 @@ def root(
             level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
         )
 
-    target = (path or Path(os.getcwd())).resolve()
     c = console()
+
+    # 인자 없이 호출 + TTY 면 인터랙티브 REPL 로 진입.
+    one_shot_signals = (
+        auto or quick or dry_run or no_llm
+        or tools is not None or path is not None
+        or output_dir is not None or timeout != 0
+    )
+    if not one_shot_signals and sys.stdin.isatty():
+        _, tool_metas = _load_tools_or_exit(c)
+        state = make_session(
+            path=None,
+            output_dir=None,
+            tool_metas=tool_metas,
+            options=SessionOptions(no_llm=False),
+        )
+        raise typer.Exit(run_repl(state))
+
+    target = (path or Path(os.getcwd())).resolve()
     c.print(f"[bold]forensicagent[/] {__version__}")
     c.print(f"[*] 작업 디렉토리: {target}")
 
@@ -129,19 +169,7 @@ def root(
     )
 
     # ---------- 2. Selector ----------
-    tools_dir = Path(settings.TOOLS_METADATA_DIR)
-    # Fallback: 만약 사용자 ~/.forensicagent/tools 가 비어 있으면 repo 내 tools_metadata/.
-    if not tools_dir.exists() or not any(tools_dir.glob("*.y*ml")):
-        repo_tools = Path.cwd() / "tools_metadata"
-        if repo_tools.exists() and any(repo_tools.glob("*.y*ml")):
-            tools_dir = repo_tools
-    tool_metas = load_all_tools(tools_dir)
-    if not tool_metas:
-        c.print(
-            f"[yellow]경고: 도구 메타데이터가 없습니다 ({tools_dir}). "
-            "tools_metadata/*.yaml 을 추가하세요.[/]"
-        )
-        raise typer.Exit(2)
+    tools_dir, tool_metas = _load_tools_or_exit(c)
 
     forced = [t.strip() for t in tools.split(",") if t.strip()] if tools else []
     c.print(
@@ -231,6 +259,37 @@ def root(
         c.print("")
         for fmt, p in paths.items():
             c.print(f"[green]리포트 저장됨 ({fmt}):[/] {p}")
+
+
+@app.command("shell")
+def shell_cmd(
+    path: Optional[Path] = typer.Option(
+        None, "--path",
+        help="Initial target directory (default: CWD).",
+        exists=False, file_okay=False, dir_okay=True,
+    ),
+    output_dir: Optional[Path] = typer.Option(
+        None, "--output-dir",
+        help="Where to write tool outputs + report (default: ./forensicagent_output).",
+    ),
+    no_llm: bool = typer.Option(
+        False, "--no-llm",
+        help="Disable LLM (Selector stage-2 + Analyzer LLM extract off).",
+    ),
+    quick: bool = typer.Option(
+        False, "--quick", help="Only short-runtime tools when planning.",
+    ),
+) -> None:
+    """Launch the interactive REPL (forensic> prompt)."""
+    c = console()
+    _, tool_metas = _load_tools_or_exit(c)
+    state = make_session(
+        path=path,
+        output_dir=output_dir,
+        tool_metas=tool_metas,
+        options=SessionOptions(no_llm=no_llm, quick=quick),
+    )
+    raise typer.Exit(run_repl(state))
 
 
 @app.command("doctor")

@@ -17,6 +17,7 @@
 forensicagent/   ← 제품 본체 (Phase 1-5 완료, end-to-end 동작)
 ├── 8 모듈      cli / scanner / selector / executor / analyzer / reporter / rag / llm
 ├── ~30 py 파일  각 모듈 평균 3-5 파일
+├── 진입 방식 2  one-shot 파이프라인 + 인터랙티브 REPL (cli/repl.py + cli/nl_router.py)
 └── observability + tools 보조 패키지
 
 tools_metadata/  ← 도구 카탈로그 (Selector / Analyzer 의 진실 원천)
@@ -95,9 +96,12 @@ scripts/         ← 보조 라인 (런타임 X)
 
 | 순서 | 파일 | 핵심 라인 |
 |---|---|---|
-| 4 | `forensicagent/cli/main.py` | `root()` 함수 — 전 파이프라인 직선 흐름 |
-| 5 | `forensicagent/cli/doctor.py` | 모든 의존성을 *진짜* 호출해 검증 |
-| 6 | `forensicagent/observability/metrics.py` | `Stopwatch` / `StageTimings` — 다른 모듈 들어가기 전 60 줄짜리 primitive |
+| 4 | `forensicagent/cli/main.py` | `root()` 함수 — 인자 없으면 REPL, 플래그 있으면 one-shot 파이프라인. `shell` 서브커맨드도 여기 |
+| 5 | `forensicagent/cli/session.py` | `SessionState` / `SessionOptions` — REPL 턴 사이에 inventory, plan, bundle, analyses 들고 다님 |
+| 6 | `forensicagent/cli/repl.py` | 슬래시 명령 디스패처 (`/scan` ... `/quit`) + `do_*` 핸들러 — main.py 의 one-shot 과 같은 함수들을 재사용 |
+| 7 | `forensicagent/cli/nl_router.py` | 자연어 → `json_chat(format_schema=...)` → `do_*` 시퀀스 — Phase B 라우터 |
+| 8 | `forensicagent/cli/doctor.py` | 모든 의존성을 *진짜* 호출해 검증 |
+| 9 | `forensicagent/observability/metrics.py` | `Stopwatch` / `StageTimings` — 다른 모듈 들어가기 전 60 줄짜리 primitive |
 
 ### 2-3 (1.5 ~ 2 시간) **5 단계 데이터 흐름**
 
@@ -355,7 +359,16 @@ forensicagent doctor
 
 `doctor` 가 ollama 줄에 `OK` 가 뜨면 준비 완료.
 
-### 5-5 첫 분석 실행 — 5 분 코스
+### 5-5 두 가지 실행 방식 — REPL 셸 vs One-shot 파이프라인
+
+forensicagent 는 두 가지 진입점이 있다. 어느 쪽이든 같은 5 단계 파이프라인 (Scanner → Selector → Executor → Analyzer → Reporter) 을 호출하지만, **언제 사용자가 끼어드는가** 가 다르다.
+
+| 방식 | 진입 | 사용자가 끼어드는 시점 | 추천 상황 |
+|---|---|---|---|
+| **REPL 셸** | `forensicagent` (인자 없이) 또는 `forensicagent shell` | 매 단계마다 — `/scan`, `/plan`, `/run`, ... 슬래시 명령으로 트리거. 자연어도 입력 가능 (LLM 라우터가 적절한 액션으로 변환) | 탐색적 분석. 한 케이스를 여러 각도로 보고 싶을 때 |
+| **One-shot 파이프라인** | `forensicagent --auto` 또는 `forensicagent --path X` 등 플래그 동반 | 한 번 — `--auto` 면 안 끼어들고, 안 주면 `/plan` 직후 한 번 `Y/n` | 배치, 스크립트, CI, 단순 케이스 |
+
+### 5-5-A REPL 셸 — 5 분 코스 (권장)
 
 ```bash
 # 1. 합성 증거 디렉토리 만들기 (실제 EVTX 없이도 테스트 가능)
@@ -363,31 +376,63 @@ mkdir C:\tmp\case
 python -c "open(r'C:\tmp\case\Security.evtx','wb').write(b'ElfFile\x00'+b'\x00'*100)"
 python -c "open(r'C:\tmp\case\NTUSER.DAT','wb').write(b'regf'+b'\x00'*100)"
 
-# 2. 계획만 먼저 보기 (도구는 실행 안 함)
+# 2. REPL 진입 (인자 없이)
+forensicagent
+# 또는 명시적으로
+forensicagent shell --path C:\tmp\case
+
+# 3. 셸 안에서 한 단계씩
+forensic> /help                     # 명령 목록
+forensic> /scan C:\tmp\case         # 증거 인벤토리
+forensic> /plan                     # 도구 선별
+forensic> /run                      # 선별된 도구 실행
+forensic> /analyze                  # 의심항목 추출
+forensic> /report                   # JSON+MD 저장
+
+# 또는 한 줄로 전 파이프라인
+forensic> /auto
+
+# 자연어도 가능 (LLM 가용 시)
+forensic> 이 폴더 스캔해서 도구 다 돌려줘
+forensic> 결과 중에 high 만 다시 보여줘
+forensic> /quit
+```
+
+### 5-5-B One-shot 파이프라인 — 같은 분석을 한 줄로
+
+```bash
+# 1. 계획만 먼저 보기 (도구는 실행 안 함)
 forensicagent --path C:\tmp\case --dry-run
 
-# 3. LLM 없이 결정론적으로 (Ollama 없어도 동작)
+# 2. LLM 없이 결정론적으로 (Ollama 없어도 동작)
 forensicagent --path C:\tmp\case --no-llm --auto
 
-# 4. LLM 포함 인터랙티브 (사용자 승인 단계 포함)
+# 3. LLM 포함 단계별 승인 (Selector 직후 한 번 Y/n)
 forensicagent --path C:\tmp\case
 
-# 5. 리포트 저장 위치 확인
+# 4. 리포트 저장 위치 확인
 ls C:\tmp\case\forensicagent_output\
 # report_YYYYMMDD_HHMMSS.json    기계 가독
 # report_YYYYMMDD_HHMMSS.md      사람 가독
 # raw/                            도구 stdout/stderr
 ```
 
+> **결정 규칙**: `forensicagent` 인자 없이 (그리고 TTY) 면 REPL. 플래그
+> (`--auto`, `--path`, `--tools`, `--dry-run`, `--no-llm`, `--quick`,
+> `--output-dir`, `--timeout`) 가 하나라도 있거나 stdin 이 파이프이면
+> one-shot. `forensicagent shell` 은 항상 REPL.
+
 ### 5-6 자주 쓰는 옵션 cheatsheet
 
 ```bash
-# 기본 흐름 변형
-forensicagent                                    # 인터랙티브 (기본)
-forensicagent --auto                              # 승인 없이 자동
-forensicagent --no-llm                            # 결정론만 (Stage 2 LLM + Analyzer LLM 스킵)
-forensicagent --dry-run                           # 계획까지만, 도구 실행 안 함
-forensicagent --quick                             # estimated_runtime: short 만 실행
+# 진입 방식
+forensicagent                                    # REPL 셸 (인자 없고 TTY일 때)
+forensicagent shell                              # REPL 셸 (명시적)
+forensicagent shell --no-llm --path /case        # REPL, LLM 끄고 초기 target 지정
+forensicagent --auto                              # one-shot, 승인 없이 자동
+forensicagent --no-llm                            # one-shot, 결정론만 (Stage 2 LLM + Analyzer LLM 스킵)
+forensicagent --dry-run                           # one-shot, 계획까지만 (도구 실행 안 함)
+forensicagent --quick                             # one-shot, estimated_runtime: short 만 실행
 
 # 범위 제어
 forensicagent --path /case/03                     # 다른 디렉토리 분석
@@ -410,6 +455,36 @@ FORENSICAGENT_LLM_BASE_URL=http://...:11434          # 원격 Ollama
 FORENSICAGENT_LLM_NUM_CTX=16384                      # 컨텍스트 윈도우
 FORENSICAGENT_TOOLS_DIR=/custom/tools forensicagent  # 도구 YAML 디렉토리 변경
 FORENSICAGENT_CHROMA_DIR=/data/chroma                # RAG DB 위치 변경
+```
+
+### 5-6-A REPL 슬래시 명령 cheatsheet
+
+REPL 안에서 쓸 수 있는 슬래시 명령. 슬래시 없이 자유 텍스트를 입력하면 LLM 라우터가 자연어를 해석해 같은 명령들을 호출한다 (`--no-llm` 이면 슬래시만).
+
+```
+/scan [path]              증거 인벤토리 작성 (path 생략시 현재 target)
+/plan                     도구 선별 (Selector)
+/run                      선별된 도구 실행 (Executor)
+/analyze                  도구 출력에서 의심항목 추출 (Analyzer)
+/report                   JSON+MD 리포트 저장 (Reporter)
+/auto                     scan -> plan -> run -> analyze -> report 한 번에
+
+/show inventory|plan|findings|report   직전 결과 다시 보기
+/status                   현재 세션 상태 (path, no_llm, 진행도 등)
+/set <key> <value>        no_llm/quick/max_depth/timeout/tools/path/output_dir
+/cd <path>                target_path 변경
+/tools [info <id>]        도구 목록 / 특정 도구 YAML 상세
+/clear                    실행 상태 초기화 (옵션 유지)
+/help  또는  ?            도움말
+/quit  /exit  /q          종료
+```
+
+자연어 예시 (LLM 가용 시):
+
+```
+forensic> 이 폴더 스캔하고 빠른 도구만 돌려줘
+forensic> 발견된 high severity 만 다시 보여줘
+forensic> output_dir 을 D:\reports 로 바꿔
 ```
 
 ### 5-7 보조 스크립트 실행 (sample.txt ETL)
@@ -482,15 +557,18 @@ forensicagent --version
 | `UnicodeEncodeError: 'cp949' ... '—'` | em-dash 가 print 문에 있음 | 이미 모두 hyphen 으로 교체됨. 새 스크립트 추가 시 주의 |
 | `ModuleNotFoundError: forensicagent` (스크립트 실행 시) | sys.path 에 repo root 없음 | `PYTHONPATH=. python scripts/foo.py` 또는 `python -m foo` |
 | `--no-llm --dry-run` 도 한글이 안 보임 | Rich Console 이 redirect 감지하면 ASCII fallback | 정상. 인터랙티브 터미널에서 직접 보면 컬러풀 |
+| `forensicagent` 쳤는데 REPL 안 뜨고 파이프라인이 돔 | 플래그 (`--auto` 등) 가 끼었거나 stdin 이 파이프 (TTY 가 아님) | 인자/리다이렉트 다 빼고 `forensicagent` 만 또는 `forensicagent shell` |
+| REPL 에서 자연어 입력했는데 `no_llm 모드` 안내가 뜸 | `--no-llm` 으로 진입했거나 `/set no_llm true` 였음 | `/set no_llm false` 또는 REPL 재진입 |
 
 ### 5-10 한 줄 요약
 
 ```
-설치   →  pip install -e .                       (shim 등록: forensicagent.exe)
-점검   →  forensicagent doctor                   (의존성 다 OK 인지)
-연습   →  forensicagent --path /tmp/case --no-llm --dry-run
-본격   →  forensicagent                          (인터랙티브, LLM 포함)
-빌드   →  python -m build                        (배포용 wheel)
+설치     →  pip install -e .                        (shim 등록: forensicagent.exe)
+점검     →  forensicagent doctor                    (의존성 다 OK 인지)
+연습     →  forensicagent --path /tmp/case --no-llm --dry-run
+REPL    →  forensicagent                           (셸 진입, /help → /scan → /plan → ...)
+배치     →  forensicagent --auto --path /case       (스크립트/CI 용, one-shot)
+빌드     →  python -m build                         (배포용 wheel)
 ```
 
 ---
