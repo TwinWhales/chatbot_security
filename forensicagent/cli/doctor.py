@@ -123,14 +123,28 @@ def _check_embedding_provider() -> CheckResult:
 
 
 def _check_optional_tools() -> list[CheckResult]:
+    # tool_install 의 registry 가 PATH + tools_bin 두 곳을 다 본다.
+    from forensicagent.cli.tool_install import TOOL_SPECS, find_executable
     out: list[CheckResult] = []
     for tool in _OPTIONAL_TOOLS:
-        path = shutil.which(tool)
+        path = find_executable(tool)
+        if path is not None:
+            detail = path
+        else:
+            spec = TOOL_SPECS.get(tool)
+            if spec is None:
+                detail = "not on PATH"
+            elif spec.kind == "pip":
+                detail = f"not installed - `forensicagent install {tool}` (pip {spec.pip_package})"
+            elif spec.kind == "zip":
+                detail = f"not installed - `forensicagent install {tool}` (zip dl)"
+            else:
+                detail = f"not installed - 수동: {spec.homepage}"
         out.append(
             CheckResult(
                 name=tool,
                 ok=path is not None,
-                detail=path or "not on PATH",
+                detail=detail,
                 optional=True,
             )
         )

@@ -30,6 +30,10 @@ dependencies = [
 openai = ["openai>=1.0.0"]
 crawlers = ["beautifulsoup4>=4.12.0"]
 dev = ["pytest>=8.0", "pytest-mock>=3.12"]
+# pip-installable forensic tools. `pip install -e .[forensic-tools]` 또는
+# `forensicagent install --all` 로 채울 수 있음. plaso 는 Windows 에서 MSVC
+# Build Tools 가 필요해서 별도 (`pip install plaso` 수동).
+forensic-tools = ["volatility3>=2.5.0", "binwalk>=2.3.0"]
 
 [project.scripts]
 forensicagent = "forensicagent.cli.main:app"

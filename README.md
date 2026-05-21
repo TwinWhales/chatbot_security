@@ -232,7 +232,28 @@ forensicagent doctor
 ```
 
 설치 안 된 의존성 / Ollama 미접속 / 포렌식 도구(volatility3, chainsaw, ...)
-PATH 미등록을 모두 보여준다.
+PATH 미등록을 모두 보여준다. 각 missing 도구 옆에 install 방법 (pip 명령
+또는 다운로드 URL) 이 같이 뜬다.
+
+### 3-A. 포렌식 도구 설치 도우미
+
+`doctor` 가 잡은 missing 도구를 자동으로 채워주는 헬퍼:
+
+```bash
+forensicagent install                       # 인터랙티브: missing 순회하며 y/n
+forensicagent install chainsaw              # 특정 도구만
+forensicagent install --all                 # 자동 가능한 거 (pip + zip) 한 번에
+```
+
+- **pip 가능** (`volatility3`, `binwalk`) → `pip install <pkg>` 실행
+- **zip 다운로드** (`chainsaw`) → GitHub releases 에서 받아
+  `~/.forensicagent/tools_bin/<tool>/` 로 풀고 `doctor` 의 PATH 검색에 자동 등록
+- **수동 설치 필요** (`yara`, `exiftool`, `tshark`, `plaso`, `regripper`,
+  `strings`, `tcpdump`) → 다운로드 URL + `curl` 예시를 출력
+  (라이선스 마법사 / MSVC Build Tools / 버전 매번 바뀌는 URL 등이라 자동 불가)
+
+zip 도구는 PATH 에 추가 안 해도 forensicagent 가 알아서 발견한다 (
+`~/.forensicagent/tools_bin/*/` 을 자체 검색).
 
 ### 4. 분석 실행 — 두 가지 방식
 

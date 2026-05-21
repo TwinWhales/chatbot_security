@@ -27,3 +27,11 @@ beautifulsoup4>=4.12.0
 
 # --- Optional: OpenAI embedding backend (set EMBEDDING_MODEL="openai:...") ---
 # openai>=1.0.0
+
+# --- Optional: pip-installable forensic tools ---
+# 주석 해제하거나 `forensicagent install <tool>` / `forensicagent install --all`
+# 로 자동 설치. 나머지 도구 (chainsaw/yara/exiftool/...) 는 zip 다운로드 또는
+# 수동 설치 - `forensicagent doctor` 가 URL 을 안내한다.
+# volatility3>=2.5.0
+# binwalk>=2.3.0
+# plaso>=20231229   # Windows 는 MSVC Build Tools 필요

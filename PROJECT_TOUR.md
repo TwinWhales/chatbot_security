@@ -551,7 +551,8 @@ forensicagent --version
 |---|---|---|
 | `forensicagent: command not found` | shim 등록 안 됨 | `pip install -e .` 재실행 또는 `python -m forensicagent` 사용 |
 | `doctor` 가 ollama 줄에 FAIL | 데몬 미실행 또는 모델 미설치 | `ollama serve` 백그라운드 + `ollama pull qwen2.5:7b` |
-| `doctor` 가 libmagic FAIL | Windows 에 libmagic 백엔드 없음 | `pip install python-magic-bin` (Win 전용) |
+| `doctor` 가 libmagic FAIL | Windows 에 libmagic 백엔드 없음 | `pip install python-magic-bin` (requirements.txt 에 이미 명시, 보통 `pip install -r requirements.txt` 한 번이면 끝) |
+| `doctor` optional 줄들이 miss | 포렌식 도구가 PATH 에 없음 | `forensicagent install` (인터랙티브) 또는 `forensicagent install --all` (자동 가능한 것 전부). 비-pip 도구는 URL 안내만 |
 | 한글이 깨짐 (`���`) | cp949 codepage + pipe 출력 | 정상. 터미널에서 직접 보면 멀쩡함. 또는 `chcp 65001` 로 UTF-8 변경 |
 | Stage 2 가 schema_failed | LLM 이 strict schema 안 따라옴 (옛 코드 + small model) | 최신 코드에는 `format_schema=` 적용됨. 더 큰 모델 (qwen2.5:7b) 사용 |
 | `UnicodeEncodeError: 'cp949' ... '—'` | em-dash 가 print 문에 있음 | 이미 모두 hyphen 으로 교체됨. 새 스크립트 추가 시 주의 |

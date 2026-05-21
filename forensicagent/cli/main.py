@@ -303,6 +303,36 @@ def doctor_cmd(
     raise typer.Exit(failed)
 
 
+@app.command("install")
+def install_cmd(
+    tools: Optional[list[str]] = typer.Argument(
+        None,
+        help="설치할 도구 이름들 (생략시 missing 인 도구를 모두 인터랙티브 순회).",
+    ),
+    all_auto: bool = typer.Option(
+        False, "--all",
+        help="자동 설치 가능한 (pip/zip) missing 도구를 모두 한 번에. manual 은 안내만.",
+    ),
+) -> None:
+    """Install missing forensic tools (pip + zip auto, manual just gets a URL hint)."""
+    from forensicagent.cli.tool_install import (
+        install_all_auto,
+        install_interactive,
+        TOOL_SPECS,
+    )
+    c = console()
+    if tools:
+        # 사용자가 명시. registry 검증은 install_interactive 가 함.
+        n = install_interactive(c, names=tools)
+    elif all_auto:
+        n = install_all_auto(c)
+    else:
+        n = install_interactive(c, names=None)
+    c.print(f"\n[bold]설치 완료:[/] {n}개")
+    c.print(f"[dim]registry 전체: {len(set(s.name for s in TOOL_SPECS.values()))} 도구[/]")
+    c.print("[dim]다시 `forensicagent doctor` 로 확인하세요.[/]")
+
+
 @tools_app.command("list")
 def tools_list() -> None:
     """List tool metadata YAMLs found in tools_metadata_dir."""
