@@ -101,8 +101,8 @@ forensicagent tools list   # 사용 가능한 도구
 
 Phase 1-5 의 모든 코드가 들어왔고 전 파이프라인이 end-to-end 로 동작한다
 (Scanner → Selector → Executor → Analyzer → Reporter, JSON + MD 리포트
-생성까지). README.md / understand_code.md / PROJECT_TOUR.md 가 사용자/협업자용
-정식 문서.
+생성까지). README.md / GUIDELINE.md / PROJECT_TOUR.md 가 사용자/협업자용
+정식 문서 (understand_code.md 는 PROJECT_TOUR § 2 에 통합되어 삭제됨).
 
 **2026-05-21 추가**: Claude Code 식 인터랙티브 REPL 을 얹었다. 진입점은
 2 갈래 — 인자 없이 + TTY 면 `forensic>` 셸 진입 (`cli/repl.py` 의 슬래시

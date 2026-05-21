@@ -5,9 +5,9 @@
 
 > 이미 있는 문서와의 관계:
 > - [`README.md`](README.md) — 프로젝트 소개, 시나리오, 설계 결정 *이유*
+> - [`GUIDELINE.md`](GUIDELINE.md) — 사용자 가이드 (지금 뭘 할 수 있고 어떻게 켜나)
 > - [`CLAUDE.md`](CLAUDE.md) — Claude/세션이 보는 명세 + 다음 세션 재개 노트
-> - [`understand_code.md`](understand_code.md) — *코드 파일* 읽는 순서 (이 문서가 가벼운 버전)
-> - 이 문서 (`PROJECT_TOUR.md`) — **결과물 인벤토리 + 빠른 투어**
+> - 이 문서 (`PROJECT_TOUR.md`) — **결과물 인벤토리 + 코드 읽는 순서 + 실행/설치/패키징 + 종결 판단**
 
 ---
 
@@ -105,18 +105,77 @@ scripts/         ← 보조 라인 (런타임 X)
 
 ### 2-3 (1.5 ~ 2 시간) **5 단계 데이터 흐름**
 
-각 단계는 **types.py 먼저 → 본체** 순서로.
+각 단계는 출력 dataclass 가 다음 단계의 입력이다. **types.py 먼저 → 본체** 순서로 읽는 게 정석.
 
-| 단계 | types | 본체 | 핵심 아이디어 |
-|---|---|---|---|
-| Scanner | `scanner/types.py` | `scanner/detectors.py`, `scanner/scanner.py` | magic / ext / 파일명 / 부모 디렉토리 4단 우선순위 |
-| Tools | `tools/schema.py` | `tools/loader.py`, `tools_metadata/chainsaw.yaml` | YAML 1개가 4 모듈을 다 구동한다 |
-| RAG | `rag/vector_store.py` | `rag/embedder.py`, `rag/indexer.py` | ChromaDB cosine + per-domain 컬렉션 |
-| LLM | (없음) | `llm/ollama_client.py` | `json_chat()` + `format_schema=` + 1회 재시도 |
-| Selector | `selector/types.py` | `selector/filter.py`, `selector/llm_rank.py`, `selector/selector.py` | 결정론 Stage 1 → LLM Stage 2, fallback 자동 |
-| Executor | `executor/types.py` | `executor/adapter.py`, `executor/runner.py`, `executor/executor.py` | subprocess 격리 + 파일 출력 + 어댑터 패턴 |
-| Analyzer | `analyzer/types.py` | `analyzer/rules.py`, `analyzer/llm_extract.py`, `analyzer/analyzer.py` | Case A/B/C 분기, id 기반 specific matcher + fallback |
-| Reporter | `reporter/types.py` | `reporter/builder.py`, `reporter/terminal.py`, `reporter/json_out.py`, `reporter/md_out.py`, `reporter/reporter.py` | terminal + JSON + MD 동시 |
+#### 2-3-A Scanner — 무엇이 있는가
+
+| 순서 | 파일 | 보는 것 |
+|---|---|---|
+| 10 | `forensicagent/scanner/types.py` | `Evidence`, `Inventory` dataclass (출력 스키마) |
+| 11 | `forensicagent/scanner/detectors.py` | 9 magic + 41 ext + 6 정규식 + 6 디렉토리. 우선순위로 한 번에 하나만 매치 |
+| 12 | `forensicagent/scanner/scanner.py` | 깊이 제한 BFS, 심볼릭 미추적, 헤더 32 바이트만 |
+
+> 읽으면 알게 되는 것: 큰 메모리 덤프 파일도 통째로 안 읽는다 (`detect_by_magic` 이 헤더 32 바이트만). `.py` 같은 source code 도 이제 `source_code_python` 으로 인식.
+
+#### 2-3-B Tools / RAG — 도구를 어떻게 표현하나
+
+forensicagent 의 *진짜 RAG* 는 도구 메타데이터 lookup 이다. 의미 검색이 주가 아니다.
+
+| 순서 | 파일 | 보는 것 |
+|---|---|---|
+| 13 | `forensicagent/tools/schema.py` | `ToolMetadata` Pydantic 클래스. **YAML 한 파일이 Selector/Executor/Analyzer/LLM 프롬프트를 다 구동한다** 는 사실을 여기서 확실히 본다. |
+| 14 | `forensicagent/tools/loader.py` | `load_all_tools` — 디렉토리 일괄 로드 |
+| 15 | `tools_metadata/chainsaw.yaml` + `bandit.yaml` | 실제 YAML 2 개를 보면 추상이 구체가 된다 (forensic + code-security 양쪽 예시) |
+| 16 | `forensicagent/rag/vector_store.py` | ChromaDB cosine 컬렉션 wrapper |
+| 17 | `forensicagent/rag/embedder.py` | SentenceTransformer / OpenAI 라우팅 |
+| 18 | `forensicagent/rag/indexer.py` | 크롤된 도메인 문서를 청크 → 임베딩 → 컬렉션 저장 (Stage 3) |
+
+#### 2-3-C LLM — Ollama 호출 패턴
+
+| 순서 | 파일 | 보는 것 |
+|---|---|---|
+| 19 | `forensicagent/llm/ollama_client.py` | `json_chat()` 의 1 회 재시도 + `JsonRetryFailed` 예외. Selector / Analyzer / nl_router 의 LLM 호출이 전부 이걸 통과한다. `format_schema=` 로 Pydantic JSON Schema 강제. |
+
+#### 2-3-D Selector — 무엇을 돌릴까
+
+| 순서 | 파일 | 보는 것 |
+|---|---|---|
+| 20 | `forensicagent/selector/types.py` | `Plan`, `ToolSelection` |
+| 21 | `forensicagent/selector/filter.py` | **Stage 1** : evidence_type 결정론 매칭 |
+| 22 | `forensicagent/selector/llm_rank.py` | **Stage 2** : LLM 우선순위. JSON 깨지면 Stage 1 결과 그대로 fallback |
+| 23 | `forensicagent/selector/selector.py` | 오케스트레이션 + `--quick / --tools` 처리 |
+
+> 읽으면 알게 되는 것: LLM 이 도구를 *선택* 하지 않고 *순위* 만 매긴다 — hallucinate 한 도구가 실행되지 않게 하는 가드.
+
+#### 2-3-E Executor — 어떻게 돌리나
+
+| 순서 | 파일 | 보는 것 |
+|---|---|---|
+| 24 | `forensicagent/executor/types.py` | `ExecutionResult`, `ExecutionBundle`. stdout 은 inline 이 아니라 **파일 경로** 로만. |
+| 25 | `forensicagent/executor/adapter.py` | `GenericAdapter` — YAML 만으로 동작. `validate_prerequisites` 가 `install_check` 를 실제로 실행해서 검증. |
+| 26 | `forensicagent/executor/runner.py` | `subprocess.Popen` + timeout + stdout/stderr 를 파일로. timeout/FileNotFound/OSError 모두 `ExecutionResult.status` 로 흡수 |
+| 27 | `forensicagent/executor/executor.py` | parallelizable 별 ThreadPool / serial 라우팅 + Rich Progress. 한 도구 실패해도 다른 도구는 계속 (failure isolation). |
+
+#### 2-3-F Analyzer — 의심항목 추출
+
+| 순서 | 파일 | 보는 것 |
+|---|---|---|
+| 28 | `forensicagent/analyzer/types.py` | `Finding`, `Severity`, `SEVERITY_RANK` |
+| 29 | `forensicagent/analyzer/rules.py` | 룰 매처 9 개. **id 기반 specific matcher** 가 우선 (`sigma_rule_hit` / `bandit_issue` / `gitleaks_secret` 등), 미등록 indicator 는 키워드 AND fallback. |
+| 30 | `forensicagent/analyzer/llm_extract.py` | `format=json` + severity 가이드라인 + known_false_positives 시스템 프롬프트. "확실하지 않으면 low" 룰. |
+| 31 | `forensicagent/analyzer/analyzer.py` | Case A / B / C 분기. dedup + severity 내림차순. |
+
+> 읽으면 알게 되는 것: 큰 출력을 LLM 에 통째로 던지지 않는다 (Case B/C 의 안전망).
+
+#### 2-3-G Reporter — 한 묶음으로
+
+| 순서 | 파일 | 보는 것 |
+|---|---|---|
+| 32 | `forensicagent/reporter/types.py` | `Report`, `Summary`. JSON 직렬화 가능. |
+| 33 | `forensicagent/reporter/builder.py` | tool_id 별로 bundle 만들어 모음. 같은 tool_id 의 여러 ToolAnalysis 를 **머지** 해서 findings 누적 (2026-05-21 fix). |
+| 34 | `forensicagent/reporter/terminal.py` | Rich Panel + severity 색 |
+| 35 | `forensicagent/reporter/json_out.py` + `md_out.py` | 파일 직렬화 |
+| 36 | `forensicagent/reporter/reporter.py` | `write()` — 한 번 호출에 terminal + JSON + MD 다 출력 |
 
 ### 2-4 (1 시간) **데이터 ETL 라인 (sample.txt 처리)**
 
@@ -124,22 +183,41 @@ forensicagent 본체와 **분리된** ETL. 도구 메타데이터, RAG 코퍼스
 
 | 순서 | 파일 | 보는 것 |
 |---|---|---|
-| 35 | `scripts/run_all.py` | 마스터 오케스트레이터 — 4 stage 자원별 동시성 |
-| 36 | `scripts/ingest_sample.py` | Stage 1 — 도메인 분류 + ThreadPool × 4 + URL_REWRITES |
-| 37 | `forensicagent/rag/indexer.py` | Stage 3 — 청킹 + 임베딩 + 컬렉션 저장 |
-| 38 | `scripts/yaml_seeder.py` | Stage 2 — Pydantic schema 강제 (`format_schema=`) |
-| 39 | `scripts/extract_indicators.py` | Stage 4a — 6 필드 indicator 추출 |
-| 40 | `scripts/build_goldenset.py` | Stage 4b — case meta 추출 |
-| 41 | `scripts/analyze_indicators.py` | Stage 4a 결과 분석 + 병합 계획 |
+| 37 | `scripts/run_all.py` | 마스터 오케스트레이터 — 4 stage 자원별 동시성 |
+| 38 | `scripts/ingest_sample.py` | Stage 1 — 도메인 분류 + ThreadPool × 4 + URL_REWRITES |
+| 39 | `forensicagent/rag/indexer.py` (재방문) | Stage 3 — 청킹 + 임베딩 + 컬렉션 저장 |
+| 40 | `scripts/yaml_seeder.py` | Stage 2 — Pydantic schema 강제 (`format_schema=`) |
+| 41 | `scripts/extract_indicators.py` | Stage 4a — 6 필드 indicator 추출 |
+| 42 | `scripts/build_goldenset.py` | Stage 4b — case meta 추출 |
+| 43 | `scripts/analyze_indicators.py` | Stage 4a 결과 분석 + 병합 계획 |
+
+> 읽으면 알게 되는 것: LLM 학습 (fine-tuning) 이 아니라 LLM 으로 정보를 *추출* 한다. 모델은 안 건드리고 데이터만 키운다.
 
 ### 2-5 (수시) **자주 다시 보는 위치**
 
+이 파일들은 한 번 읽어도 다음에 또 보게 된다. 책갈피 둘 가치 있음.
+
 | 파일 | 왜 자주 보나 |
 |---|---|
-| `forensicagent/config.py` | env var 이름 (`FORENSICAGENT_LLM_MODEL`, `_NUM_CTX`, `_NUM_PREDICT`, ...) |
+| `forensicagent/config.py` | env var 이름 (`FORENSICAGENT_LLM_MODEL`, `_NUM_CTX`, `_NUM_PREDICT`, `_TOOLS_DIR`, `_CHROMA_DIR`) |
 | `forensicagent/tools/schema.py` | 새 도구 YAML 작성 시 항상 참조 |
 | `forensicagent/analyzer/rules.py` 의 `_SPECIFIC_MATCHERS` | 새 indicator id 등록 |
 | `forensicagent/executor/adapter.py` 의 `register_adapter()` | 새 specialized adapter 추가 hook |
+| `forensicagent/cli/tool_install.py` 의 `TOOL_SPECS` | 신규 도구를 `forensicagent install` 도우미에 등록 |
+
+### 2-6 변경할 때 어디부터 손대나 (cheatsheet)
+
+| 하고 싶은 일 | 손대는 파일 |
+|---|---|
+| 새 도구 추가 | `tools_metadata/<tool>.yaml` 만 작성. 코드 변경 0 |
+| 새 indicator 룰 (정교한 매처) | `analyzer/rules.py` 의 `_SPECIFIC_MATCHERS` 에 함수 등록 |
+| 도구별 어댑터 커스터마이즈 | `executor/adapter.py` 에서 `GenericAdapter` 상속 + `register_adapter()` |
+| 새 evidence 타입 인식 | `scanner/types.py` 의 `EvidenceType` literal + `scanner/detectors.py` 시그니처 + `tools/schema.py` 의 `EvidenceTypeStr` |
+| 새 LLM 백엔드 (Ollama 외) | `llm/` 에 새 클라이언트 + Selector/Analyzer/nl_router 의 client 의존성 주입 |
+| CLI 새 옵션 | `cli/main.py` 의 `root()` 또는 새 `@app.command()` |
+| 리포트 포맷 추가 (예: HTML) | `reporter/html_out.py` + `reporter.py` 의 `formats` 튜플 |
+| 새 슬래시 명령 | `cli/repl.py` 의 `do_*` 함수 + `_build_table()` 등록 + `do_help` 텍스트 |
+| 새 설치 도구 등록 (`forensicagent install`) | `cli/tool_install.py` 의 `TOOL_SPECS` dict |
 
 ---
 
@@ -600,7 +678,7 @@ REPL    →  forensicagent                           (셸 진입, /help → /sca
 | **명세 충족도** | Phase 1-5 코드 완성. 명세에 있던 6 모듈 + observability + rag + tools + llm 모두 구현 |
 | **동작 검증** | 합성 evidence + echo_tool 어댑터로 end-to-end 흐름 확인 / 89 단위 테스트 1.94초 통과 |
 | **자료** | 도구 8개 / RAG 15K chunks / goldenset 14 case / indicator 후보 299 |
-| **문서** | README + CLAUDE + understand_code + PROJECT_TOUR 4 문서로 코드/실행/패키징/다음단계 다 커버 |
+| **문서** | README + GUIDELINE + CLAUDE + PROJECT_TOUR 4 문서로 시나리오/사용자/명세/코드읽기 다 커버 |
 | **재현성** | `pip install -e .` 한 줄로 새 머신에 동작. wheel 빌드 가능 |
 | **확장성** | YAML 1 파일 추가 = 새 도구. 어댑터 hook + indicator matcher hook 도 있음 |
 
