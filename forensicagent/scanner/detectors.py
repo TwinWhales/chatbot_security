@@ -62,6 +62,27 @@ _EXTENSION_MAP: dict[str, tuple[EvidenceType, Platform, float]] = {
     ".db": ("browser_artifact", "unknown", 0.40),
     ".log": ("text_log", "unknown", 0.55),
     ".txt": ("text_log", "unknown", 0.30),
+    # --- source code (bandit / semgrep / gitleaks 의 입력) ---
+    ".py": ("source_code_python", "unknown", 0.85),
+    ".pyi": ("source_code_python", "unknown", 0.80),
+    ".js": ("source_code_javascript", "unknown", 0.80),
+    ".jsx": ("source_code_javascript", "unknown", 0.80),
+    ".ts": ("source_code_javascript", "unknown", 0.85),
+    ".tsx": ("source_code_javascript", "unknown", 0.85),
+    ".mjs": ("source_code_javascript", "unknown", 0.80),
+    ".cjs": ("source_code_javascript", "unknown", 0.80),
+    ".java": ("source_code_generic", "unknown", 0.80),
+    ".go": ("source_code_generic", "unknown", 0.80),
+    ".rb": ("source_code_generic", "unknown", 0.80),
+    ".php": ("source_code_generic", "unknown", 0.80),
+    ".c": ("source_code_generic", "unknown", 0.70),
+    ".h": ("source_code_generic", "unknown", 0.55),
+    ".cpp": ("source_code_generic", "unknown", 0.75),
+    ".hpp": ("source_code_generic", "unknown", 0.70),
+    ".rs": ("source_code_generic", "unknown", 0.80),
+    ".cs": ("source_code_generic", "unknown", 0.75),
+    ".kt": ("source_code_generic", "unknown", 0.75),
+    ".swift": ("source_code_generic", "unknown", 0.75),
 }
 
 # (regex, evidence_type, platform_hint, confidence)

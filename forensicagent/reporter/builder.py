@@ -53,7 +53,46 @@ def build(
     for r in execution.results:
         b = bundle_map.setdefault(r.tool_id, ToolBundle(tool_id=r.tool_id))
         b.execution.append(r)
+
+    # 같은 tool_id 의 여러 ToolAnalysis 를 하나로 머지 (도구가 여러 evidence
+    # 파일에 호출되면 analysis 도 N개씩 옴 — 단순히 마지막을 쓰면 다른 결과를
+    # 덮어쓰게 됨). findings 는 누적, case/llm 플래그는 가장 상위 결과 유지.
+    merged_analyses: dict[str, ToolAnalysis] = {}
     for a in analyses:
+        existing = merged_analyses.get(a.tool_id)
+        if existing is None:
+            merged_analyses[a.tool_id] = ToolAnalysis(
+                tool_id=a.tool_id,
+                findings=list(a.findings),
+                summary=a.summary,
+                case_used=a.case_used,
+                llm_invoked=a.llm_invoked,
+                llm_failed=a.llm_failed,
+            )
+        else:
+            existing.findings.extend(a.findings)
+            existing.llm_invoked = existing.llm_invoked or a.llm_invoked
+            existing.llm_failed = existing.llm_failed or a.llm_failed
+            # case 는 더 보수적인 쪽 (A < B < C) 유지.
+            order = {"A": 0, "B": 1, "C": 2}
+            if order.get(a.case_used, 0) > order.get(existing.case_used, 0):
+                existing.case_used = a.case_used
+
+    # summary 재생성 (머지 후 정확한 카운트).
+    for a in merged_analyses.values():
+        from forensicagent.analyzer.types import by_severity_count
+        cnt = by_severity_count(a.findings)
+        sev = (
+            f"critical={cnt['critical']} high={cnt['high']} "
+            f"medium={cnt['medium']} low={cnt['low']} info={cnt['info']}"
+        )
+        cat: dict[str, int] = {}
+        for f in a.findings:
+            cat[f.category] = cat.get(f.category, 0) + 1
+        top = ", ".join(f"{k}({v})" for k, v in sorted(cat.items(), key=lambda x: -x[1])[:3]) or "n/a"
+        a.summary = f"{len(a.findings)} findings ({sev}); top: {top}"
+
+    for a in merged_analyses.values():
         b = bundle_map.setdefault(a.tool_id, ToolBundle(tool_id=a.tool_id))
         b.analysis = a
 

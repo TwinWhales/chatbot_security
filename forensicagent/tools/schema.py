@@ -21,6 +21,9 @@ EvidenceTypeStr = Literal[
     "browser_artifact",
     "prefetch",
     "text_log",
+    "source_code_python",
+    "source_code_javascript",
+    "source_code_generic",
     "unknown",
 ]
 

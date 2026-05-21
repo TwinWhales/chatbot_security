@@ -77,6 +77,20 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         homepage="https://github.com/ReFirmLabs/binwalk",
         pip_package="binwalk",
     ),
+    "bandit": ToolSpec(
+        name="bandit",
+        kind="pip",
+        description="Python SAST - OWASP/CWE 패턴 탐지",
+        homepage="https://bandit.readthedocs.io/",
+        pip_package="bandit",
+    ),
+    "semgrep": ToolSpec(
+        name="semgrep",
+        kind="pip",
+        description="Multi-language SAST - auto ruleset",
+        homepage="https://semgrep.dev/",
+        pip_package="semgrep",
+    ),
 
     # ---- zip 다운로드 가능 (GitHub releases) ----
     # /releases/latest/download/ 패턴으로 자산 파일명이 안정적인 경우만.
@@ -88,6 +102,19 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         zip_url="https://github.com/WithSecureLabs/chainsaw/releases/latest/download/chainsaw_x86_64-pc-windows-msvc.zip",
         zip_executable="chainsaw.exe",
         only_on="win32",
+    ),
+    "gitleaks": ToolSpec(
+        name="gitleaks",
+        kind="manual",
+        description="Secret scanner - API keys / credentials in code",
+        homepage="https://github.com/gitleaks/gitleaks/releases",
+        # GitHub release asset 파일명에 버전이 들어가 latest/download 패턴 불가.
+        # 사용자가 직접 받아 ~/.forensicagent/tools_bin/gitleaks/gitleaks.exe 로.
+        manual_hint=(
+            "Windows: download gitleaks_X.Y.Z_windows_x64.zip from GitHub releases, "
+            "extract gitleaks.exe to ~/.forensicagent/tools_bin/gitleaks/. "
+            "또는 `choco install gitleaks` / `scoop install gitleaks`."
+        ),
     ),
 
     # ---- manual (라이선스/설치 마법사/MSVC 빌드 필요/버전 변동 큰 URL) ----

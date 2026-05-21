@@ -101,11 +101,209 @@ def _match_malfind_pe_unbacked(
     return out
 
 
+# ---------- code-security matchers ----------
+
+def _bandit_results(parsed: Any) -> list[dict]:
+    """Bandit JSON 의 results 배열을 정규화."""
+    if isinstance(parsed, dict):
+        r = parsed.get("results")
+        if isinstance(r, list):
+            return [x for x in r if isinstance(x, dict)]
+        # 우리 _parse_json_or_ndjson 이 list 를 {"items": [...]} 로 감싼 경우.
+        items = parsed.get("items")
+        if isinstance(items, list):
+            for it in items:
+                if isinstance(it, dict) and isinstance(it.get("results"), list):
+                    return [x for x in it["results"] if isinstance(x, dict)]
+    return []
+
+
+def _match_bandit_issue(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    """bandit -f json 의 results[*] → Finding."""
+    sev_map = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high"}
+    out: list[Finding] = []
+    for r in _bandit_results(parsed):
+        sev_raw = (r.get("issue_severity") or "MEDIUM").upper()
+        out.append(
+            Finding(
+                severity=sev_map.get(sev_raw, ind.severity_baseline),
+                category="code_security",
+                title=f"[bandit:{r.get('test_id', '?')}] {(r.get('issue_text') or '')[:120]}",
+                description=(
+                    f"{r.get('filename', '?')}:{r.get('line_number', '?')} - "
+                    f"{r.get('issue_text', '')} (confidence={r.get('issue_confidence', '?')})"
+                ),
+                evidence_ref=EvidenceRef(
+                    source_file=str(r.get("filename", "")),
+                    raw_excerpt=str(r.get("code", ""))[:400],
+                ),
+                suggested_followup="Bandit test_id 페이지 참조하여 해당 코드 보안 조치.",
+                source="rule",
+            )
+        )
+    return out
+
+
+def _match_bandit_high(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    """bandit results 중 HIGH severity 만 별도 critical 마킹."""
+    out: list[Finding] = []
+    for r in _bandit_results(parsed):
+        if (r.get("issue_severity") or "").upper() != "HIGH":
+            continue
+        out.append(
+            Finding(
+                severity="high",
+                category="code_security",
+                title=f"[bandit HIGH] {(r.get('issue_text') or '')[:120]}",
+                description=f"{r.get('filename', '?')}:{r.get('line_number', '?')}",
+                evidence_ref=EvidenceRef(
+                    source_file=str(r.get("filename", "")),
+                    raw_excerpt=str(r.get("code", ""))[:400],
+                ),
+                suggested_followup="HIGH 등급은 우선 검토.",
+                source="rule",
+            )
+        )
+    return out
+
+
+def _semgrep_results(parsed: Any) -> list[dict]:
+    if isinstance(parsed, dict):
+        r = parsed.get("results")
+        if isinstance(r, list):
+            return [x for x in r if isinstance(x, dict)]
+    return []
+
+
+def _match_semgrep_issue(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    sev_map = {"INFO": "low", "WARNING": "medium", "ERROR": "high"}
+    out: list[Finding] = []
+    for r in _semgrep_results(parsed):
+        sev_raw = (r.get("severity") or "WARNING").upper()
+        start = r.get("start") or {}
+        out.append(
+            Finding(
+                severity=sev_map.get(sev_raw, ind.severity_baseline),
+                category="code_security",
+                title=f"[semgrep:{r.get('check_id', '?')}]",
+                description=(
+                    f"{r.get('path', '?')}:{start.get('line', '?')} - "
+                    f"{((r.get('extra') or {}).get('message') or r.get('message') or '')[:240]}"
+                ),
+                evidence_ref=EvidenceRef(
+                    source_file=str(r.get("path", "")),
+                    raw_excerpt=str((r.get("extra") or {}).get("lines", ""))[:400],
+                ),
+                suggested_followup=str(
+                    (r.get("extra") or {}).get("fix")
+                    or "Semgrep rule 페이지 참조."
+                ),
+                source="rule",
+            )
+        )
+    return out
+
+
+def _match_semgrep_high(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    out: list[Finding] = []
+    for r in _semgrep_results(parsed):
+        if (r.get("severity") or "").upper() != "ERROR":
+            continue
+        start = r.get("start") or {}
+        out.append(
+            Finding(
+                severity="high",
+                category="code_security",
+                title=f"[semgrep ERROR] {r.get('check_id', '?')}",
+                description=f"{r.get('path', '?')}:{start.get('line', '?')}",
+                evidence_ref=EvidenceRef(source_file=str(r.get("path", ""))),
+                source="rule",
+            )
+        )
+    return out
+
+
+def _gitleaks_results(parsed: Any) -> list[dict]:
+    # gitleaks JSON 은 그냥 array → _parse_json_or_ndjson 이 {"items": [...]}.
+    if isinstance(parsed, dict):
+        items = parsed.get("items")
+        if isinstance(items, list):
+            return [x for x in items if isinstance(x, dict)]
+    if isinstance(parsed, list):
+        return [x for x in parsed if isinstance(x, dict)]
+    return []
+
+
+def _match_gitleaks_secret(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    out: list[Finding] = []
+    for r in _gitleaks_results(parsed):
+        rule_id = r.get("RuleID", "?")
+        out.append(
+            Finding(
+                severity=ind.severity_baseline,
+                category="secret_exposure",
+                title=f"[gitleaks:{rule_id}] {r.get('Description', '')[:120]}",
+                description=(
+                    f"{r.get('File', '?')}:{r.get('StartLine', '?')} - "
+                    f"match: {(r.get('Match') or '')[:120]}"
+                ),
+                evidence_ref=EvidenceRef(
+                    source_file=str(r.get("File", "")),
+                    raw_excerpt=str(r.get("Match", ""))[:400],
+                ),
+                suggested_followup="시크릿 즉시 회수 + 키 로테이션 + git 히스토리 정리.",
+                source="rule",
+            )
+        )
+    return out
+
+
+def _match_gitleaks_aws_key(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    out: list[Finding] = []
+    for r in _gitleaks_results(parsed):
+        rid = (r.get("RuleID") or "").lower()
+        match = r.get("Match") or ""
+        if "aws" in rid or "AKIA" in match:
+            out.append(
+                Finding(
+                    severity="critical",
+                    category="secret_exposure",
+                    title=f"[gitleaks AWS KEY] {r.get('Description', '')[:120]}",
+                    description=f"{r.get('File', '?')}:{r.get('StartLine', '?')}",
+                    evidence_ref=EvidenceRef(
+                        source_file=str(r.get("File", "")),
+                        raw_excerpt=str(match)[:400],
+                    ),
+                    suggested_followup="즉시 IAM 키 비활성 + CloudTrail 의심 활동 점검.",
+                    source="rule",
+                )
+            )
+    return out
+
+
 # Indicator id → matcher 매핑. 신규 indicator id 추가 시 여기 등록.
 _SPECIFIC_MATCHERS: dict[str, Matcher] = {
     "sigma_rule_hit": _match_sigma_rule_hit,
     "run_key_unusual_binary": _match_run_key_unusual_binary,
     "malfind_pe_in_unbacked_region": _match_malfind_pe_unbacked,
+    "bandit_issue": _match_bandit_issue,
+    "bandit_high": _match_bandit_high,
+    "semgrep_issue": _match_semgrep_issue,
+    "semgrep_high": _match_semgrep_high,
+    "gitleaks_secret": _match_gitleaks_secret,
+    "gitleaks_aws_key": _match_gitleaks_aws_key,
 }
 
 

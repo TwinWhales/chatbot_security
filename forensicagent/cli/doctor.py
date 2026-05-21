@@ -28,8 +28,8 @@ from forensicagent.llm import OllamaClient
 # Optional forensic tools surveyed by doctor. Missing ones are just hints —
 # users only need the tools that match the evidence they actually have.
 _OPTIONAL_TOOLS = [
-    "volatility3",
-    "vol",  # volatility3 alt entry
+    # --- forensic (사후 분석) ---
+    "vol",  # volatility3
     "chainsaw",
     "rip",  # RegRipper
     "log2timeline.py",
@@ -42,6 +42,10 @@ _OPTIONAL_TOOLS = [
     "binwalk",
     "strings",
     "file",
+    # --- code security (정적 분석) ---
+    "bandit",
+    "semgrep",
+    "gitleaks",
 ]
 
 

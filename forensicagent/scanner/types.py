@@ -18,6 +18,10 @@ EvidenceType = Literal[
     "browser_artifact",
     "prefetch",
     "text_log",
+    # 코드 보안 (정적 분석 도구가 소비)
+    "source_code_python",
+    "source_code_javascript",
+    "source_code_generic",
     "unknown",
 ]
 
