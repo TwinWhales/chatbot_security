@@ -1,0 +1,49 @@
+{
+  "tool_id": "sdbexplorer",
+  "display_name": "SDB Explorer",
+  "version_supported": "",
+  "category": "registry_analysis",
+  "subcategory": "shim_database",
+  "applicable_evidence_types": [
+    "registry_hive"
+  ],
+  "platform": "windows",
+  "input_format": "*.sdb",
+  "output_format": "json | csv | text",
+  "output_size_estimate": "small",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": "./sdbexplorer --help",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "Open Registry Hive",
+      "template": "./sdbexplorer {evidence_path}",
+      "when": "When a shim database file needs to be examined."
+    }
+  ],
+  "usage_description": "SDB Explorer is used to analyze shim database files, which can provide insights into application compatibility issues on Windows systems.",
+  "suspicious_indicators": [
+    {
+      "id": "shim_database_abnormalities",
+      "pattern": "Unexpected or large number of entries in the shim database.",
+      "severity_baseline": "medium",
+      "description": "Indicates potential tampering or unusual application behavior."
+    },
+    {
+      "id": "missing_entries",
+      "pattern": "Missing critical entries that should be present in a normal shim database.",
+      "severity_baseline": "low",
+      "description": "May indicate issues with application compatibility or installation."
+    }
+  ],
+  "known_false_positives": [
+    "Normal variations in shim databases due to different software environments may appear suspicious but are not necessarily indicative of malicious activity."
+  ],
+  "reference_urls": [
+    "https://learn.microsoft.com/en-us/windows/win32/devnotes/application-compatibility-database",
+    "https://binaryforay.blogspot.com/2018/02/introducing-sdb-explorer.html"
+  ]
+}

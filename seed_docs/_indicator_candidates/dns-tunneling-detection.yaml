@@ -1,0 +1,68 @@
+topic: Detecting DNS Tunneling
+indicators:
+- id: dns-long-subdomains
+  pattern: Subdomain length > 50 characters
+  severity_baseline: medium
+  description: Unusually long subdomains are indicative of DNS tunneling.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: dns-abnormal-query-volume
+  pattern: Query volume > 1000 queries/hour to a single domain
+  severity_baseline: medium
+  description: High query frequency to the same domain is suspicious.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: dns-rare-record-types
+  pattern: TXT or NULL record types with high volume
+  severity_baseline: medium
+  description: Unusual use of TXT or NULL records is a red flag.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: dns-suspicious-domains
+  pattern: Recently registered domain with no web presence
+  severity_baseline: medium
+  description: Domains recently registered and not in use are suspicious.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: dns-high-entropy-subdomains
+  pattern: Shannon entropy of subdomain > 4.0
+  severity_baseline: medium
+  description: High Shannon entropy in subdomains suggests encoded data.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: dns-uniform-query-intervals
+  pattern: Uniform query intervals < 60 seconds
+  severity_baseline: medium
+  description: Uniform timing of queries suggests automated tooling.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: dns-recently-registered-domains
+  pattern: Domain registered within last 30 days with no web presence
+  severity_baseline: medium
+  description: Recently registered domains without a web presence are suspicious.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: dns-correlated-endpoint-activity
+  pattern: Correlation with EDR alerts or unusual process activity
+  severity_baseline: high
+  description: Evidence of malicious activity on the endpoint.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+source_url: https://cyberdefenders.org/blog/dns-tunneling-detection/
+source_title: What Is DNS Tunneling detection techniques?

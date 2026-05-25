@@ -1,0 +1,46 @@
+topic: Realistic Cyber Threat Scenarios in Modern IT Environments
+indicators:
+- id: mfa-bypass-hybrid-identity
+  pattern: Azure tenant sign-in anomalies correlated with AWS CloudTrail API activity and Active Directory authentication
+    events.
+  severity_baseline: medium
+  description: Identify MFA bypass via hybrid identity abuse.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: assume-role-aws-api-calls
+  pattern: Unusual AWS AssumeRole API calls in CloudTrail logs.
+  severity_baseline: medium
+  description: Recognize pivoting from cloud-to-cloud via legitimate automation pipelines.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: poisoned-ai-skill-import
+  pattern: Legitimate-looking skill import on an AI platform that later propagates into the broader developer environment.
+  severity_baseline: high
+  description: Detect AI supply chain compromise at ingestion point.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: cross-cloud-data-exfiltration
+  pattern: Data exfiltration from AWS S3 and Azure Blob Storage in a coordinated, multi-stage operation.
+  severity_baseline: high
+  description: Identify cross-cloud data exfiltration spanning multiple platforms.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - registry_hive
+- id: wiper-targeting-endpoints-and-storage
+  pattern: Detection of wiper deployment targeting both endpoints and cloud storage.
+  severity_baseline: high
+  description: Respond to multi-stage attack that targets both local disks and cloud storage.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/cyberdefenders-in-locked-shields-2026/
+source_title: CyberDefenders contribution to Locked Shields 2026

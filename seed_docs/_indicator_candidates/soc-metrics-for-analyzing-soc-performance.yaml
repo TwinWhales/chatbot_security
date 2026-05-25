@@ -1,0 +1,59 @@
+topic: Key SOC Metrics for Performance Analysis
+indicators:
+- id: mtd_detection
+  pattern: Average time between threat occurrence and detection
+  severity_baseline: low
+  description: Measures how quickly threats are identified by the SOC.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - registry_hive
+  - pcap
+  - disk_image
+- id: mttr_response
+  pattern: Average time from detection to containment or remediation
+  severity_baseline: low
+  description: Indicates the efficiency of SOC response efforts.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - registry_hive
+  - pcap
+  - disk_image
+- id: false_positive_rate
+  pattern: Percentage of security alerts that are determined to be non-malicious after investigation
+  severity_baseline: low
+  description: Measures the accuracy of threat detection.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - registry_hive
+  - pcap
+  - disk_image
+- id: case_closure_rate
+  pattern: Number of cases closed within a specific period
+  severity_baseline: low
+  description: Indicates the throughput and efficiency of the SOC team.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - registry_hive
+  - pcap
+  - disk_image
+- id: analyst_utilization_rate
+  pattern: Percentage of analyst work hours spent on core SOC tasks
+  severity_baseline: low
+  description: Measures the productivity and efficiency of analysts.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - registry_hive
+  - pcap
+  - disk_image
+source_url: https://cyberdefenders.org/blog/soc-metrics-for-analyzing-soc-performance/
+source_title: 'SOC Metrics and KPIs: Security Performance'

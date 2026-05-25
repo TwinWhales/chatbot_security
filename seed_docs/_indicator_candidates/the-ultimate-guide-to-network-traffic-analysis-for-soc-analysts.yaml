@@ -1,0 +1,66 @@
+topic: Network Traffic Analysis for SOC Analysts
+indicators:
+- id: unusual_outbound_data
+  pattern: Unusual outbound data volumes or transfers to unfamiliar external destinations.
+  severity_baseline: low
+  description: Detects potential data exfiltration attempts.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - flow_data
+  - pcap
+- id: telnet_usage
+  pattern: Traffic involving Telnet protocol.
+  severity_baseline: low
+  description: Identifies unencrypted management protocols in use.
+  tool_hint: evtx
+  applicable_evidence_types:
+  - flow_data
+  - pcap
+- id: http_usage
+  pattern: Traffic involving HTTP protocol on port 80.
+  severity_baseline: low
+  description: Detects unencrypted web traffic.
+  tool_hint: evtx
+  applicable_evidence_types:
+  - flow_data
+  - pcap
+- id: snmpv1_usage
+  pattern: Traffic involving SNMPv1 protocol on port 161/162.
+  severity_baseline: low
+  description: Identifies unencrypted network management protocol in use.
+  tool_hint: evtx
+  applicable_evidence_types:
+  - flow_data
+  - pcap
+- id: dns_tunneling
+  pattern: DNS queries or responses with unusual frequency or volume.
+  severity_baseline: low
+  description: Detects potential DNS tunneling for C2 communications.
+  tool_hint: tshark
+  applicable_evidence_types:
+  - pcap
+- id: http_tunneling
+  pattern: HTTP requests or responses with unusual frequency or volume, especially to known malicious domains.
+  severity_baseline: low
+  description: Identifies potential HTTP tunneling for C2 communications.
+  tool_hint: tshark
+  applicable_evidence_types:
+  - pcap
+- id: smb_lateral_movement
+  pattern: New peer-to-peer SMB connections between internal hosts, especially involving privileged accounts.
+  severity_baseline: medium
+  description: Surfaces potential lateral movement by attackers.
+  tool_hint: evtx
+  applicable_evidence_types:
+  - flow_data
+  - pcap
+- id: ransomware_scanning
+  pattern: SMBv1 port 445 open and subsequent large-scale file-write patterns.
+  severity_baseline: high
+  description: Detects initial scanning behavior by ransomware variants.
+  tool_hint: evtx
+  applicable_evidence_types:
+  - flow_data
+  - pcap
+source_url: https://cyberdefenders.org/blog/the-ultimate-guide-to-network-traffic-analysis-for-soc-analysts/
+source_title: What is Network Traffic Analysis (NTA)?

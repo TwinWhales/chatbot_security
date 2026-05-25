@@ -1,0 +1,36 @@
+{
+  "case_name": "TB34936_PR38220",
+  "case_summary": "The intrusion began with a successful RDP login using valid credentials likely obtained from an infostealer, data breach reuse, or initial access broker. The threat actor moved laterally to the domain controller and created multiple impersonation-style accounts before deploying Lynx ransomware across backup servers.",
+  "evidence_types_present": [
+    "memory_dump",
+    "evtx_log",
+    "registry_hive",
+    "pcap",
+    "disk_image"
+  ],
+  "tools_used": [
+    {
+      "tool_id": "volatility3",
+      "purpose": "Memory analysis"
+    },
+    {
+      "tool_id": "plaso",
+      "purpose": "Log file analysis"
+    },
+    {
+      "tool_id": "regripper",
+      "purpose": "Registry hive analysis"
+    }
+  ],
+  "ttps": [
+    "T1059.003",
+    "T1078",
+    "T1082",
+    "T1016"
+  ],
+  "key_iocs": [
+    "195.211.190[.]189"
+  ],
+  "source_url": "https://thedfirreport.com/2025/12/17/cats-got-your-files-lynx-ransomware/",
+  "source_title": "Cat’s Got Your Files: Lynx Ransomware - The DFIR Report"
+}

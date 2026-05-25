@@ -1,0 +1,879 @@
+{
+  "meta": {
+    "version": "0.0.1",
+    "run_id": "41b30ae1-55f6-4d00-8c8d-eaeba863109d",
+    "started_at": "2026-05-21T07:49:38+00:00",
+    "finished_at": "2026-05-21T07:49:42+00:00",
+    "working_directory": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli",
+    "host_info": {
+      "system": "Windows",
+      "release": "11",
+      "machine": "AMD64",
+      "python": "3.12.4"
+    }
+  },
+  "evidence_inventory": {
+    "scan_root": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli",
+    "scanned_files": 8,
+    "skipped_files": 0,
+    "depth_limit_hit": false,
+    "evidence_list": [
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+        "filename": "doctor.py",
+        "size_bytes": 6034,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      },
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+        "filename": "main.py",
+        "size_bytes": 12245,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      },
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+        "filename": "nl_router.py",
+        "size_bytes": 7133,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      },
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+        "filename": "repl.py",
+        "size_bytes": 17387,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      },
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+        "filename": "session.py",
+        "size_bytes": 2573,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      },
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+        "filename": "tool_install.py",
+        "size_bytes": 15335,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      },
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+        "filename": "ui.py",
+        "size_bytes": 1413,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      },
+      {
+        "path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py",
+        "filename": "__init__.py",
+        "size_bytes": 111,
+        "evidence_type": "source_code_python",
+        "detected_by": "extension",
+        "platform_hint": "unknown",
+        "confidence": 0.85
+      }
+    ]
+  },
+  "execution_plan": {
+    "selected_tools": [
+      {
+        "tool_id": "bandit",
+        "tool_version": ">=1.7",
+        "reason": "source_code_python 증거가 발견되어 Bandit 적용 가능 (code_security).",
+        "target_evidence": [
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py"
+        ],
+        "command_template": "bandit -f json -q --exit-zero {evidence_path}",
+        "estimated_runtime": "short",
+        "priority": 5
+      },
+      {
+        "tool_id": "gitleaks",
+        "tool_version": ">=8.0",
+        "reason": "source_code_python 증거가 발견되어 Gitleaks 적용 가능 (code_security).",
+        "target_evidence": [
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py"
+        ],
+        "command_template": "gitleaks detect --no-git --source {evidence_path} --report-format json --report-path - --exit-code 0",
+        "estimated_runtime": "short",
+        "priority": 5
+      },
+      {
+        "tool_id": "semgrep",
+        "tool_version": ">=1.0",
+        "reason": "source_code_python 증거가 발견되어 Semgrep 적용 가능 (code_security).",
+        "target_evidence": [
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+          "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py"
+        ],
+        "command_template": "semgrep --config=auto --json --quiet {evidence_path}",
+        "estimated_runtime": "medium",
+        "priority": 5
+      }
+    ],
+    "stage_one_candidates": 3,
+    "llm_used": false,
+    "llm_fallback": false,
+    "skipped_no_evidence": [
+      "amcacheparser",
+      "chainsaw",
+      "evtxecmd",
+      "mftecmd",
+      "pecmd",
+      "recmd",
+      "regripper",
+      "volatility3"
+    ]
+  },
+  "tool_results": [
+    {
+      "tool_id": "bandit",
+      "execution": [
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\03_bandit_nl_router.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\03_bandit_nl_router.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.6549960999982432,
+          "output_format": "json",
+          "output_size_bytes": 833,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:39Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 148,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 148,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": []
+          }
+        },
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\01_bandit_doctor.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\01_bandit_doctor.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.6717253000242636,
+          "output_format": "json",
+          "output_size_bytes": 830,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:39Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 161,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 161,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": []
+          }
+        },
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\02_bandit_main.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\02_bandit_main.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.7200004999758676,
+          "output_format": "json",
+          "output_size_bytes": 828,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:39Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 314,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 314,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": []
+          }
+        },
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\05_bandit_session.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\05_bandit_session.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.7748028000351042,
+          "output_format": "json",
+          "output_size_bytes": 829,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:40Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 68,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 68,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": []
+          }
+        },
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\04_bandit_repl.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\04_bandit_repl.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.8750793000217527,
+          "output_format": "json",
+          "output_size_bytes": 828,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:40Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 403,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 403,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": []
+          }
+        },
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\06_bandit_tool_install.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\06_bandit_tool_install.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.8001175000099465,
+          "output_format": "json",
+          "output_size_bytes": 3628,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:40Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py": {
+                "CONFIDENCE.HIGH": 3,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 2,
+                "SEVERITY.MEDIUM": 1,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 353,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 3,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 2,
+                "SEVERITY.MEDIUM": 1,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 353,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": [
+              {
+                "code": "19 import shutil\n20 import subprocess\n21 import sys\n",
+                "col_offset": 0,
+                "end_col_offset": 17,
+                "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+                "issue_confidence": "HIGH",
+                "issue_cwe": {
+                  "id": 78,
+                  "link": "https://cwe.mitre.org/data/definitions/78.html"
+                },
+                "issue_severity": "LOW",
+                "issue_text": "Consider possible security implications associated with the subprocess module.",
+                "line_number": 20,
+                "line_range": [
+                  20
+                ],
+                "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_imports.html#b404-import-subprocess",
+                "test_id": "B404",
+                "test_name": "blacklist"
+              },
+              {
+                "code": "260     try:\n261         subprocess.run(\n262             [sys.executable, \"-m\", \"pip\", \"install\", spec.pip_package],\n263             check=True,\n264         )\n265         return True\n",
+                "col_offset": 8,
+                "end_col_offset": 9,
+                "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+                "issue_confidence": "HIGH",
+                "issue_cwe": {
+                  "id": 78,
+                  "link": "https://cwe.mitre.org/data/definitions/78.html"
+                },
+                "issue_severity": "LOW",
+                "issue_text": "subprocess call - check for execution of untrusted input.",
+                "line_number": 261,
+                "line_range": [
+                  261,
+                  262,
+                  263,
+                  264
+                ],
+                "more_info": "https://bandit.readthedocs.io/en/1.9.4/plugins/b603_subprocess_without_shell_equals_true.html",
+                "test_id": "B603",
+                "test_name": "subprocess_without_shell_equals_true"
+              },
+              {
+                "code": "284         # urllib 가 stdlib 라서 추가 의존성 없음. 큰 파일에도 OK.\n285         with urllib.request.urlopen(spec.zip_url) as resp, tmp_path.open(\"wb\") as f:\n286             shutil.copyfileobj(resp, f)\n",
+                "col_offset": 13,
+                "end_col_offset": 49,
+                "filename": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+                "issue_confidence": "HIGH",
+                "issue_cwe": {
+                  "id": 22,
+                  "link": "https://cwe.mitre.org/data/definitions/22.html"
+                },
+                "issue_severity": "MEDIUM",
+                "issue_text": "Audit url open for permitted schemes. Allowing use of file:/ or custom schemes is often unexpected.",
+                "line_number": 285,
+                "line_range": [
+                  285
+                ],
+                "more_info": "https://bandit.readthedocs.io/en/1.9.4/blacklists/blacklist_calls.html#b310-urllib-urlopen",
+                "test_id": "B310",
+                "test_name": "blacklist"
+              }
+            ]
+          }
+        },
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\07_bandit_ui.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\07_bandit_ui.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.5501875999616459,
+          "output_format": "json",
+          "output_size_bytes": 824,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:42Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 42,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 42,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": []
+          }
+        },
+        {
+          "tool_id": "bandit",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py",
+          "status": "success",
+          "command_executed": "bandit -f json -q --exit-zero C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py",
+          "stdout_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\08_bandit___init__.stdout",
+          "stderr_path": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent_output\\raw\\08_bandit___init__.stderr",
+          "exit_code": 0,
+          "duration_seconds": 0.5215000999160111,
+          "output_format": "json",
+          "output_size_bytes": 828,
+          "error_message": "",
+          "parsed_output": {
+            "errors": [],
+            "generated_at": "2026-05-21T07:49:42Z",
+            "metrics": {
+              "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 3,
+                "nosec": 0,
+                "skipped_tests": 0
+              },
+              "_totals": {
+                "CONFIDENCE.HIGH": 0,
+                "CONFIDENCE.LOW": 0,
+                "CONFIDENCE.MEDIUM": 0,
+                "CONFIDENCE.UNDEFINED": 0,
+                "SEVERITY.HIGH": 0,
+                "SEVERITY.LOW": 0,
+                "SEVERITY.MEDIUM": 0,
+                "SEVERITY.UNDEFINED": 0,
+                "loc": 3,
+                "nosec": 0,
+                "skipped_tests": 0
+              }
+            },
+            "results": []
+          }
+        }
+      ],
+      "analysis": {
+        "tool_id": "bandit",
+        "case_used": "A",
+        "llm_invoked": false,
+        "llm_failed": false,
+        "summary": "0 findings (critical=0 high=0 medium=0 low=0 info=0); top: n/a",
+        "findings": []
+      }
+    },
+    {
+      "tool_id": "gitleaks",
+      "execution": [
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "gitleaks",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: gitleaks not on PATH",
+          "parsed_output": null
+        }
+      ],
+      "analysis": {
+        "tool_id": "gitleaks",
+        "case_used": "A",
+        "llm_invoked": false,
+        "llm_failed": false,
+        "summary": "skipped (skipped): prerequisites failed: gitleaks not on PATH",
+        "findings": []
+      }
+    },
+    {
+      "tool_id": "semgrep",
+      "execution": [
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\doctor.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\main.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\nl_router.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\repl.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\session.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\tool_install.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\ui.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        },
+        {
+          "tool_id": "semgrep",
+          "target_evidence": "C:\\Users\\user\\OneDrive\\Desktop\\chatbot_security\\forensicagent\\cli\\__init__.py",
+          "status": "skipped",
+          "command_executed": "",
+          "stdout_path": "",
+          "stderr_path": "",
+          "exit_code": -1,
+          "duration_seconds": 0.0,
+          "output_format": "json",
+          "output_size_bytes": 0,
+          "error_message": "prerequisites failed: semgrep not on PATH",
+          "parsed_output": null
+        }
+      ],
+      "analysis": {
+        "tool_id": "semgrep",
+        "case_used": "A",
+        "llm_invoked": false,
+        "llm_failed": false,
+        "summary": "skipped (skipped): prerequisites failed: semgrep not on PATH",
+        "findings": []
+      }
+    }
+  ],
+  "summary": {
+    "total_findings": 0,
+    "by_severity": {},
+    "by_category": {},
+    "tools_run": 1,
+    "tools_failed": 0,
+    "tools_skipped": 2,
+    "total_ms": 4011
+  },
+  "stage_ms": {
+    "scan_walk": 0,
+    "scan_detect": 1,
+    "select_filter": 0,
+    "execute": 4010,
+    "analyze_rules:bandit": 0
+  }
+}

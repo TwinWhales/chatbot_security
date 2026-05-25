@@ -1,0 +1,32 @@
+{
+  "case_name": "onenote_to_ransomnote",
+  "case_summary": "Threat actors gained initial access through a phishing campaign using malicious OneNote files, deployed IcedID and Cobalt Strike for persistence and lateral movement, then exfiltrated data before deploying Nokoyawa ransomware on critical servers.",
+  "evidence_types_present": [
+    "memory_dump",
+    "evtx_log",
+    "registry_hive",
+    "pcap"
+  ],
+  "tools_used": [
+    {
+      "tool_id": "sysmon",
+      "purpose": "Monitoring system events for detection of malicious activities"
+    },
+    {
+      "tool_id": "plaso",
+      "purpose": "Forensic analysis of disk images and memory dumps"
+    }
+  ],
+  "ttps": [
+    "T1059.003",
+    "T1071.001",
+    "T1082",
+    "T1033"
+  ],
+  "key_iocs": [
+    "http://mrassociattes.com/images/62.gif",
+    "C:\\\temp\\Funa2.exe"
+  ],
+  "source_url": "https://thedfirreport.com/2024/04/01/from-onenote-to-ransomnote-an-ice-cold-intrusion/",
+  "source_title": "From OneNote to RansomNote: An Ice Cold Intrusion - The DFIR Report"
+}

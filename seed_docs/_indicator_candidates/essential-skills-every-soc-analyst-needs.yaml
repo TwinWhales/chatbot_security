@@ -1,0 +1,61 @@
+topic: Advanced SOC Analyst Skills
+indicators:
+- id: http-anomalies
+  pattern: HTTP requests with unusual user-agents or request methods.
+  severity_baseline: low
+  description: Detects potentially malicious HTTP traffic.
+  tool_hint: tshark (pcap)
+  applicable_evidence_types:
+  - pcap
+- id: dns-queries
+  pattern: DNS queries for known malicious domains or IP addresses.
+  severity_baseline: low
+  description: Identifies suspicious DNS activity.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: tcp-flags
+  pattern: TCP packets with unusual flags set, such as URG or PSH.
+  severity_baseline: low
+  description: Detects potential covert channels in network traffic.
+  tool_hint: tshark (pcap)
+  applicable_evidence_types:
+  - pcap
+- id: ssl-traffic
+  pattern: HTTPS traffic with unexpected or self-signed certificates.
+  severity_baseline: low
+  description: Identifies potentially malicious HTTPS connections.
+  tool_hint: tshark (pcap)
+  applicable_evidence_types:
+  - pcap
+- id: firewall-logs
+  pattern: Firewall logs showing unusual outbound traffic patterns.
+  severity_baseline: low
+  description: Detects potential exfiltration attempts.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: siem-alerts
+  pattern: SIEM alerts with high severity and no context.
+  severity_baseline: low
+  description: Identifies potential false positives or real threats in SIEM logs.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - evtx_log
+- id: malware-signatures
+  pattern: Malware signatures detected by antivirus software.
+  severity_baseline: low
+  description: Detects known malware on the network.
+  tool_hint: yara (signatures)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: network-segmentation
+  pattern: Network segmentation violations or unauthorized access attempts.
+  severity_baseline: low
+  description: Identifies potential lateral movement in the network.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/essential-skills-every-soc-analyst-needs/
+source_title: '2026 Guide: Advanced SOC Analyst skills'

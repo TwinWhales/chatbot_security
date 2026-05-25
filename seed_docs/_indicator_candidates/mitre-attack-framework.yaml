@@ -1,0 +1,60 @@
+topic: Mapping Real Alerts to MITRE ATT&CK Techniques
+indicators:
+- id: repeated_failed_auth
+  pattern: index=authentication action=failure src_ip=* user=* | stats count by user, src_ip | where count > 5
+  severity_baseline: low
+  description: Detects repeated failed authentication attempts followed by a successful login from an IP address.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - authentication_log
+- id: lsass_memory_access
+  pattern: minidump, comsvcs.dll usage, suspicious handle access
+  severity_baseline: high
+  description: Detects LSASS memory access via MiniDump or similar techniques.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+- id: remote_services_lateral_movement
+  pattern: RDP bruteforce, SMB with stolen tokens, WMI remote execution
+  severity_baseline: medium
+  description: Detects lateral movement techniques such as RDP brute force and SMB with stolen tokens.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: scheduled_task_persistence
+  pattern: multiple executions with schtasks.exe, non-admin accounts or suspicious paths
+  severity_baseline: medium
+  description: Detects the creation of scheduled tasks for persistence.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - registry_hive
+- id: wmi_execution
+  pattern: Wmiprvse.exe spawning PowerShell/CMD
+  severity_baseline: medium
+  description: Detects WMI execution for remote code execution.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+- id: powershell_command_execution
+  pattern: encoded command, unusual execution policy bypass
+  severity_baseline: low
+  description: Detects the use of PowerShell with encoded commands or unusual execution policies.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+- id: registry_run_key_modification
+  pattern: Registry Run Keys modifications, suspicious paths
+  severity_baseline: medium
+  description: Detects changes to the Windows Registry Run Keys.
+  tool_hint: regripper (registry)
+  applicable_evidence_types:
+  - registry_hive
+- id: masquerading_binary
+  pattern: Fake svchost.exe running from C:\Users\Public
+  severity_baseline: low
+  description: Detects binaries masquerading as legitimate executables.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+source_url: https://cyberdefenders.org/blog/mitre-attack-framework/
+source_title: MITRE ATT&CK Full guide for SOC & DFIR | CyberDefenders Blog

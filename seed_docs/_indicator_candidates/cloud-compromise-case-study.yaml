@@ -1,0 +1,68 @@
+topic: Microsoft 365 Cloud Compromise Detection
+indicators:
+- id: unexpected-mailbox-rules
+  pattern: Creation or modification of rules that redirect or hide emails.
+  severity_baseline: low
+  description: Identify if any new inbox rules have been added or existing ones modified just before or after suspicious activity.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: unusual-email-traffic
+  pattern: Elevated email traffic from specific accounts.
+  severity_baseline: low
+  description: Detect unusual spikes in email activity originating from a particular account.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: login-anomalies
+  pattern: Unusual sign-in activities such as logins from unfamiliar IP addresses/geographies.
+  severity_baseline: low
+  description: Identify login events that deviate from the user's typical behavior.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: oauth-token-anomalies
+  pattern: Unusual OAuth token refreshes or app consent activities from unknown sources.
+  severity_baseline: low
+  description: Detect unauthorized access attempts via OAuth tokens and app consents.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: malicious-mailbox-rules
+  pattern: Rules forwarding emails externally, especially to unknown addresses.
+  severity_baseline: medium
+  description: Identify mailbox rules that forward incoming emails to external addresses.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: thread-hijacking-indicators
+  pattern: Altered reply chains, injected links or malicious scripts in email bodies and headers.
+  severity_baseline: medium
+  description: Detect signs of thread hijacking by analyzing email content for anomalies.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: unauthorized-app-consents
+  pattern: New or suspicious app permissions, especially for third-party apps not approved internally.
+  severity_baseline: medium
+  description: Identify unauthorized app consents and permissions granted to external applications.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: impersonation-emails
+  pattern: Slight misspellings or homograph attacks in email headers and display names.
+  severity_baseline: medium
+  description: Detect emails that attempt to impersonate legitimate senders through subtle name changes.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+source_url: https://cyberdefenders.org/blog/cloud-compromise-case-study/
+source_title: 'SOC Simulator: Cloud Security Case Study'

@@ -1,0 +1,50 @@
+{
+  "tool_id": "amcacheparser",
+  "display_name": "AmcacheParser",
+  "version_supported": "",
+  "category": "registry_analysis",
+  "subcategory": "registry_hive",
+  "applicable_evidence_types": [
+    "registry_hive"
+  ],
+  "platform": "windows",
+  "input_format": "*.hve",
+  "output_format": "csv | json",
+  "output_size_estimate": "medium",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\AmcacheParser.exe -?",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "parse_amcache_hve",
+      "template": ".\\AmcacheParser.exe -f {evidence_path} --csv {output_dir}",
+      "when": "When parsing an Amcache.hve file and outputting to CSV."
+    }
+  ],
+  "usage_description": "AmcacheParser is used to parse the Amcache.hve registry hive, which can provide insights into installed programs and their associated SHA1 hashes.",
+  "suspicious_indicators": [
+    {
+      "id": "unassociated_entry",
+      "pattern": "Unassociated entries with no program entry.",
+      "severity_baseline": "medium",
+      "description": "Potential indicators of malware execution."
+    },
+    {
+      "id": "sha1_hash_mismatch",
+      "pattern": "SHA1 hash does not match known good values.",
+      "severity_baseline": "high",
+      "description": "Possible evidence of malicious software."
+    }
+  ],
+  "known_false_positives": [
+    "Legitimate system updates or installations may result in unassociated entries.",
+    "Some legitimate applications may have SHA1 hashes that are not widely recognized."
+  ],
+  "reference_urls": [
+    "https://github.com/EricZimmerman/AmcacheParser",
+    "https://binaryforay.blogspot.com/2017/10/amcache-still-rules-everything-around.html"
+  ]
+}

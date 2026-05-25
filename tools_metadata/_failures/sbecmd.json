@@ -1,0 +1,49 @@
+{
+  "tool_id": "sbecmd",
+  "display_name": "SBECmd",
+  "version_supported": "",
+  "category": "registry_analysis",
+  "subcategory": "shell_items",
+  "applicable_evidence_types": [
+    "registry_hive"
+  ],
+  "platform": "windows",
+  "input_format": "*.hiv; *.hve",
+  "output_format": "csv",
+  "output_size_estimate": "medium",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\sbecmd.exe -?",
+    "expected_pattern": "SBECmd"
+  },
+  "command_templates": [
+    {
+      "name": "parse_hives",
+      "template": ".\\sbecmd.exe -d {evidence_path} --csv {output_dir}",
+      "when": "When parsing offline user Registry hives and outputting to CSV."
+    }
+  ],
+  "usage_description": "SBECmd is used for parsing NTUSER.dat and UsrClass.dat registry hives to extract folder traversal artifacts, which can be useful in both law enforcement and private sector investigations.",
+  "suspicious_indicators": [
+    {
+      "id": "first_interacted",
+      "pattern": "FirstInteracted timestamp indicates initial access to a directory.",
+      "severity_baseline": "low",
+      "description": "This may indicate the first time a user accessed a specific folder."
+    },
+    {
+      "id": "last_interacted",
+      "pattern": "LastInteracted timestamp indicates last access to a directory.",
+      "severity_baseline": "low",
+      "description": "This may indicate the most recent time a user accessed a specific folder."
+    }
+  ],
+  "known_false_positives": [
+    "SBECmd output can be influenced by system timezone settings and transaction logs, which might lead to misinterpretation of timestamps if not properly accounted for."
+  ],
+  "reference_urls": [
+    "https://binaryforay.blogspot.com/2015/02/shellbags-explorer-v0520-released.html",
+    "https://binaryforay.blogspot.com/2017/01/shellbags-explorer-v0800-released.html"
+  ]
+}

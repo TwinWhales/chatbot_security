@@ -1,0 +1,68 @@
+topic: Challenges and Solutions for SOC Analysts in 2026
+indicators:
+- id: cloud-native-tools-monitoring
+  pattern: Use of cloud-native tools like AWS GuardDuty, Azure Sentinel, or GCP Security Command Center
+  severity_baseline: low
+  description: Identify and monitor cloud resources using native security tools.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: log_correlation
+  pattern: Correlation of multi-source data from endpoints, networks, and cloud services
+  severity_baseline: low
+  description: Aggregate logs to detect subtle indicators of compromise.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: behavioral_analytics
+  pattern: Behavioral analytics to distinguish between legitimate and suspicious activities
+  severity_baseline: low
+  description: Use behavioral patterns to identify potential threats.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: cloud_forensics_skills
+  pattern: Collection and analysis of cloud logs, snapshots, and metadata for incident investigation
+  severity_baseline: low
+  description: Gather evidence from cloud environments for forensic analysis.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: alert_tuning
+  pattern: Regular refinement of SIEM and cloud-native alerting policies to reduce noise
+  severity_baseline: low
+  description: Tune detection rules to minimize false positives.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: log_parsing_skills
+  pattern: Parsing and normalizing data from diverse log formats (e.g., AWS CloudTrail, Azure Activity Logs)
+  severity_baseline: low
+  description: Extract actionable insights from complex log data.
+  tool_hint: yara (signatures)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: iam_monitoring
+  pattern: Setting up alerts for suspicious IAM changes, such as new admin accounts or permission escalations
+  severity_baseline: low
+  description: Detect and respond to potential identity threats.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: ai_driven_threat_hunting
+  pattern: Use of AI-powered analytics to uncover hidden patterns and lateral movement indicative of APTs
+  severity_baseline: low
+  description: Automatically detect advanced threats using machine learning.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/soc-analysts-roadmap-for-2026/
+source_title: 7 key steps in SOC analyst roadmap | CyberDefenders Blog

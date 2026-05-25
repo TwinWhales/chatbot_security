@@ -1,0 +1,53 @@
+topic: Disk Forensics for SOC Analysts
+indicators:
+- id: prefetch-execution-indicator
+  pattern: pecmd.exe -d C:\Windows\Prefetch --csv | grep powershell.exe
+  severity_baseline: low
+  description: Identifies execution of PowerShell scripts from Prefetch files.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - prefetch
+- id: eventlog-scriptblock-indicator
+  pattern: Event ID 4104 in Security or PowerShell/Operational logs
+  severity_baseline: low
+  description: Detects deobfuscated PowerShell commands from Event Logs.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: registry-run-key-indicator
+  pattern: LastWriteTime of HKCU\Software\Microsoft\Windows\CurrentVersion\Run or HKLM\Software\Microsoft\Windows\CurrentVersion\Run
+    is suspiciously recent
+  severity_baseline: medium
+  description: Detects recently modified registry keys for persistence.
+  tool_hint: regripper (registry)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: amcache-hve-indicator
+  pattern: SHA1 hash of suspicious binary in Amcache.hve matches known malicious binaries
+  severity_baseline: medium
+  description: Identifies recently executed binaries using Amcache.hve.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - amcache_hive
+- id: lnk-file-indicator
+  pattern: LNK file in C:\Users\<user>\AppData\Roaming\Microsoft\Windows\Recent\ points to suspicious directory or file
+  severity_baseline: low
+  description: Detects recent user interactions with potentially malicious files.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - lnk_file
+- id: browser-history-indicator
+  pattern: Download history in Chrome's AppData\Local\Google\Chrome\User Data\Default\ contains suspicious URLs or filenames
+  severity_baseline: low
+  description: Identifies recent browser activity that may indicate malicious downloads.
+  tool_hint: browser (browser artifacts)
+  applicable_evidence_types:
+  - memory_dump
+  - browser_artifact
+source_url: https://cyberdefenders.org/blog/disk-forensics-for-soc-analysts/
+source_title: 'Disk Forensics: SOC Analyst Playbook | CyberDefenders Blog'

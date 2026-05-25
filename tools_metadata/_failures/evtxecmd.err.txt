@@ -1,0 +1,7 @@
+2 validation errors for ToolMetadata
+output_format
+  Input should be 'json', 'csv', 'text' or 'binary' [type=literal_error, input_value='json | csv | text', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/literal_error
+references
+  Extra inputs are not permitted [type=extra_forbidden, input_value=[{'title': 'Introducing E...m/watch?v=BIkyWexMF0I'}], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden

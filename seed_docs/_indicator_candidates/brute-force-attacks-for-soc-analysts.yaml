@@ -1,0 +1,60 @@
+topic: Detecting Brute Force Attacks
+indicators:
+- id: failed_login_attempts
+  pattern: A large number of failed login attempts within a short time period from the same IP or user agent.
+  severity_baseline: low
+  description: Identifies potential brute force attack patterns in authentication logs.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: slow_and_low_attempts
+  pattern: A series of login attempts spaced out over a long period, each attempt failing but not triggering account lockout.
+  severity_baseline: low
+  description: Detects brute force attacks that use slow and low techniques to evade detection.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: credential_stuffing_attempts
+  pattern: Multiple failed login attempts using common or leaked credentials across different accounts.
+  severity_baseline: low
+  description: Identifies brute force attacks that use credential stuffing techniques.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: dictionary_attack_attempts
+  pattern: Failed login attempts using common or dictionary-based passwords.
+  severity_baseline: low
+  description: Detects brute force attacks that use dictionary attack techniques.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: reverse_brute_force_attempts
+  pattern: A single common password being tested against multiple usernames or accounts.
+  severity_baseline: low
+  description: Identifies brute force attacks that use reverse brute force techniques.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: password_spraying_attempts
+  pattern: A small number of common passwords being tested across many accounts.
+  severity_baseline: low
+  description: Detects brute force attacks that use password spraying techniques.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: targeted_brute_force_attempts
+  pattern: Failed login attempts using personalized or targeted passwords based on gathered information about the target.
+  severity_baseline: low
+  description: Identifies brute force attacks that use targeted techniques.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/brute-force-attacks-for-soc-analysts/
+source_title: What are the Brute Force Attacks? How AI affect it in 2026?

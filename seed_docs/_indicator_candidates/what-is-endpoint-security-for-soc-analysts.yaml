@@ -1,0 +1,70 @@
+topic: Endpoint Security for SOC Analysts
+indicators:
+- id: behavioral_anomaly
+  pattern: Unusual process activity or file modifications detected by EDR tools.
+  severity_baseline: low
+  description: Identifies suspicious behavior that may indicate a threat.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: malware_infection
+  pattern: Detection of known malware signatures or IoCs in endpoint telemetry data.
+  severity_baseline: medium
+  description: Indicates a potential infection by malicious software.
+  tool_hint: yara (signatures)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: lateral_movement
+  pattern: Detection of network connections or command execution indicative of lateral movement.
+  severity_baseline: medium
+  description: Suggests an attacker is moving within the network from one endpoint to another.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: phishing_compromise
+  pattern: Suspicious email activity or file downloads associated with phishing attempts.
+  severity_baseline: low
+  description: Identifies potential entry points for social engineering attacks.
+  tool_hint: browser (browser artifacts)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - browser_artifact
+- id: registry_changes
+  pattern: Unusual or unauthorized changes to the Windows registry detected by EDR tools.
+  severity_baseline: medium
+  description: Indicates potential persistence mechanisms used by attackers.
+  tool_hint: regripper (registry)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: file_modifications
+  pattern: Detection of unauthorized file modifications or deletions on endpoints.
+  severity_baseline: medium
+  description: May indicate data exfiltration or other malicious activities.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: automated_response
+  pattern: Automated containment actions initiated by EDR tools in response to detected threats.
+  severity_baseline: info
+  description: Indicates an automated response to a potential threat.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: incident_response
+  pattern: Collection of forensic artifacts such as memory dumps and system logs during incident response.
+  severity_baseline: info
+  description: Supports the investigation and analysis of security incidents.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - registry_hive
+source_url: https://cyberdefenders.org/blog/what-is-endpoint-security-for-soc-analysts/
+source_title: What Is Endpoint Security for SOC Analysts?

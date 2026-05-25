@@ -1,0 +1,45 @@
+topic: Man-in-the-Middle Attacks
+indicators:
+- id: arp_spoofing
+  pattern: Duplicate MAC addresses on a network segment
+  severity_baseline: low
+  description: Indicates potential ARP spoofing by an attacker.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: ssl_stripping
+  pattern: Unexpected SSL certificate errors on sensitive sites
+  severity_baseline: low
+  description: Suggests an attacker is performing SSL stripping.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: dns_poisoning
+  pattern: Anomalous DNS traffic or unusually high ARP volumes
+  severity_baseline: low
+  description: Indicates potential DNS poisoning by an attacker.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: certificate_changes
+  pattern: TLS certificate changes for known domains via certificate transparency log monitoring
+  severity_baseline: low
+  description: Detects unauthorized certificate issuance by an attacker.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - plaso
+- id: session_cookie_reuse
+  pattern: Session cookie reuse from different IP addresses or user agents within a short time window
+  severity_baseline: low
+  description: Indicates potential session hijacking by an attacker.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/what-is-a-man-in-the-middle-attack/
+source_title: What Is a Man-in-the-Middle Attack? MITM

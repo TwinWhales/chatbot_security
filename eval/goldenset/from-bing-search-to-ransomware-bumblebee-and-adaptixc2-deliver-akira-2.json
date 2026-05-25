@@ -1,0 +1,39 @@
+{
+  "case_name": "Bumblebee-AdaptixC2-Akira",
+  "case_summary": "A threat actor used SEO poisoning to deliver Bumblebee malware, which was then used to deploy AdaptixC2 and ultimately Akira ransomware across multiple organizations.",
+  "evidence_types_present": [
+    "memory_dump",
+    "evtx_log",
+    "registry_hive",
+    "pcap",
+    "disk_image"
+  ],
+  "tools_used": [
+    {
+      "tool_id": "volatility3",
+      "purpose": "Memory analysis for Bumblebee and Akira"
+    },
+    {
+      "tool_id": "yara",
+      "purpose": "Detecting IoCs in memory dumps and logs"
+    }
+  ],
+  "ttps": [
+    "T1059.001",
+    "T1083",
+    "T1097",
+    "T1546"
+  ],
+  "key_iocs": [
+    "ManageEngine-OpManager.msi",
+    "msimg32.dll",
+    "locker.exe",
+    "109.205.195[.]211",
+    "188.40.187[.]145",
+    "172.96.137[.]160",
+    "193.242.184[.]150",
+    "185.174.100[.]203"
+  ],
+  "source_url": "https://thedfirreport.com/2025/11/04/from-bing-search-to-ransomware-bumblebee-and-adaptixc2-deliver-akira-2/",
+  "source_title": "From Bing Search to Ransomware: Bumblebee and AdaptixC2 Deliver Akira - The DFIR Report"
+}

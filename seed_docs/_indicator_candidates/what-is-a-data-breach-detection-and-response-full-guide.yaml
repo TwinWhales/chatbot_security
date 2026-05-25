@@ -1,0 +1,61 @@
+topic: Indicators of Data Breaches
+indicators:
+- id: unusual-login-activity
+  pattern: Unusual login activity, off-hours access, logins from unexpected geographies, or multiple failed attempts followed
+    by success.
+  severity_baseline: low
+  description: Detects unusual login patterns that may indicate a breach.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: unexpected-account-lockouts
+  pattern: Unexpected account lockouts or password reset requests that your team didn't initiate.
+  severity_baseline: low
+  description: Identifies unauthorized changes to user accounts, possibly indicating a breach.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: abnormal-outbound-traffic
+  pattern: Abnormal outbound traffic, especially large data transfers at unusual hours.
+  severity_baseline: low
+  description: Detects unexpected data exfiltration attempts that may indicate a breach.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: new-admin-accounts
+  pattern: New or unauthorized admin accounts appearing in your directory.
+  severity_baseline: low
+  description: Detects the creation of new administrative accounts, which may be a sign of an attacker gaining access.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: antivirus-edr-alerts
+  pattern: Antivirus or EDR alerts that were dismissed or went unreviewed.
+  severity_baseline: low
+  description: Identifies security tool alerts that may have been overlooked, indicating potential compromise.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: system-behavioral-anomalies
+  pattern: Systems behaving erratically, unexpected reboots, slowdowns, or process crashes.
+  severity_baseline: low
+  description: Detects system behavior that deviates from the norm, possibly indicating a breach.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: dark-web-credential-leaks
+  pattern: Alerts from dark web monitoring tools about leaked credentials.
+  severity_baseline: low
+  description: Identifies leaked credentials that may have been compromised in a breach.
+  tool_hint: other
+  applicable_evidence_types:
+  - text_log
+- id: suspicious-communications
+  pattern: Customers or partners reporting suspicious communications impersonating your brand.
+  severity_baseline: low
+  description: Detects reports of phishing attempts or other suspicious communications that may indicate a breach.
+  tool_hint: other
+  applicable_evidence_types:
+  - text_log
+source_url: https://cyberdefenders.org/blog/what-is-a-data-breach-detection-and-response-full-guide/
+source_title: What is a data breach? Detect&Response Guide

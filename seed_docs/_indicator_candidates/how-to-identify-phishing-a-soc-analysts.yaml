@@ -1,0 +1,60 @@
+topic: Phishing Email Detection Techniques
+indicators:
+- id: sender-spoofing
+  pattern: Email with display name matching a known trusted domain but envelope sender is different.
+  severity_baseline: low
+  description: Detects potential spoofed emails by comparing display names and actual senders.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+- id: dkim-failure
+  pattern: Email with DKIM signature validation failure.
+  severity_baseline: low
+  description: Identifies emails that fail DomainKeys Identified Mail (DKIM) authentication.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+- id: url-obfuscation
+  pattern: URLs containing hexadecimal encoding or Unicode characters.
+  severity_baseline: low
+  description: Detects obfuscated URLs that may be used in phishing emails.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+- id: urgent-language
+  pattern: Email containing language like 'Your account will be locked unless...'.
+  severity_baseline: low
+  description: Identifies emails with urgent or threatening language often used in phishing.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+- id: malicious-attachment
+  pattern: Email attachment with executable file extension, renamed to appear as a non-executable file.
+  severity_baseline: low
+  description: Detects suspicious attachments that may contain malware.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+- id: credential-harvesting-site
+  pattern: URL pointing to a website mimicking a login portal.
+  severity_baseline: low
+  description: Identifies phishing sites designed to steal user credentials.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+- id: spear-phishing-target
+  pattern: Email content referencing internal projects or recent breaches.
+  severity_baseline: low
+  description: Detects spear phishing attempts by correlating email content with known data leaks.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+- id: bce-compromise
+  pattern: Email from an external domain mimicking internal communication patterns, especially financial requests.
+  severity_baseline: low
+  description: Identifies Business Email Compromise (BEC) attempts by monitoring unusual external-to-internal communications.
+  tool_hint: other
+  applicable_evidence_types:
+  - email
+source_url: https://cyberdefenders.org/blog/how-to-identify-phishing-a-soc-analysts/
+source_title: Phishing Email  Detection Techniques | CyberDefenders Blog

@@ -1,0 +1,60 @@
+{
+  "tool_id": "eztools_commonswitches",
+  "display_name": "EZ Tools Common Switches",
+  "version_supported": "",
+  "category": "other",
+  "subcategory": "common-switches",
+  "applicable_evidence_types": [
+    "unknown"
+  ],
+  "platform": "windows",
+  "input_format": [
+    "*.lnk",
+    "*.automaticDestinations-ms",
+    "*$MFT*",
+    "*.prefetch*"
+  ],
+  "output_format": "json | csv | text | xml",
+  "output_size_estimate": "small",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\JLECmd.exe --help",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "File Parsing",
+      "template": "{tool} -f {evidence_path}",
+      "when": "When parsing a single file"
+    },
+    {
+      "name": "Directory Parsing",
+      "template": "{tool} -d {evidence_path}",
+      "when": "When parsing multiple files in a directory"
+    },
+    {
+      "name": "CSV Output",
+      "template": "{tool} --csv {output_path}",
+      "when": "When requiring CSV output format"
+    },
+    {
+      "name": "JSON Pretty Print Output",
+      "template": "{tool} --json {output_path} --pretty",
+      "when": "When requiring pretty printed JSON output format"
+    }
+  ],
+  "usage_description": "The EZ Tools Common Switches provide a set of shared command-line options that can be used across various forensic tools to customize the parsing and output formats.",
+  "suspicious_indicators": [
+    {
+      "id": "dedupe",
+      "pattern": "--dedupe",
+      "severity_baseline": "low",
+      "description": "Deduplication of results may indicate a need for more detailed analysis."
+    }
+  ],
+  "known_false_positives": [],
+  "reference_urls": [
+    "https://docs.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings?redirectedfrom=MSDN"
+  ]
+}

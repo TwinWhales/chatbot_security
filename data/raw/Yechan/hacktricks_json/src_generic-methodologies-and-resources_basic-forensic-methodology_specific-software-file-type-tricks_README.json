@@ -1,0 +1,7 @@
+{
+    "url": "https://book.hacktricks.xyz/src/generic-methodologies-and-resources/basic-forensic-methodology/specific-software-file-type-tricks/README",
+    "title": "README",
+    "category": "src/generic-methodologies-and-resources/basic-forensic-methodology/specific-software-file-type-tricks",
+    "source": "HackTricks",
+    "content": "# Specific Software/File Type Tricks\n\n{{#include ../../../banners/hacktricks-training.md}}\n\nHere you can find interesting tricks for specific file-types and/or software:\n\n{{#ref}}\n.pyc.md\n{{#endref}}\n\n{{#ref}}\nbrowser-artifacts.md\n{{#endref}}\n\n{{#ref}}\ndesofuscation-vbs-cscript.exe.md\n{{#endref}}\n\n{{#ref}}\nlocal-cloud-storage.md\n{{#endref}}\n\n{{#ref}}\noffice-file-analysis.md\n{{#endref}}\n\n{{#ref}}\npdf-file-analysis.md\n{{#endref}}\n\n{{#ref}}\nsvg-font-glyph-analysis-and-web-drm-deobfuscation.md\n{{#endref}}\n\n{{#ref}}\nstructural-file-format-exploit-detection.md\n{{#endref}}\n\n{{#ref}}\npng-tricks.md\n{{#endref}}\n\n{{#ref}}\nvideo-and-audio-file-analysis.md\n{{#endref}}\n\n{{#ref}}\nzips-tricks.md\n{{#endref}}\n\n{{#ref}}\nmach-o-entitlements-and-ipsw-indexing.md\n{{#endref}}\n\n{{#include ../../../banners/hacktricks-training.md}}"
+}

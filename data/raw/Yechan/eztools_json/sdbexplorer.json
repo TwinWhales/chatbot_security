@@ -1,0 +1,6 @@
+{
+    "url": "https://github.com/EZToolsManuals/EZToolsManuals/blob/main/manuscript/sdbexplorer.txt",
+    "title": "EZ Tools - sdbexplorer",
+    "source": "EZToolsManuals",
+    "content": "# SDB Explorer\n\n## SDB Explorer Introduction\n\nSDB Explorer is a tool created by Eric Zimmerman that can be used by forensic examiners to examine shim database files (.sdb). Please check out Microsoft's official documentation on Application Compatability Databases [here](https://learn.microsoft.com/en-us/windows/win32/devnotes/application-compatibility-database?redirectedfrom=MSDN).\n\nBelow is a screenshot of SDB Explorer with a shim database file loaded.\n\nUsing the Info -> Metrics menu, examiners can look at a visual representation of the data present within a loaded shim database.\n\n## SDB Explorer References\n\n### Blog Posts\n\n#### Official Blog Posts\n\nBlog posts from Eric Zimmerman's blog, Binary Foray:\n\n* [Introducing SDB Explorer](https://binaryforay.blogspot.com/2018/02/introducing-sdb-explorer.html)\n\n### Download SDB Explorer\n\nSDB Explorer can be downloaded from <https://ericzimmerman.github.io/#!index.md>"
+}

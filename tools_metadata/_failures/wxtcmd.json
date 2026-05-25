@@ -1,0 +1,55 @@
+{
+  "tool_id": "wxtcmd",
+  "display_name": "WxTCmd",
+  "version_supported": "",
+  "category": "timeline",
+  "subcategory": "windows-timeline",
+  "applicable_evidence_types": [
+    "text_log"
+  ],
+  "platform": "windows",
+  "input_format": [
+    "ActivitiesCache.db"
+  ],
+  "output_format": "csv | json",
+  "output_size_estimate": "medium",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\WxTCmd.exe --help",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "Parse Windows Timeline and Output to CSV",
+      "template": ".\\wxtcmd.exe -f {evidence_path} --csv c:\\temp",
+      "when": "When you need to parse the Windows Timeline for program execution activity."
+    }
+  ],
+  "usage_description": "WxTCmd is used to parse the Windows Timeline, which can provide program execution activity attributed to a specific user account. This tool is useful in law enforcement and private sector cases.",
+  "suspicious_indicators": [
+    {
+      "id": "unusual_activity",
+      "pattern": "Unusual application usage patterns or times",
+      "severity_baseline": "medium",
+      "description": "Identifies potentially suspicious application activity."
+    },
+    {
+      "id": "recent_compromise",
+      "pattern": "Recent application launches that may indicate compromise",
+      "severity_baseline": "high",
+      "description": "Highlights activities that occurred shortly before the incident."
+    }
+  ],
+  "known_false_positives": [
+    "Normal user behavior, such as opening common applications at typical times"
+  ],
+  "reference_urls": [
+    "https://github.com/EricZimmerman/WxTCmd",
+    "https://binaryforay.blogspot.com/2018/05/introducing-wxtcmd.html",
+    "https://niiconsulting.com/checkmate/2021/10/windows-timeline-putting-the-what-when-together/",
+    "https://www.datadigitally.com/2019/04/windows-10-timeline-feature.html",
+    "https://andreafortuna.org/2019/10/03/some-forensic-thoughts-about-windows-10-timeline/",
+    "https://tajdini.net/blog/forensics-and-security/windows-artifacts-for-forensics-investigation/"
+  ]
+}

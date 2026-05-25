@@ -1,0 +1,46 @@
+topic: Windows Event Log Analysis Techniques
+indicators:
+- id: failed_logon_attempts
+  pattern: Event ID 4625 - Failed logon attempts from a single IP or targeting a specific account.
+  severity_baseline: low
+  description: Detects potential brute force attacks by monitoring failed login attempts.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: multiple_logons
+  pattern: Event ID 4624 - Multiple successful logons to multiple systems from the same user in a short period.
+  severity_baseline: medium
+  description: Identifies potential lateral movement by monitoring logon events across different systems.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: privilege_escalation
+  pattern: Event ID 4672 - Special privileges assigned, or Event ID 4732 - User added to privileged group.
+  severity_baseline: medium
+  description: Detects potential privilege escalation by monitoring special privilege assignments and group membership changes.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: rogue_account_creation
+  pattern: Event ID 4720 - User account created, or Event ID 7045 - Service installed.
+  severity_baseline: medium
+  description: Identifies potential persistence mechanisms by monitoring the creation of new user accounts and services.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: malware_detection
+  pattern: Event ID 4104 - PowerShell script block logging, or Windows Defender detections.
+  severity_baseline: high
+  description: Detects potential malware and fileless attacks by monitoring PowerShell event logs and Windows Defender alerts.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: data_exfiltration
+  pattern: Unusual access to sensitive files, abnormal use of removable media, or large outbound network transfers.
+  severity_baseline: high
+  description: Identifies potential data exfiltration by monitoring unusual file access and network transfer activities.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/event-log-analysis-for-soc-analysts/
+source_title: Windows Event Log Analysis Techniques | CyberDefenders Blog

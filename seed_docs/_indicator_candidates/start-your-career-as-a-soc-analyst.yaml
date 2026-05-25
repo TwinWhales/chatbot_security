@@ -1,0 +1,67 @@
+topic: Detection Rules and Incident Response for SOC Analysts
+indicators:
+- id: malware_hash_detection
+  pattern: SHA256 hash of known malicious software in process list or file system
+  severity_baseline: medium
+  description: Identifies potential malware based on known hashes.
+  tool_hint: yara (signatures)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: unusual_network_activity
+  pattern: Sudden increase in outbound network traffic to suspicious IP addresses or domains
+  severity_baseline: low
+  description: Detects potential exfiltration of data.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: abnormal_login_attempts
+  pattern: Multiple failed login attempts from the same IP address or user within a short timeframe
+  severity_baseline: low
+  description: Indicates potential brute force attack.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: unauthorized_registry_modifications
+  pattern: Changes to the Windows Registry that are not part of standard system operations or recent user actions
+  severity_baseline: medium
+  description: Detects potential persistence mechanisms used by malware.
+  tool_hint: regripper (registry)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: unusual_process_creation
+  pattern: Creation of processes with unusual names or paths, especially in system directories
+  severity_baseline: low
+  description: Identifies potential malicious activity.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: suspicious_file_modifications
+  pattern: Modification of system or critical application files outside normal business hours
+  severity_baseline: medium
+  description: Detects potential tampering with software.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - disk_image
+- id: unusual_service_changes
+  pattern: Modification of Windows services to start automatically or changes in service dependencies
+  severity_baseline: medium
+  description: Indicates potential persistence mechanisms.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: uncommon_browser_activity
+  pattern: Unexpected or unauthorized access to websites, downloads of suspicious files through browsers
+  severity_baseline: low
+  description: Detects potential phishing or malware download.
+  tool_hint: browser (browser artifacts)
+  applicable_evidence_types:
+  - browser_artifact
+source_url: https://cyberdefenders.org/blog/start-your-career-as-a-soc-analyst/
+source_title: 'How to Become a SOC Analyst: Career Path & Tools Guide'

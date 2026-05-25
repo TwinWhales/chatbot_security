@@ -1,0 +1,5 @@
+{
+  "url": "https://github.com/EZToolsManuals/EZToolsManuals/blob/main/manuscript/timeapp.txt",
+  "title": "timeapp",
+  "content": "# TimeApp\n\n## TimeApp Introduction\n\nTimeApp is a tool created by Eric Zimmerman that provides multiple functions: current time, stopwatch, countdown timer, and current IP address.\n\n## TimeApp Screenshots\n\n![](timeapp\\TimeApp1.jpg)\n\n![](timeapp\\TimeApp2.jpg)\n\n![](timeapp\\TimeApp3.jpg)\n\n![](timeapp\\TimeApp4.jpg)\n\n![](timeapp\\TimeApp5.jpg)\n\n## TimeApp References\n\n### Associated GitHub Repositories\n\n* <https://github.com/EricZimmerman/timeapp> is the GitHub repository for TimeApp\n\n### Download TimeApp\n\nTimeApp can be downloaded from <https://ericzimmerman.github.io/#!index.md>\n"
+}

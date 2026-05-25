@@ -1,0 +1,67 @@
+22 validation errors for ToolMetadata
+display_name
+  Field required [type=missing, input_value={'name': 'LECmd', 'descri...NK', 'tool_id': 'lecmd'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing
+category
+  Field required [type=missing, input_value={'name': 'LECmd', 'descri...NK', 'tool_id': 'lecmd'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing
+applicable_evidence_types
+  Field required [type=missing, input_value={'name': 'LECmd', 'descri...NK', 'tool_id': 'lecmd'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing
+command_templates
+  Field required [type=missing, input_value={'name': 'LECmd', 'descri...NK', 'tool_id': 'lecmd'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing
+usage_description
+  Field required [type=missing, input_value={'name': 'LECmd', 'descri...NK', 'tool_id': 'lecmd'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing
+name
+  Extra inputs are not permitted [type=extra_forbidden, input_value='LECmd', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+description
+  Extra inputs are not permitted [type=extra_forbidden, input_value='A tool for parsing .LNK ...ess on Windows systems.', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+version
+  Extra inputs are not permitted [type=extra_forbidden, input_value='N/A', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+author
+  Extra inputs are not permitted [type=extra_forbidden, input_value='Eric Zimmerman', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+license
+  Extra inputs are not permitted [type=extra_forbidden, input_value='MIT', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+dependencies
+  Extra inputs are not permitted [type=extra_forbidden, input_value=[], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+categories
+  Extra inputs are not permitted [type=extra_forbidden, input_value=['File Analysis', 'Forensic Tools'], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+usage
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'commandLineOptions': ['...\XPS Viewer.lnk" --mp']}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+outputFormats
+  Extra inputs are not permitted [type=extra_forbidden, input_value=['Console', 'CSV', 'JSON', 'XML', 'HTML'], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+features
+  Extra inputs are not permitted [type=extra_forbidden, input_value=['Parses .LNK files to ex...s for further analysis'], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+limitations
+  Extra inputs are not permitted [type=extra_forbidden, input_value=[], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+examples
+  Extra inputs are not permitted [type=extra_forbidden, input_value=[{'description': 'Parsing....lnk" --html c:\\temp'}], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+outputDetails
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'Console': ['Timestamps:...ation of parsed data.']}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+importantDataPoints
+  Extra inputs are not permitted [type=extra_forbidden, input_value={'Timestamps': ['SourceCr...CAddress', 'MACVendor']}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+references
+  Extra inputs are not permitted [type=extra_forbidden, input_value=['https://github.com/eric...nd-jlecmd-updated.html'], input_type=list]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+download
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://ericzimmerman.github.io/#!index.md', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+sampleData
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://github.com/Andre...m/tree/main/Windows/LNK', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden

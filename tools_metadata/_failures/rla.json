@@ -1,0 +1,48 @@
+{
+  "tool_id": "rla",
+  "display_name": "Registry Log Analyzer",
+  "version_supported": "",
+  "category": "registry_analysis",
+  "subcategory": "registry_hive_repair",
+  "applicable_evidence_types": [
+    "registry_hive"
+  ],
+  "platform": "windows",
+  "input_format": [
+    "dat",
+    "hiv"
+  ],
+  "output_format": "json | csv | text",
+  "output_size_estimate": "small",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\RLA.exe --help",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "repair_hive",
+      "template": ".\\RLA.exe -f {evidence_path} --out {output_directory}",
+      "when": "When a specific hive needs to be repaired."
+    },
+    {
+      "name": "repair_directory",
+      "template": ".\\RLA.exe -d {evidence_directory} --out {output_directory}",
+      "when": "When multiple hives in a directory need to be repaired."
+    }
+  ],
+  "usage_description": "RLA is used for repairing dirty Windows Registry hives by replaying transaction logs, ensuring all possible data within the hive is parsed.",
+  "suspicious_indicators": [
+    {
+      "id": "dirty_hive",
+      "pattern": "Hive marked as dirty with transaction logs present.",
+      "severity_baseline": "low",
+      "description": "Indicates potential corruption or tampering."
+    }
+  ],
+  "known_false_positives": [],
+  "reference_urls": [
+    "https://ericzimmerman.github.io/#!index.md"
+  ]
+}

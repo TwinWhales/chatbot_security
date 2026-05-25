@@ -1,0 +1,60 @@
+topic: Black Basta Ransomware Detection & Response
+indicators:
+- id: black-basta-shadow-copy-deletion
+  pattern: vssadmin.exe with 'delete shadows /all /quiet' arguments
+  severity_baseline: high
+  description: Indicates potential ransomware activity by deleting shadow copies.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - registry_hive
+- id: black-basta-safe-mode-boot
+  pattern: bcdedit.exe with '/set safeboot' arguments
+  severity_baseline: high
+  description: Indicates potential ransomware activity by booting into Safe Mode.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - registry_hive
+- id: black-basta-mimikatz-process-injection
+  pattern: process injection into lsass.exe or sekurlsa::logonpasswords, lsadump::dcsync commands
+  severity_baseline: high
+  description: Indicates potential ransomware activity by using Mimikatz for privilege escalation.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - memory_dump
+- id: black-basta-ransom-note-creation
+  pattern: readme.txt files appearing across multiple directories simultaneously
+  severity_baseline: high
+  description: Indicates potential ransomware activity by dropping ransom notes.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - text_log
+- id: black-basta-file-extension-changes
+  pattern: High-volume modifications to files with the .basta extension
+  severity_baseline: high
+  description: Indicates potential ransomware activity by changing file extensions.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - file_system
+- id: black-basta-cobalt-strike-beaconing
+  pattern: Periodically, outbound connections to unfamiliar IPs with Cobaly Strike or SystemBC services
+  severity_baseline: high
+  description: Indicates potential ransomware activity by using Cobalt Strike for C2 communication.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - network_traffic
+- id: black-basta-tor-traffic
+  pattern: Connections to known Tor entry/exit nodes
+  severity_baseline: high
+  description: Indicates potential ransomware activity by using Tor for C2 communication.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - network_traffic
+- id: black-basta-rclone-traffic
+  pattern: Large outbound data transfer to cloud storage providers (Mega, Dropbox)
+  severity_baseline: high
+  description: Indicates potential ransomware activity by exfiltrating data.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - network_traffic
+source_url: https://cyberdefenders.org/blog/black-basta-ransomware/
+source_title: Black Basta Ransomware Detection & Response

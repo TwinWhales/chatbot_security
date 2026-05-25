@@ -1,0 +1,43 @@
+{
+  "command": ".\\bstrings.exe -d 'D:\\DFIRArtifactMuseum\\Windows' --lr ipv4 --fr C:\\temp\\results.txt --mask *.txt --ms 10",
+  "description": "This command searches for IPv4 addresses in all .txt files within the specified directory, but only processes files smaller than 10 bytes.",
+  "examples": [
+    {
+      "command": ".\\bstrings.exe -d 'D:\\DFIRArtifactMuseum\\Windows' --ls powershell",
+      "description": "Searches for the string 'powershell' in all files within the specified directory."
+    },
+    {
+      "command": ".\\bstrings.exe -p",
+      "description": "Displays a list of built-in regular expressions available in bstrings."
+    },
+    {
+      "command": ".\\bstrings.exe -d 'D:\\DFIRArtifactMuseum\\Windows' --fs C:\\temp\\searchterms.txt",
+      "description": "Searches for terms listed in the file 'C:\\temp\\searchterms.txt' within all files in the specified directory."
+    },
+    {
+      "command": ".\\bstrings.exe -d 'D:\\DFIRArtifactMuseum\\Windows' --lr ipv4 --fr C:\\temp\\results.txt",
+      "description": "Searches for IPv4 addresses using a regular expression and saves results to 'C:\\temp\\results.txt'."
+    },
+    {
+      "command": ".\\bstrings.exe -d 'D:\\DFIRArtifactMuseum\\Windows' --ar [\\x20-\\x37]",
+      "description": "Searches for strings using a specified ASCII range in code page 1252."
+    }
+  ],
+  "resources": [
+    {
+      "title": "Data Recovery Blog 2",
+      "url": "https://leahycenterblog.champlain.edu/2020/05/01/data-recovery-blog-2-2/"
+    },
+    {
+      "title": "bstrings v1.0 Released!",
+      "url": "https://binaryforay.blogspot.com/2016/02/bstrings-10-released.html"
+    },
+    {
+      "title": "bstrings v1.1 Released!",
+      "url": "https://binaryforay.blogspot.com/2016/04/bstrings-v11-released.html"
+    }
+  ],
+  "downloadLink": "https://ericzimmerman.github.io/#!index.md",
+  "version": "v1.1",
+  "tool_id": "bstrings"
+}

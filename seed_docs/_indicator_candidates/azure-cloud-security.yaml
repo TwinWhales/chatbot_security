@@ -1,0 +1,34 @@
+topic: Azure Cloud Security Detection Rules
+indicators:
+- id: impossible_travel
+  pattern: SigninLogs with UserPrincipalName from different countries within a configurable time window (e.g., 60 minutes)
+  severity_baseline: medium
+  description: Detects anomalous sign-in geography that may indicate an attacker's impossible travel.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - evtx_log
+- id: mass_resource_deletion
+  pattern: AzureActivity with operationName containing 'delete' from a single caller identity within a short time window
+  severity_baseline: high
+  description: Detects bulk deletion of Azure resources which may indicate an attacker attempting to destroy evidence.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - evtx_log
+- id: new_role_assignment
+  pattern: AzureActivity with OperationNameValue == 'Microsoft.Authorization/roleAssignments/write' and target role contains
+    'Owner', 'Contributor', or 'UserAccessAdministrator'
+  severity_baseline: high
+  description: Detects new high-privilege role assignments which may indicate an attacker escalating privileges.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - evtx_log
+- id: exfiltration_storage
+  pattern: StorageBlobLogs with operationType = 'GetBlob' from a new IP or GenerateSasToken operations by identities that
+    don't normally do so
+  severity_baseline: medium
+  description: Detects potential data exfiltration via Azure Storage.
+  tool_hint: plaso
+  applicable_evidence_types:
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/azure-cloud-security/
+source_title: 'Azure Cloud Security: SOC analyst Guide'

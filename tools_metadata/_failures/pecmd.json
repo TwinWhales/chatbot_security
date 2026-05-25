@@ -1,0 +1,55 @@
+{
+  "tool_id": "pecmd",
+  "display_name": "PECmd",
+  "version_supported": "",
+  "category": "prefetch",
+  "subcategory": "prefetch",
+  "applicable_evidence_types": [
+    "prefetch"
+  ],
+  "platform": "windows",
+  "input_format": "*.pf",
+  "output_format": "json | csv | text",
+  "output_size_estimate": "medium",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\PECmd.exe -?",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "parse_prefetch_file",
+      "template": ".\\PECmd.exe -f {evidence_path}",
+      "when": "When a single prefetch file needs to be parsed."
+    },
+    {
+      "name": "parse_directory_of_prefetch_files",
+      "template": ".\\PECmd.exe -d {evidence_path}",
+      "when": "When multiple prefetch files in a directory need to be parsed."
+    }
+  ],
+  "usage_description": "PECmd is used for parsing Windows Prefetch files, which can provide evidence of program execution and help establish patterns of activity.",
+  "suspicious_indicators": [
+    {
+      "id": "high_run_count",
+      "pattern": "RunCount: [high number]",
+      "severity_baseline": "high",
+      "description": "A high run count for an executable may indicate frequent or suspicious usage."
+    },
+    {
+      "id": "unknown_executable",
+      "pattern": "ExecutableName: [unknown or suspicious name]",
+      "severity_baseline": "medium",
+      "description": "Unknown or suspiciously named executables can be a sign of malicious activity."
+    }
+  ],
+  "known_false_positives": [
+    "High run counts for common system utilities may not always indicate malicious activity.",
+    "Prefetch files from legitimate software updates might have unexpected high run counts."
+  ],
+  "reference_urls": [
+    "https://github.com/EricZimmerman/PECmd",
+    "https://binaryforay.blogspot.com/2016/01/introducing-pecmd.html"
+  ]
+}

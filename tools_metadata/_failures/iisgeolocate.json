@@ -1,0 +1,42 @@
+{
+  "tool_id": "iisgeolocate",
+  "display_name": "IISGeoLocate",
+  "version_supported": ">2.1.0.0",
+  "category": "log_analysis",
+  "subcategory": "web_server_log",
+  "applicable_evidence_types": [
+    "text_log"
+  ],
+  "platform": "windows",
+  "input_format": "*.log",
+  "output_format": "csv",
+  "output_size_estimate": "medium",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\iisgeolocate.exe -h",
+    "expected_pattern": "iisgeolocate version"
+  },
+  "command_templates": [
+    {
+      "name": "geo_locate_logs",
+      "template": ".\\iisgeolocate.exe -d {evidence_path} --csv C:\\temp",
+      "when": "When IIS logs need to be geolocated and converted to CSV for analysis."
+    }
+  ],
+  "usage_description": "IISGeoLocate is used to geolocate IP addresses found in IIS Logs, converting them into a more analyzable format like CSV.",
+  "suspicious_indicators": [
+    {
+      "id": "geo_location",
+      "pattern": "Unusual geographic locations for user activity.",
+      "severity_baseline": "low",
+      "description": "Indicates potential malicious or anomalous activity."
+    }
+  ],
+  "known_false_positives": [
+    "N/A"
+  ],
+  "reference_urls": [
+    "https://github.com/EricZimmerman/iisGeolocate"
+  ]
+}

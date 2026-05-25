@@ -1,0 +1,7 @@
+{
+    "url": "https://book.hacktricks.xyz/src/todo/radio-hacking/flipper-zero/README",
+    "title": "README",
+    "category": "src/todo/radio-hacking/flipper-zero",
+    "source": "HackTricks",
+    "content": "# Flipper Zero\n\n{{#include ../../../banners/hacktricks-training.md}}\n\nWith [**Flipper Zero**](https://flipperzero.one/) you can:\n\n- **Listen/Capture/Replay radio frequencies:** [**Sub-GHz**](fz-sub-ghz.md)\n- **Read/Capture/Emulate NFC cards:** [**NFC**](fz-nfc.md)\n- **Read/Capture/Emulate 125kHz tags:** [**125kHz RFID**](fz-125khz-rfid.md)\n- **Read/Capture/Send Infrared signals:** [**Infrared**](fz-infrared.md)\n- **Read/Capture/Emulate iButtons:** [**iButton**](../ibutton.md)\n- **Use is as Bad USB**\n- **Use it as security key (U2F)**\n- **Play Snake**\n\n**Other Flipper Zero resources in** [**https://github.com/djsime1/awesome-flipperzer**](https://github.com/djsime1/awesome-flipperzero)\n\n{{#include ../../../banners/hacktricks-training.md}}"
+}

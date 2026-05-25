@@ -1,0 +1,69 @@
+topic: Detecting Malicious PowerShell Activity
+indicators:
+- id: encoded_command_detection
+  pattern: -EncodedCommand or excessive use of Invoke-Expression with suspicious base64 strings
+  severity_baseline: medium
+  description: Indicates potential obfuscation to evade detection.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: unusual_module_usage
+  pattern: Unusual use of modules such as Net.WebClient, Invoke-Command, or Mimikatz-related scripts by non-administrative
+    users
+  severity_baseline: medium
+  description: Suggests potential privilege escalation or lateral movement.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: unusual_parent_child_processes
+  pattern: PowerShell launched from Office macros (e.g., WINWORD.EXE spawning powershell.exe)
+  severity_baseline: low
+  description: Indicates potential initial access via phishing.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: network_connections_from_powershell
+  pattern: PowerShell scripts initiating outbound connections, especially to rare or external destinations
+  severity_baseline: medium
+  description: Suggests potential data exfiltration or command and control activity.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: fileless_in_memory_attacks
+  pattern: PowerShell activity with no corresponding file writes or disk artifacts
+  severity_baseline: high
+  description: Indicates potential in-memory attacks.
+  tool_hint: memory_dump, evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: baseline_deviation
+  pattern: PowerShell usage on endpoints where it is rarely used
+  severity_baseline: low
+  description: Suggests potential initial access or lateral movement.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: known_iocs_in_powershell_scripts
+  pattern: Script blocks or commands matching known malicious signatures
+  severity_baseline: high
+  description: Indicates potential execution of known malicious scripts.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: lateral_movement_patterns
+  pattern: Sequence PowerShell events to reconstruct attack timelines and identify lateral movement patterns
+  severity_baseline: medium
+  description: Helps in understanding the attacker's movements within the network.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/why-logging-powershell-activity-matters-a-soc-analysts/
+source_title: 'PowerShell Attacks Explained: Detection Through Logging'

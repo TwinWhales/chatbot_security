@@ -1,0 +1,71 @@
+topic: Technical Workflow for Reviewing Security Alerts
+indicators:
+- id: failed-login-attempts-correlation
+  pattern: Multiple failed login attempts from the same IP within a short window.
+  severity_baseline: low
+  description: Correlates multiple failed login attempts to identify potential brute force attacks.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: malicious-activity-correlation
+  pattern: IDS alert and corresponding EDR detection of a new, unsigned process initiating connections.
+  severity_baseline: high
+  description: Correlates network alerts with endpoint detections to identify potential malicious activity.
+  tool_hint: evtx (events), volatility (memory)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: outbound-suspicious-traffic
+  pattern: Outbound traffic to a suspicious IP address from a critical server.
+  severity_baseline: high
+  description: Identifies potential data exfiltration or malicious activity by monitoring outbound network traffic.
+  tool_hint: evtx (events), tshark (pcap)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - pcap
+- id: anomalous-network-activity
+  pattern: Anomalous network activity patterns, such as unusual protocol deviations or suspicious destinations.
+  severity_baseline: medium
+  description: Detects potential malicious activities by analyzing network traffic for anomalies.
+  tool_hint: tshark (pcap)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - pcap
+- id: threat-hunting-activity
+  pattern: Threat hunting exercises that form hypotheses and query logs for supporting evidence.
+  severity_baseline: medium
+  description: Conducts proactive analysis to identify potential threats by testing hypotheses.
+  tool_hint: evtx (events), tshark (pcap)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+  - pcap
+- id: dynamic-baselining
+  pattern: Dynamic baselining to adjust for normal variations in network or user behavior.
+  severity_baseline: low
+  description: Adapts detection rules based on historical data to reduce false positives.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: machine-learning-for-alert-prioritization
+  pattern: Use of machine learning models for alert prioritization based on historical incident outcomes.
+  severity_baseline: low
+  description: Improves the accuracy of alert classification using machine learning algorithms.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: llm-for-incident-reporting
+  pattern: LLM-generated recommendations for summarizing alert details and auto-generating incident reports.
+  severity_baseline: low
+  description: Uses large language models to assist in faster triage and documentation of incidents.
+  tool_hint: other
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/how-security-alerts-are-contained/
+source_title: 'Security Alerts: Classification & containment'

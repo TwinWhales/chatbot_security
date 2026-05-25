@@ -1,0 +1,32 @@
+{
+  "case_name": "confluence_elpaco",
+  "case_summary": "A threat actor exploited a known vulnerability (CVE-2023-22527) in an unpatched Confluence server to gain initial access, then deployed ELPACO-team ransomware after establishing persistence and privilege escalation.",
+  "evidence_types_present": [
+    "sysmon_log",
+    "pcap",
+    "batch_file"
+  ],
+  "tools_used": [
+    {
+      "tool_id": "suricata",
+      "purpose": "Detecting network anomalies"
+    },
+    {
+      "tool_id": "sysmon",
+      "purpose": "Monitoring system events for suspicious activities"
+    }
+  ],
+  "ttps": [
+    "T1059.003",
+    "T1047",
+    "T1543.003",
+    "T1016"
+  ],
+  "key_iocs": [
+    "CVE-2023-22527",
+    "91.191.209[.]46",
+    "45.227.254[.]124"
+  ],
+  "source_url": "https://thedfirreport.com/2025/05/19/another-confluence-bites-the-dust-falling-to-elpaco-team-ransomware/",
+  "source_title": "Another Confluence Bites the Dust: Falling to ELPACO-team Ransomware - The DFIR Report"
+}

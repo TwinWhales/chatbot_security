@@ -1,0 +1,78 @@
+{
+  "tool": {
+    "name": "RECmd",
+    "description": "A command-line tool for parsing and analyzing Windows Registry hives.",
+    "version": "latest",
+    "url": "https://ericzimmerman.github.io/#!index.md"
+  },
+  "usage": {
+    "command_line_interface": true,
+    "supported_operating_systems": [
+      "Windows"
+    ],
+    "input_types": [
+      "Registry hive files",
+      "Directory paths containing Registry hives"
+    ],
+    "output_formats": [
+      "Text output",
+      "CSV"
+    ]
+  },
+  "features": [
+    {
+      "name": "Batch processing",
+      "description": "Parses multiple Registry hives in a directory."
+    },
+    {
+      "name": "String search",
+      "description": "Searches for specified strings within key names, value names, and data values."
+    },
+    {
+      "name": "Regular expression support",
+      "description": "Supports regular expressions for more complex string searches."
+    },
+    {
+      "name": "Deleted key/value recovery",
+      "description": "Attempts to recover deleted keys and values from the Registry hive."
+    },
+    {
+      "name": "Transaction log replaying",
+      "description": "Replays transaction logs to ensure data integrity during parsing."
+    },
+    {
+      "name": "Dirty hive handling",
+      "description": "Handles dirty hives by providing warnings and continuing processing."
+    }
+  ],
+  "examples": [
+    {
+      "command": "RECmd.exe --f \"C:\\Temp\\UsrClass 1.dat\" --sk URL --recover false --nl",
+      "description": "Parses a specified file for `URL` within the key names without recovering deleted keys/values and without replaying transaction logs."
+    },
+    {
+      "command": "RECmd.exe --f \"D:\\temp\\UsrClass 1.dat\" --regex --sv '(App|Display)Name'",
+      "description": "Parses a specified file for specified regular expression within the value names."
+    }
+  ],
+  "output": {
+    "text_output": true,
+    "csv_output": true
+  },
+  "dependencies": [],
+  "compatibility": {
+    "minimum_windows_version": "Windows XP SP2",
+    "recommended_environment": "Command Prompt or PowerShell"
+  },
+  "additional_resources": [
+    {
+      "name": "DFIRArtifactMuseum",
+      "url": "https://github.com/AndrewRathbun/DFIRArtifactMuseum/tree/main/Windows/Registry"
+    },
+    {
+      "name": "Vanilla Windows Registry Hives",
+      "url": "https://github.com/AndrewRathbun/VanillaWindowsRegistryHives"
+    }
+  ],
+  "tool_id": "recmd"
+}

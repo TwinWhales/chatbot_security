@@ -1,0 +1,66 @@
+topic: Detecting BEC Attacks in Finance Teams
+indicators:
+- id: suspicious-mailbox-rules
+  pattern: New or altered inbox rules with 'Forward to' or 'Redirect to' unfamiliar external addresses.
+  severity_baseline: medium
+  description: Identifies potential mailbox rule attacks used in BEC campaigns.
+  tool_hint: eztools (windows artifacts)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: suspicious-email-headers
+  pattern: Mismatched 'Received' headers or inconsistent 'Reply-To', 'Return-Path' fields.
+  severity_baseline: medium
+  description: Detects potential email spoofing and impersonation attempts.
+  tool_hint: other
+  applicable_evidence_types:
+  - text_log
+- id: abnormal-login-activity
+  pattern: Unusual login sessions from unfamiliar IPs, outside normal working hours, or from anonymizing VPNs.
+  severity_baseline: low
+  description: Indicates potential account compromise and unauthorized access.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: suspicious-invoice-attachments
+  pattern: Attachments or emails with subtle domain variations, typosquatted addresses, or lookalike domains.
+  severity_baseline: medium
+  description: Detects potential invoice fraud and impersonation attempts.
+  tool_hint: browser (browser artifacts)
+  applicable_evidence_types:
+  - disk_image
+  - text_log
+- id: unusual-outgoing-emails
+  pattern: Unusual outgoing emails, especially those sent to external domains or containing sensitive information.
+  severity_baseline: medium
+  description: Identifies potential data exfiltration attempts.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: failed-authentication-checks
+  pattern: Failed SPF, DKIM, or DMARC authentication checks in email headers.
+  severity_baseline: low
+  description: Indicates potential spoofing attempts and suspicious emails.
+  tool_hint: other
+  applicable_evidence_types:
+  - text_log
+- id: suspicious-mailbox-exports
+  pattern: Suspicious exports or downloads of attachments or email content from the inbox.
+  severity_baseline: medium
+  description: Detects potential data exfiltration and malicious activity.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: unusual-login-locations
+  pattern: Unusual login locations, such as IP addresses from foreign countries or anonymized VPN endpoints.
+  severity_baseline: medium
+  description: Indicates potential account takeover and unauthorized access.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/email-compromise-investigation-training/
+source_title: 'SOC Simulator: BEC Attack in Finance Teams'

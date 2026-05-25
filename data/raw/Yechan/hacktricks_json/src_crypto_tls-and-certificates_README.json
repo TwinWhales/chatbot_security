@@ -1,0 +1,7 @@
+{
+    "url": "https://book.hacktricks.xyz/src/crypto/tls-and-certificates/README",
+    "title": "README",
+    "category": "src/crypto/tls-and-certificates",
+    "source": "HackTricks",
+    "content": "# TLS & Certificates\n\n{{#include ../../banners/hacktricks-training.md}}\n\nThis area is about **X.509 parsing, formats, conversions, and common mistakes**.\n\n## X.509: parsing, formats & common mistakes\n\n### Quick parsing\n\n```bash\nopenssl x509 -in cert.pem -noout -text\nopenssl asn1parse -in cert.pem\n```\n\nUseful fields to inspect:\n\n- Subject / Issuer / SAN\n- Key Usage / EKU\n- Basic Constraints (is it a CA?)\n- Validity window (NotBefore/NotAfter)\n- Signature algorithm (MD5? SHA1?)\n\n### Formats & conversion\n\n- PEM (Base64 with BEGIN/END headers)\n- DER (binary)\n- PKCS#7 (`.p7b`) (cert chain, no private key)\n- PKCS#12 (`.pfx/.p12`) (cert + private key + chain)\n\nConversions:\n\n```bash\nopenssl x509 -in cert.cer -outform PEM -out cert.pem\nopenssl x509 -in cert.pem -outform der -out cert.der\nopenssl pkcs12 -in file.pfx -out out.pem\n```\n\n### Common offensive angles\n\n- Trusting user-provided roots / missing chain validation\n- Weak signature algorithms (legacy)\n- Name constraints / SAN parsing bugs (implementation-specific)\n- Confused deputy issues with client-certificate authentication misbinding\n\n### CT logs\n\n- [https://crt.sh/](https://crt.sh/)\n\n{{#include ../../banners/hacktricks-training.md}}"
+}

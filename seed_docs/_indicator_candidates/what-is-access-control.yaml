@@ -1,0 +1,65 @@
+topic: Access Control Weaknesses and Exploits
+indicators:
+- id: orphaned_account
+  pattern: Service account with no recent activity but high permissions.
+  severity_baseline: low
+  description: Identify inactive accounts with elevated privileges.
+  tool_hint: eztools (windows artifacts)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: excessive_permissions
+  pattern: User or service account with more permissions than necessary for their role.
+  severity_baseline: low
+  description: Detect accounts with overly broad access rights.
+  tool_hint: eztools (windows artifacts)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: misconfigured_roles
+  pattern: Active Directory group or IAM policy that is too permissive.
+  severity_baseline: low
+  description: Identify overly broad role-based access control policies.
+  tool_hint: eztools (windows artifacts)
+  applicable_evidence_types:
+  - memory_dump
+  - registry_hive
+- id: lateral_movement
+  pattern: Use of legitimate tools like PowerShell, RDP, WMI for unauthorized access.
+  severity_baseline: medium
+  description: Detect lateral movement using trusted administrative tools.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: credential_theft
+  pattern: Failed login attempts followed by successful authentication from unknown sources.
+  severity_baseline: medium
+  description: Identify credential stuffing or phishing attacks.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+- id: bloodhound_graph
+  pattern: Graph showing relationships between users, groups, and resources with potential privilege escalation paths.
+  severity_baseline: medium
+  description: Visualize Active Directory relationships for privilege escalation.
+  tool_hint: volatility (memory)
+  applicable_evidence_types:
+  - memory_dump
+- id: zero_trust_violation
+  pattern: Access request that violates zero trust principles, e.g., internal user accessing external resource without proper
+    validation.
+  severity_baseline: high
+  description: Detect violations of the principle of least privilege and continuous validation.
+  tool_hint: plaso (timeline)
+  applicable_evidence_types:
+  - memory_dump
+  - evtx_log
+- id: audit_logging_missing
+  pattern: Lack of comprehensive logs for access events, especially from critical systems.
+  severity_baseline: low
+  description: Identify environments with inadequate audit logging.
+  tool_hint: evtx (events)
+  applicable_evidence_types:
+  - evtx_log
+source_url: https://cyberdefenders.org/blog/what-is-access-control/
+source_title: What is access control? | CyberDefenders Blog

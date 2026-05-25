@@ -1,0 +1,53 @@
+{
+  "tool_id": "sqlecmd",
+  "display_name": "SQLECmd",
+  "version_supported": "",
+  "category": "browser_artifact",
+  "subcategory": "sqlite_database",
+  "applicable_evidence_types": [
+    "browser_artifact"
+  ],
+  "platform": "windows",
+  "input_format": "*.db, *.sqlite",
+  "output_format": "json | csv",
+  "output_size_estimate": "medium",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\SQLECmd.exe -?",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "Parse File",
+      "template": ".\\SQLECmd.exe -f {evidence_path} --csv C:\\temp",
+      "when": "When a specific SQLite file needs to be parsed."
+    },
+    {
+      "name": "Parse Directory",
+      "template": ".\\SQLECmd.exe -d {evidence_path} --csv C:\\temp",
+      "when": "When a directory containing multiple SQLite files needs to be processed."
+    }
+  ],
+  "usage_description": "SQLECmd is used for parsing SQLite databases, often found in web browsers and mobile artifacts. It provides a way to extract structured data from these databases into CSV or JSON formats.",
+  "suspicious_indicators": [
+    {
+      "id": "browser_history",
+      "pattern": "Suspicious URLs or timestamps in browser history.",
+      "severity_baseline": "medium",
+      "description": "Indicates potential browsing activity of interest."
+    },
+    {
+      "id": "login_credentials",
+      "pattern": "Unusual login attempts or credentials stored in the database.",
+      "severity_baseline": "high",
+      "description": "Potential evidence of unauthorized access or credential stuffing attacks."
+    }
+  ],
+  "known_false_positives": [
+    "Common web browsing activities that do not indicate malicious behavior."
+  ],
+  "reference_urls": [
+    "https://github.com/EricZimmerman/SQLECmd"
+  ]
+}

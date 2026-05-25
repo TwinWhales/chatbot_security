@@ -1,0 +1,33 @@
+{
+  "tool_id": "eztools_powershellcmd",
+  "display_name": "EZ Tools PowerShell vs CMD Guidance",
+  "version_supported": "",
+  "category": "other",
+  "subcategory": "guidance",
+  "applicable_evidence_types": [
+    "unknown"
+  ],
+  "platform": "windows",
+  "input_format": [],
+  "output_format": "text",
+  "output_size_estimate": "small",
+  "parallelizable": false,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\eztools_powershellcmd.exe --help",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "example_command",
+      "template": ".\\eztools_powershellcmd.exe -f {evidence_path} --csv C:\\temp",
+      "when": "When using MFTECmd with a file path containing special characters like $MFT or $J"
+    }
+  ],
+  "usage_description": "Provides guidance on the differences between using PowerShell and Command Prompt when running EZ Tools commands, specifically for MFTECmd.",
+  "suspicious_indicators": [],
+  "known_false_positives": [],
+  "reference_urls": [
+    "https://github.com/eztools/eztools"
+  ]
+}

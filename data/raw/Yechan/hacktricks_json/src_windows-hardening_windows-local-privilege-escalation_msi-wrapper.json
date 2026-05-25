@@ -1,0 +1,7 @@
+{
+    "url": "https://book.hacktricks.xyz/src/windows-hardening/windows-local-privilege-escalation/msi-wrapper",
+    "title": "msi-wrapper",
+    "category": "src/windows-hardening/windows-local-privilege-escalation",
+    "source": "HackTricks",
+    "content": "# MSI Wrapper\n\n{{#include ../../banners/hacktricks-training.md}}\n\nDownload the free version app from [https://www.exemsi.com/documentation/getting-started/](https://www.exemsi.com/download/), execute it and wrap the \"malicious\" binary on it.\\\nNote that you can wrap a \"**.bat**\" if you **just** want to **execute** **command lines (instead of cmd.exe select the .bat file)**\n\n.png>)\n\nAnd this is the most important part of the configuration:\n\n.png>)\n\n.png>)\n\n.png>)\n\n(Please, note that if you try to pack your own binary you will be able to modify these values)\n\nFrom here just click on **next buttons** and the last **build button and your installer/wrapper will be generated.**\n\n{{#include ../../banners/hacktricks-training.md}}"
+}

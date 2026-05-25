@@ -1,0 +1,7 @@
+{
+    "url": "https://book.hacktricks.xyz/src/generic-methodologies-and-resources/phishing-methodology/clone-a-website",
+    "title": "clone-a-website",
+    "category": "src/generic-methodologies-and-resources/phishing-methodology",
+    "source": "HackTricks",
+    "content": "# Cloning a Website\n\n{{#include ../../banners/hacktricks-training.md}}\n\nFor a phishing assessment sometimes it might be useful to completely **clone/dump a website**.\n\nNote that you can add also some payloads to the cloned website like a BeEF hook to \"control\" the tab of the user.\n\nThere are different tools you can use for this purpose:\n\n## wget\n\n```bash\nwget --mirror --page-requisites --convert-links --adjust-extension <URL>\ncd <URL>\npython3 -m http.server 8000\n```\n\n## goclone\n\n```bash\n#https://github.com/imthaghost/goclone\ngoclone <url>\n```\n\n## Social Engineering Toolit\n\n```bash\n#https://github.com/trustedsec/social-engineer-toolkit\n```\n\n{{#include ../../banners/hacktricks-training.md}}"
+}

@@ -1,0 +1,36 @@
+{
+  "case_name": "lunar_spider_invasion",
+  "case_summary": "A Lunar Spider group used a tax form disguised JavaScript file to deploy Brute Ratel, Latrodectus, Cobalt Strike, and other malware over nearly two months, exfiltrating data via FTP.",
+  "evidence_types_present": [
+    "memory_dump",
+    "registry_hive",
+    "pcap"
+  ],
+  "tools_used": [
+    {
+      "tool_id": "volatility3",
+      "purpose": "Memory analysis for Brute Ratel and Latrodectus"
+    },
+    {
+      "tool_id": "yara",
+      "purpose": "Scanning process memory for malware patterns"
+    },
+    {
+      "tool_id": "plaso",
+      "purpose": "Timeline analysis of system events"
+    }
+  ],
+  "ttps": [
+    "T1059.003",
+    "T1222.001",
+    "T1047",
+    "T1071.001"
+  ],
+  "key_iocs": [
+    "hxxp://91.194.11[.]64/MSI.msi",
+    "193.168.143[.]196",
+    "hxxps://cloudmeri.com/comm[.]php"
+  ],
+  "source_url": "https://thedfirreport.com/2025/09/29/from-a-single-click-how-lunar-spider-enabled-a-near-two-month-intrusion/",
+  "source_title": "From a Single Click: How Lunar Spider Enabled a Near Two-Month Intrusion - The DFIR Report"
+}

@@ -1,0 +1,58 @@
+{
+  "tool_id": "ezviewer",
+  "display_name": "EZViewer",
+  "version_supported": "",
+  "category": "other",
+  "subcategory": "file_viewer",
+  "applicable_evidence_types": [
+    "text_log",
+    "unknown"
+  ],
+  "platform": "windows",
+  "input_format": [
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".txt",
+    ".log",
+    ".rtf",
+    ".otd",
+    ".htm",
+    ".html",
+    ".mht",
+    ".csv",
+    ".pdf",
+    "*.hex"
+  ],
+  "output_format": "n/a",
+  "output_size_estimate": "n/a",
+  "parallelizable": false,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": "ezviewer --help",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "view_file",
+      "template": "ezviewer {evidence_path}",
+      "when": "when viewing a file of unknown or unsupported type"
+    }
+  ],
+  "usage_description": "EZViewer is a standalone viewer for various file types, useful in DFIR scenarios where the original application to open specific file formats may not be available.",
+  "suspicious_indicators": [
+    {
+      "id": "unusual_file_content",
+      "pattern": "Suspicious content or structure within a document or log file.",
+      "severity_baseline": "low",
+      "description": "Content that could indicate malicious activity."
+    }
+  ],
+  "known_false_positives": [
+    "Hex view of binary data is normal for unsupported files."
+  ],
+  "reference_urls": [
+    "https://ericzimmerman.github.io/#!index.md"
+  ]
+}

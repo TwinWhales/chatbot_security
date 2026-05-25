@@ -1,0 +1,59 @@
+{
+  "tool_id": "evtxecmd",
+  "display_name": "EvtxECmd",
+  "version_supported": ">1.0.0",
+  "category": "log_analysis",
+  "subcategory": "evtx_log",
+  "applicable_evidence_types": [
+    "evtx_log"
+  ],
+  "platform": [
+    "windows"
+  ],
+  "input_format": [
+    "evtx"
+  ],
+  "output_format": "json | csv | text",
+  "output_size_estimate": "medium",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": ".\\EvtxECmd.exe -?",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "parse_single_evtx_file_csv",
+      "template": ".\\EvtxECmd.exe -f {evidence_path} --csv D:\\evtx_output",
+      "when": "When you need to parse a single .evtx file and output the results in CSV format."
+    },
+    {
+      "name": "parse_single_evtx_file_json",
+      "template": ".\\EvtxECmd.exe -f {evidence_path} --json D:\\json_output",
+      "when": "When you need to parse a single .evtx file and output the results in JSON format."
+    }
+  ],
+  "usage_description": "EvtxECmd is used for parsing Windows event logs (.evtx files) which can provide valuable forensic artifacts such as program execution, NTFS file system changes, RDP sessions, account lockouts, and more.",
+  "suspicious_indicators": [
+    {
+      "id": "event_id_4625",
+      "pattern": "Event ID 4625: An event log entry was suppressed due to duplicate events within a specified time period.",
+      "description": "This can indicate potential data loss or suppression of critical security events."
+    },
+    {
+      "id": "event_id_4720",
+      "pattern": "Event ID 4720: A user account was logged off, which may be indicative of unauthorized access or account compromise.",
+      "description": "This event can help in identifying suspicious activities related to user sessions."
+    }
+  ],
+  "references": [
+    {
+      "title": "Introducing EvtxECmd!!",
+      "url": "https://binaryforay.blogspot.com/2019/04/introducing-evtxecmd.html"
+    },
+    {
+      "title": "Enhancing Event Log Analysis with EvtxEcmd using KAPE",
+      "url": "https://www.youtube.com/watch?v=BIkyWexMF0I"
+    }
+  ]
+}

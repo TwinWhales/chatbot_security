@@ -1,0 +1,48 @@
+{
+  "tool_id": "mftexplorer",
+  "display_name": "MFT Explorer",
+  "version_supported": "",
+  "category": "other",
+  "subcategory": "file_system_analysis",
+  "applicable_evidence_types": [
+    "unknown"
+  ],
+  "platform": "windows",
+  "input_format": "*.mft",
+  "output_format": "json | csv | text",
+  "output_size_estimate": "small",
+  "parallelizable": false,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": "mftexplorer --help",
+    "expected_pattern": "Usage"
+  },
+  "command_templates": [
+    {
+      "name": "basic_usage",
+      "template": "mftexplorer {evidence_path}",
+      "when": "When you want to explore an $MFT file visually."
+    }
+  ],
+  "usage_description": "MFT Explorer is a tool for forensic examiners to visualize and explore the contents of an $MFT file, aiding in file system analysis.",
+  "suspicious_indicators": [
+    {
+      "id": "file_access",
+      "pattern": "Recent access to suspicious files or directories.",
+      "severity_baseline": "low",
+      "description": "Indicates potential user activity."
+    },
+    {
+      "id": "modified_files",
+      "pattern": "Files with recent modifications.",
+      "severity_baseline": "low",
+      "description": "May indicate changes made by a user or malware."
+    }
+  ],
+  "known_false_positives": [
+    "Visual exploration of $MFT files can show normal user activities that may be mistaken for suspicious behavior without context."
+  ],
+  "reference_urls": [
+    "https://ericzimmerman.github.io/#!index.md"
+  ]
+}

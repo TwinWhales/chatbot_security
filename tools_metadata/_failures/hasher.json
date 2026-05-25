@@ -1,0 +1,42 @@
+{
+  "tool_id": "hasher",
+  "display_name": "Hasher",
+  "version_supported": "",
+  "category": "hash",
+  "subcategory": "hashing",
+  "applicable_evidence_types": [
+    "file"
+  ],
+  "platform": "windows",
+  "input_format": "*.txt;*.csv;*.log",
+  "output_format": "json | csv | text",
+  "output_size_estimate": "small",
+  "parallelizable": true,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": "hasher --help",
+    "expected_pattern": "Hasher"
+  },
+  "command_templates": [
+    {
+      "name": "hash_file",
+      "template": "hasher {evidence_path}",
+      "when": "When hashing a single file or folder of files."
+    }
+  ],
+  "usage_description": "Generates hash values for files and folders, useful in verifying file integrity.",
+  "suspicious_indicators": [
+    {
+      "id": "hash_mismatch",
+      "pattern": "Hash value does not match expected value.",
+      "severity_baseline": "medium",
+      "description": "Indicates potential tampering or corruption."
+    }
+  ],
+  "known_false_positives": [
+    "Hash values may vary due to different hashing algorithms used by other tools."
+  ],
+  "reference_urls": [
+    "https://ericzimmerman.github.io/#!index.md"
+  ]
+}

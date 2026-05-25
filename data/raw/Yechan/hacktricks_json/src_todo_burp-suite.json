@@ -1,0 +1,7 @@
+{
+    "url": "https://book.hacktricks.xyz/src/todo/burp-suite",
+    "title": "burp-suite",
+    "category": "src/todo",
+    "source": "HackTricks",
+    "content": "# Burp Suite\n\n{{#include ../banners/hacktricks-training.md}}\n\n## Basic Payloads\n\n- **Simple List:** Just a list containing an entry in each line\n- **Runtime File:** A list read in runtime (not loaded in memory). For supporting big lists.\n- **Case Modification:** Apply some changes to a list of strings(No change, to lower, to UPPER, to Proper name - First capitalized and the rest to lower-, to Proper Name -First capitalized an the rest remains the same-.\n- **Numbers:** Generate numbers from X to Y using Z step or randomly.\n- **Brute Forcer:** Character set, min & max length.\n\n[https://github.com/0xC01DF00D/Collabfiltrator](https://github.com/0xC01DF00D/Collabfiltrator) : Payload to execute commands and grab the output via DNS requests to burpcollab.\n\n{{#ref}}\nhttps://medium.com/@ArtsSEC/burp-suite-exporter-462531be24e\n{{#endref}}\n\n[https://github.com/h3xstream/http-script-generator](https://github.com/h3xstream/http-script-generator)\n\n{{#include ../banners/hacktricks-training.md}}"
+}

@@ -1,0 +1,60 @@
+topic: Intrusion Detection Systems (IDS)
+indicators:
+- id: network-traffic-suspicious-pattern
+  pattern: Unusual network traffic patterns, such as unexpected outbound connections or large data transfers.
+  severity_baseline: low
+  description: Detects potential exfiltration attempts or lateral movement.
+  tool_hint: evtx
+  applicable_evidence_types:
+  - network-based-ids
+- id: file-modification-anomaly
+  pattern: Unexpected changes to critical system files or configuration files.
+  severity_baseline: medium
+  description: Indicates possible insider threats or post-compromise activity.
+  tool_hint: hids
+  applicable_evidence_types:
+  - host-based-ids
+- id: process-execution-suspicious
+  pattern: Execution of known malicious processes or unusual process behavior.
+  severity_baseline: medium
+  description: Detects potential malware execution or lateral movement.
+  tool_hint: hids
+  applicable_evidence_types:
+  - host-based-ids
+- id: login-failure-pattern
+  pattern: Repetitive failed login attempts from the same source or unusual login times.
+  severity_baseline: low
+  description: Indicates potential brute-force attacks or credential stuffing.
+  tool_hint: hids
+  applicable_evidence_types:
+  - host-based-ids
+- id: unusual-command-sequence
+  pattern: Execution of a sequence of commands that deviates from the baseline behavior.
+  severity_baseline: medium
+  description: Detects potential lateral movement or privilege escalation attempts.
+  tool_hint: hids
+  applicable_evidence_types:
+  - host-based-ids
+- id: large-data-transfer-pattern
+  pattern: Sudden increase in data transfer volumes, especially to external IPs.
+  severity_baseline: medium
+  description: Indicates potential data exfiltration attempts.
+  tool_hint: evtx
+  applicable_evidence_types:
+  - network-based-ids
+- id: unusual-login-pattern
+  pattern: Login activity from unusual locations or times, especially for privileged accounts.
+  severity_baseline: medium
+  description: Detects potential insider threats or lateral movement.
+  tool_hint: hids
+  applicable_evidence_types:
+  - host-based-ids
+- id: unexpected-service-startup
+  pattern: Unexpected startup of services or scheduled tasks, especially on critical systems.
+  severity_baseline: medium
+  description: Indicates potential post-compromise activity or lateral movement.
+  tool_hint: hids
+  applicable_evidence_types:
+  - host-based-ids
+source_url: https://cyberdefenders.org/blog/what-is-intrusion-detection-system-ids/
+source_title: What is an Intrusion Detection System (IDS)?

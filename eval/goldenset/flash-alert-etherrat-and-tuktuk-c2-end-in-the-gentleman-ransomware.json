@@ -1,0 +1,40 @@
+{
+  "case_name": "gentleman_ransomware",
+  "case_summary": "An intrusion involving EtherRAT and TukTuk malware, leading to the deployment of The Gentlemen ransomware across a network.",
+  "evidence_types_present": [
+    "memory_dump",
+    "evtx_log",
+    "registry_hive",
+    "pcap",
+    "disk_image"
+  ],
+  "tools_used": [
+    {
+      "tool_id": "volatility3",
+      "purpose": "Memory analysis for identifying malware and lateral movement activities"
+    },
+    {
+      "tool_id": "yara",
+      "purpose": "Pattern matching to detect known malicious signatures in memory dumps and files"
+    },
+    {
+      "tool_id": "plaso",
+      "purpose": "Log file analysis, including EVTX logs, for timeline reconstruction"
+    },
+    {
+      "tool_id": "autopsy",
+      "purpose": "Forensic image analysis of disk images"
+    }
+  ],
+  "ttps": [
+    "T1059.001",
+    "T1204"
+  ],
+  "key_iocs": [
+    "1rpc.io",
+    "trycloudflare.com",
+    "supabase.co"
+  ],
+  "source_url": "https://thedfirreport.com/2026/05/11/flash-alert-etherrat-and-tuktuk-c2-end-in-the-gentleman-ransomware/",
+  "source_title": "Flash Alert: EtherRat and TukTuk C2 End in The Gentleman Ransomware - The DFIR Report"
+}

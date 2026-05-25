@@ -1,0 +1,35 @@
+topic: Detection Engineering and Advanced Threat Hunting Techniques
+indicators:
+- id: hypothesis-driven-hunting
+  pattern: LDAP search events with high query volumes from non-admin workstations
+  severity_baseline: medium
+  description: Detects potential attacker activity using structured hypotheses.
+  tool_hint: SIEM (Splunk, Microsoft Sentinel)
+  applicable_evidence_types:
+  - evtx_log
+  - memory_dump
+- id: mitre-attack-t1046
+  pattern: Process hollowing or reflective DLL injection in memory dump
+  severity_baseline: high
+  description: Identifies evasion techniques like process hollowing and reflective DLL injection.
+  tool_hint: Volatility, Autopsy
+  applicable_evidence_types:
+  - memory_dump
+- id: ueba-user-logon-patterns
+  pattern: Statistically significant deviations from established user logon patterns
+  severity_baseline: medium
+  description: Detects anomalies in user behavior using UEBA.
+  tool_hint: UEBA platforms
+  applicable_evidence_types:
+  - evtx_log
+  - registry_hive
+- id: mitre-attack-t1098
+  pattern: Unusual API call sequences or outbound traffic volumes
+  severity_baseline: medium
+  description: Identifies potential lateral movement using MITRE ATT&CK T1098.
+  tool_hint: SIEM (Splunk, Microsoft Sentinel)
+  applicable_evidence_types:
+  - evtx_log
+  - pcap
+source_url: https://cyberdefenders.org/blog/soc-analyst-job/
+source_title: How to get your SOC analyst Job? | CyberDefenders Blog

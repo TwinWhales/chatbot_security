@@ -1,0 +1,51 @@
+{
+  "tool_id": "timelineexplorer",
+  "display_name": "Timeline Explorer",
+  "version_supported": "",
+  "category": "other",
+  "subcategory": "timeline",
+  "applicable_evidence_types": [
+    "csv",
+    "xlsx",
+    "txt"
+  ],
+  "platform": "windows",
+  "input_format": "*.csv; *.tsv; *.xlsx; *.txt",
+  "output_format": "json | csv | text",
+  "output_size_estimate": "medium",
+  "parallelizable": false,
+  "estimated_runtime": "short",
+  "install_check": {
+    "command": "timelineexplorer.exe --help",
+    "expected_pattern": "Timeline Explorer"
+  },
+  "command_templates": [
+    {
+      "name": "open_file",
+      "template": "timelineexplorer.exe {evidence_path}",
+      "when": "to open a CSV, TSV, XLSX or TXT file for analysis"
+    }
+  ],
+  "usage_description": "A user-friendly tool to analyze and visualize CSV, TSV, XLSX, and TXT files. Supports multiple file types and provides features like grouping, tagging, and exporting.",
+  "suspicious_indicators": [
+    {
+      "id": "tagged_rows",
+      "pattern": "Rows with tags indicating potential issues or interest.",
+      "severity_baseline": "low",
+      "description": "Rows that have been tagged by the user may indicate areas of interest for further investigation."
+    },
+    {
+      "id": "large_groupings",
+      "pattern": "Large groupings in columns, possibly indicating significant data points.",
+      "severity_baseline": "info",
+      "description": "Grouping large numbers of rows can help identify patterns or anomalies within the dataset."
+    }
+  ],
+  "known_false_positives": [
+    "Tagging and grouping are common analysis techniques that may not always indicate malicious activity."
+  ],
+  "reference_urls": [
+    "https://github.com/EricZimmerman/TimelineExplorer",
+    "https://aboutdfir.com/toolsandartifacts/windows/timeline-explorer"
+  ]
+}
