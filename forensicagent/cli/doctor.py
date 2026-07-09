@@ -110,6 +110,19 @@ def _check_ollama() -> CheckResult:
     return CheckResult(name=f"ollama ({client.model})", ok=ok, detail=detail)
 
 
+def _check_rag_index() -> CheckResult:
+    """런타임 도구 선별 RAG 인덱스 존재/카운트. 미배선이어도 파이프라인은 동작하므로 optional."""
+    from forensicagent.rag.tool_indexer import tool_collection_status
+
+    ok, n, detail = tool_collection_status()
+    return CheckResult(
+        name=f"rag tool index ({settings.TOOL_COLLECTION})",
+        ok=ok and n > 0,
+        detail=f"{n} tools indexed — {detail}",
+        optional=True,
+    )
+
+
 def _check_embedding_provider() -> CheckResult:
     model = settings.EMBEDDING_MODEL
     if model.startswith("openai:"):
@@ -169,6 +182,7 @@ def run_doctor(console: Console | None = None, *, show_optional: bool = True) ->
     console = console or Console()
 
     core_results = [c() for c in CORE_CHECKS]
+    rag_result = _check_rag_index()
     optional_results = _check_optional_tools() if show_optional else []
 
     table = Table(title="forensicagent - environment check", show_lines=False)
@@ -179,6 +193,10 @@ def run_doctor(console: Console | None = None, *, show_optional: bool = True) ->
     for r in core_results:
         status = "[green]OK[/]" if r.ok else "[red]FAIL[/]"
         table.add_row(status, r.name, r.detail)
+
+    # RAG 인덱스는 optional — 없어도 결정론+LLM 경로로 폴백되므로 miss 로만 표시.
+    rag_status = "[green]OK[/]" if rag_result.ok else "[yellow]miss[/]"
+    table.add_row(rag_status, rag_result.name, rag_result.detail)
 
     if optional_results:
         table.add_section()

@@ -35,7 +35,36 @@ from forensicagent.selector import select
 # ---------------------------------------------------------------------------
 
 
-def do_scan(state: SessionState, c, *, path: Optional[Path] = None) -> None:
+def do_scenario(state: SessionState, c, text: str = "") -> None:
+    """조사 시나리오를 세션에 설정/표시/해제한다.
+
+    /scenario <자유 텍스트>  → 설정 (Selector·Analyzer LLM 컨텍스트로 주입)
+    /scenario                → 현재 시나리오 표시
+    /scenario clear          → 해제
+    """
+    text = text.strip()
+    if not text:
+        if state.scenario:
+            c.print(f"[*] 현재 시나리오: [cyan]{state.scenario}[/]")
+        else:
+            c.print("[dim](시나리오 없음 — /scenario <설명> 으로 설정)[/]")
+        return
+    if text.lower() in ("clear", "none", "reset"):
+        state.scenario = None
+        c.print("[*] 시나리오 해제됨.")
+        return
+    state.scenario = text
+    c.print(f"[green]시나리오 설정됨:[/] {text}")
+    c.print("[dim](/plan 과 /analyze 의 LLM 단계에 컨텍스트로 주입됩니다.)[/]")
+
+
+def do_scan(
+    state: SessionState, c, *, path: Optional[Path] = None,
+    scenario: Optional[str] = None,
+) -> None:
+    if scenario and scenario.strip():
+        state.scenario = scenario.strip()
+        c.print(f"[green]시나리오 설정됨:[/] {state.scenario}")
     target = (path or state.target_path).resolve()
     if not target.exists():
         c.print(f"[red]경로가 없습니다:[/] {target}")
@@ -71,7 +100,9 @@ def do_plan(state: SessionState, c) -> None:
         quick=state.options.quick,
         force_tools=forced,
         use_llm=not state.options.no_llm,
+        use_rag=state.options.use_rag,
         client=state.client(),
+        scenario=state.scenario,
         stage_ms=state.stage_ms,
     )
     state.plan = plan
@@ -86,6 +117,8 @@ def do_plan(state: SessionState, c) -> None:
             f"targets={len(sel.target_evidence)})"
         )
         c.print(f"     [dim]{sel.reason}[/]")
+    if plan.rag_used:
+        c.print("[dim](RAG 관련도 재정렬 + 컨텍스트 주입 적용됨)[/]")
     if plan.llm_used:
         msg = "LLM 우선순위 보강 ok" if not plan.llm_fallback else "LLM 실패 -> 기본 우선순위"
         c.print(f"[dim]({msg})[/]")
@@ -120,7 +153,9 @@ def do_analyze(state: SessionState, c) -> None:
         state.bundle.results,
         state.tool_metas,
         use_llm=not state.options.no_llm,
+        use_rag=state.options.use_rag,
         client=state.client(),
+        scenario=state.scenario,
         stage_ms=state.stage_ms,
     )
     state.analyses = analyses
@@ -238,10 +273,12 @@ def do_status(state: SessionState, c) -> None:
     o = state.options
     t = Table(title="session", show_header=False, show_lines=False)
     t.add_row("path", str(state.target_path))
+    t.add_row("scenario", state.scenario or "-")
     t.add_row("output_dir", str(state.output_dir))
     t.add_row("tools loaded", str(len(state.tool_metas)))
     t.add_row("no_llm", str(o.no_llm))
     t.add_row("quick", str(o.quick))
+    t.add_row("use_rag", str(o.use_rag))
     t.add_row("max_depth", str(o.max_depth))
     t.add_row("timeout_sec", str(o.timeout_sec or "default"))
     t.add_row("forced_tools", ",".join(o.forced_tools) or "-")
@@ -264,6 +301,8 @@ def do_set(state: SessionState, c, key: str, value: str) -> None:
         state._client = None  # 다음 호출 때 다시 생성
     elif key == "quick":
         o.quick = _to_bool(value)
+    elif key == "rag":
+        o.use_rag = _to_bool(value)
     elif key == "max_depth":
         o.max_depth = int(value)
     elif key == "timeout":
@@ -277,7 +316,7 @@ def do_set(state: SessionState, c, key: str, value: str) -> None:
     else:
         c.print(f"[red]알 수 없는 키:[/] {key}")
         c.print(
-            "  가능: no_llm, quick, max_depth, timeout, tools, output_dir, path"
+            "  가능: no_llm, quick, rag, max_depth, timeout, tools, output_dir, path"
         )
         return
     c.print(f"[green]ok[/] {key} = {value}")
@@ -335,6 +374,7 @@ def do_help(c) -> None:
     c.print(
         "[bold]commands[/]\n"
         "  [cyan]/scan[/] [path]         증거 인벤토리 작성\n"
+        "  [cyan]/scenario[/] <설명>     조사 시나리오 설정 (plan/analyze LLM 에 주입)\n"
         "  [cyan]/plan[/]                도구 선별 (selector)\n"
         "  [cyan]/run[/]                 선별된 도구 실행\n"
         "  [cyan]/analyze[/]             출력에서 의심항목 추출\n"
@@ -368,6 +408,7 @@ class _Cmd:
 def _build_table(state: SessionState, c) -> dict[str, _Cmd]:
     return {
         "scan": _Cmd("scan", lambda *a: do_scan(state, c, path=Path(a[0]) if a else None), 0, 1),
+        "scenario": _Cmd("scenario", lambda *a: do_scenario(state, c, " ".join(a)), 0, 99),
         "inventory": _Cmd("inventory", lambda *a: do_show(state, c, "inventory")),
         "inv": _Cmd("inv", lambda *a: do_show(state, c, "inventory")),
         "plan": _Cmd("plan", lambda *a: do_plan(state, c)),

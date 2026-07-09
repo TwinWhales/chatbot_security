@@ -40,6 +40,9 @@ app = typer.Typer(
 tools_app = typer.Typer(help="Tool metadata management.")
 app.add_typer(tools_app, name="tools")
 
+rag_app = typer.Typer(help="RAG index management (tool-metadata corpus).")
+app.add_typer(rag_app, name="rag")
+
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -59,17 +62,8 @@ def _approve(c, *, auto: bool, prompt: str) -> bool:
     return answer in ("", "y", "yes")
 
 
-def _resolve_tools_dir() -> Path:
-    tools_dir = Path(settings.TOOLS_METADATA_DIR)
-    if not tools_dir.exists() or not any(tools_dir.glob("*.y*ml")):
-        repo_tools = Path.cwd() / "tools_metadata"
-        if repo_tools.exists() and any(repo_tools.glob("*.y*ml")):
-            tools_dir = repo_tools
-    return tools_dir
-
-
 def _load_tools_or_exit(c) -> tuple[Path, list]:
-    tools_dir = _resolve_tools_dir()
+    tools_dir = settings.resolve_tools_dir()
     tool_metas = load_all_tools(tools_dir)
     if not tool_metas:
         c.print(
@@ -107,6 +101,14 @@ def root(
         False, "--no-llm",
         help="Skip LLM ranking and LLM analysis (deterministic only).",
     ),
+    no_rag: bool = typer.Option(
+        False, "--no-rag",
+        help="Disable RAG relevance ranking/context (use deterministic order).",
+    ),
+    scenario: Optional[str] = typer.Option(
+        None, "--scenario",
+        help="Investigation scenario injected into LLM tool-ranking and analysis.",
+    ),
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir",
         help="Where to write tool outputs + report (default: ./forensicagent_output).",
@@ -134,9 +136,10 @@ def root(
 
     # 인자 없이 호출 + TTY 면 인터랙티브 REPL 로 진입.
     one_shot_signals = (
-        auto or quick or dry_run or no_llm
+        auto or quick or dry_run or no_llm or no_rag
         or tools is not None or path is not None
         or output_dir is not None or timeout != 0
+        or scenario is not None
     )
     if not one_shot_signals and sys.stdin.isatty():
         _, tool_metas = _load_tools_or_exit(c)
@@ -183,7 +186,9 @@ def root(
         quick=quick,
         force_tools=forced or None,
         use_llm=not no_llm,
+        use_rag=not no_rag,
         client=client,
+        scenario=scenario,
         stage_ms=stage_ms,
     )
 
@@ -212,7 +217,7 @@ def root(
         raise typer.Exit(0)
 
     # ---------- 3. Executor ----------
-    out_dir = (output_dir or Path.cwd() / settings.OUTPUT_DIR_NAME).resolve()
+    out_dir = (output_dir.resolve() if output_dir else settings.default_output_dir(target))
     raw_out_dir = out_dir / "raw"
     c.print(f"\n[*] 도구 실행 중 (output → {out_dir})...")
     bundle = execute(
@@ -237,7 +242,9 @@ def root(
         bundle.results,
         tool_metas,
         use_llm=not no_llm,
+        use_rag=not no_rag,
         client=client,
+        scenario=scenario,
         stage_ms=stage_ms,
     )
 
@@ -335,18 +342,19 @@ def install_cmd(
 
 @tools_app.command("list")
 def tools_list() -> None:
-    """List tool metadata YAMLs found in tools_metadata_dir."""
-    # 우선순위: user dir → repo cwd fallback.
-    candidates = [Path(settings.TOOLS_METADATA_DIR), Path.cwd() / "tools_metadata"]
+    """List tool metadata YAMLs found in the resolved tools dir."""
     c = console()
-    for tdir in candidates:
-        yamls = sorted(list(tdir.glob("*.yaml")) + list(tdir.glob("*.yml"))) if tdir.exists() else []
-        if yamls:
-            c.print(f"[bold]tool metadata in {tdir}:[/]")
-            for y in yamls:
-                c.print(f"  - {y.name}")
-            return
-    c.print(f"[yellow]no YAMLs found in: {', '.join(map(str, candidates))}[/]")
+    tdir = settings.resolve_tools_dir()
+    yamls = (
+        sorted(list(tdir.glob("*.yaml")) + list(tdir.glob("*.yml")))
+        if tdir.exists() else []
+    )
+    if yamls:
+        c.print(f"[bold]tool metadata in {tdir}:[/]")
+        for y in yamls:
+            c.print(f"  - {y.name}")
+        return
+    c.print(f"[yellow]no YAMLs found in: {tdir}[/]")
 
 
 @tools_app.command("info")
@@ -354,15 +362,93 @@ def tools_info(
     tool_id: str = typer.Argument(..., help="Tool ID (matches YAML filename stem).")
 ) -> None:
     """Print contents of tool metadata YAML."""
-    candidates = [Path(settings.TOOLS_METADATA_DIR), Path.cwd() / "tools_metadata"]
-    for tdir in candidates:
-        for ext in (".yaml", ".yml"):
-            f = tdir / f"{tool_id}{ext}"
-            if f.exists():
-                console().print(f.read_text(encoding="utf-8"))
-                return
-    console().print(f"[red]not found:[/] {tool_id}")
+    tdir = settings.resolve_tools_dir()
+    for ext in (".yaml", ".yml"):
+        f = tdir / f"{tool_id}{ext}"
+        if f.exists():
+            console().print(f.read_text(encoding="utf-8"))
+            return
+    console().print(f"[red]not found:[/] {tool_id} (in {tdir})")
     raise typer.Exit(1)
+
+
+@rag_app.command("index-tools")
+def rag_index_tools(
+    keep: bool = typer.Option(
+        False, "--keep",
+        help="Add without resetting the collection first (default: overwrite).",
+    ),
+) -> None:
+    """Index tools_metadata/*.yaml into the runtime tool-selection collection."""
+    c = console()
+    tools_dir, tool_metas = _load_tools_or_exit(c)
+    c.print(f"[*] 도구 {len(tool_metas)} 개 인덱싱 중 ({tools_dir}) ...")
+    try:
+        from forensicagent.rag.tool_indexer import index_tools
+    except ImportError as e:  # pragma: no cover
+        c.print(f"[red]RAG 의존성 없음:[/] {e}")
+        raise typer.Exit(2)
+    try:
+        stats = index_tools(tool_metas, overwrite=not keep)
+    except Exception as e:  # noqa: BLE001
+        c.print(
+            f"[red]인덱싱 실패:[/] {type(e).__name__}: {e}\n"
+            "[dim]chromadb / sentence-transformers 설치 여부를 확인하세요 "
+            "(forensicagent doctor).[/]"
+        )
+        raise typer.Exit(2)
+    if stats.errors:
+        for err in stats.errors:
+            c.print(f"[yellow]  ! {err}[/]")
+    c.print(
+        f"[green]완료:[/] collection={stats.collection} "
+        f"tools_indexed={stats.tools_indexed} "
+        f"(embed {stats.embedding_ms}ms, chroma {stats.chroma_ms}ms, "
+        f"total {stats.elapsed_s:.1f}s)"
+    )
+
+
+@app.command("bench")
+def bench_cmd(
+    with_llm: bool = typer.Option(
+        False, "--with-llm",
+        help="Also run +LLM / +RAG+LLM modes (needs Ollama; slow on CPU).",
+    ),
+    no_rebuild: bool = typer.Option(
+        False, "--no-rebuild", help="Reuse existing tool index instead of rebuilding.",
+    ),
+) -> None:
+    """Benchmark RAG reranking vs the deterministic baseline (writes bench/)."""
+    c = console()
+    # bench/ 는 패키지 밖(리포 루트)이라 PROJECT_ROOT 를 path 에 얹고 import.
+    root = str(settings.PROJECT_ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        from bench.harness import run_benchmark
+        from bench.report import render_terminal, save
+    except ImportError as e:
+        c.print(f"[red]bench/ 를 찾을 수 없습니다 ({e}). 리포 루트에서 실행하세요.[/]")
+        raise typer.Exit(2)
+    result = run_benchmark(with_llm=with_llm, rebuild=not no_rebuild)
+    render_terminal(result, c)
+    paths = save(result)
+    c.print(f"\n[green]saved:[/] {paths['json']}")
+    c.print(f"[green]saved:[/] {paths['md']}")
+
+
+@rag_app.command("status")
+def rag_status() -> None:
+    """Show whether the runtime tool-selection index is present and populated."""
+    from forensicagent.rag.tool_indexer import tool_collection_status
+
+    c = console()
+    ok, n, detail = tool_collection_status()
+    status = "[green]OK[/]" if ok and n > 0 else "[yellow]miss[/]"
+    c.print(f"{status} collection=[bold]{settings.TOOL_COLLECTION}[/] count={n}")
+    c.print(f"[dim]{detail}[/]")
+    c.print(f"[dim]USE_RAG={settings.USE_RAG}, TOP_K={settings.RAG_TOP_K}, "
+            f"persist={settings.CHROMA_PERSIST_DIR}[/]")
 
 
 if __name__ == "__main__":

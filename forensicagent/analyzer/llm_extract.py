@@ -69,6 +69,8 @@ def extract(
     evidence_path: str = "",
     budget_chars: int = 12_000,
     client: OllamaClient | None = None,
+    scenario: str | None = None,
+    rag_context: str | None = None,
 ) -> tuple[list[Finding], str, bool, bool]:
     """LLM 으로 finding 추출.
 
@@ -82,13 +84,29 @@ def extract(
 
     client = client or OllamaClient()
     payload = _truncate(raw_text, budget_chars)
+    scenario_block = ""
+    if scenario and scenario.strip():
+        scenario_block = (
+            f"Investigation scenario - prioritize findings relevant to this, "
+            f"but still report other clearly suspicious items:\n{scenario.strip()}\n\n"
+        )
+    rag_block = ""
+    if rag_context and rag_context.strip():
+        rag_block = (
+            "Reference forensic domain knowledge (retrieved; use to judge what "
+            "is suspicious, do not invent findings not in the output):\n"
+            f"{rag_context.strip()}\n\n"
+        )
     try:
         parsed: Any = client.json_chat(
             [
                 ChatMessage(role="system", content=_system_prompt(metadata)),
                 ChatMessage(
                     role="user",
-                    content=f"Tool output:\n```\n{payload}\n```\n\nReturn the JSON now.",
+                    content=(
+                        f"{scenario_block}{rag_block}"
+                        f"Tool output:\n```\n{payload}\n```\n\nReturn the JSON now."
+                    ),
                 ),
             ],
             retry=1,

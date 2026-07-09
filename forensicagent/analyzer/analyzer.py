@@ -35,6 +35,30 @@ CASE_A_MAX = 100 * 1024
 CASE_B_MAX = 4 * 1024 * 1024
 
 
+def _rag_context_for(metadata: ToolMetadata) -> str:
+    """분석 중인 도구의 도메인 스니펫을 TOOL_COLLECTION 에서 검색 (폴백 안전).
+
+    로컬 LLM 의 포렌식 도메인 지식 약점을 보강하는 용도. 실패하면 빈 문자열.
+    """
+    from forensicagent.rag.retrieval import retrieve_tools
+
+    ind = " ".join(
+        f"{i.pattern} {i.description}" for i in metadata.suspicious_indicators
+    ).strip()
+    query = (
+        f"{metadata.display_name} {metadata.category}: "
+        f"what output patterns are suspicious? {ind}"
+    )
+    hits = retrieve_tools(query)  # tool_ids 필터 없음 — 교차 도메인 지식 허용.
+    if not hits:
+        return ""
+    parts = []
+    for h in hits[:3]:
+        compact = " ".join(h.snippet.split())[:400]
+        parts.append(f"- {compact}")
+    return "\n".join(parts)
+
+
 def _read_text(path: str, *, max_bytes: int) -> str:
     p = Path(path)
     if not p.exists():
@@ -71,7 +95,9 @@ def analyze_one(
     metadata: ToolMetadata,
     *,
     use_llm: bool = True,
+    use_rag: bool = True,
     client: OllamaClient | None = None,
+    scenario: str | None = None,
     stage_ms: dict[str, int] | None = None,
 ) -> ToolAnalysis:
     """단일 ExecutionResult 분석."""
@@ -117,12 +143,15 @@ def analyze_one(
     invoked = False
     failed = False
     if use_llm and case != "C":
+        rag_context = _rag_context_for(metadata) if use_rag else ""
         with Stopwatch() as sw_llm:
             llm_findings, summary, invoked, failed = llm_extract(
                 metadata,
                 raw_text,
                 evidence_path=result.target_evidence,
                 client=client,
+                scenario=scenario,
+                rag_context=rag_context or None,
             )
         if stage_ms is not None:
             stage_ms[f"analyze_llm:{metadata.tool_id}"] = (
@@ -155,7 +184,9 @@ def analyze_all(
     tools: dict[str, ToolMetadata],
     *,
     use_llm: bool = True,
+    use_rag: bool = True,
     client: OllamaClient | None = None,
+    scenario: str | None = None,
     stage_ms: dict[str, int] | None = None,
 ) -> list[ToolAnalysis]:
     out: list[ToolAnalysis] = []
@@ -166,7 +197,13 @@ def analyze_all(
             continue
         out.append(
             analyze_one(
-                result, meta, use_llm=use_llm, client=client, stage_ms=stage_ms
+                result,
+                meta,
+                use_llm=use_llm,
+                use_rag=use_rag,
+                client=client,
+                scenario=scenario,
+                stage_ms=stage_ms,
             )
         )
     return out

@@ -37,7 +37,7 @@ logger = logging.getLogger("rag.indexer")
 # cheap to import (e.g. from CLI --help).
 
 
-SEED_ROOT = Path("seed_docs")
+SEED_ROOT = settings.SEED_DOCS_DIR
 
 
 # ---------------------------------------------------------------------------

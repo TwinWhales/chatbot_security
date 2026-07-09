@@ -29,8 +29,8 @@ ROUTER_SCHEMA: dict[str, Any] = {
                     "name": {
                         "type": "string",
                         "enum": [
-                            "scan", "plan", "run", "analyze", "report",
-                            "auto", "show", "status", "set", "cd",
+                            "scan", "scenario", "plan", "run", "analyze",
+                            "report", "auto", "show", "status", "set", "cd",
                             "tools", "clear",
                         ],
                     },
@@ -57,7 +57,8 @@ Output JSON shape (strict):
 }}
 
 Available actions:
-- scan       args: {{ "path"?: string }}        - 증거 인벤토리 작성 (path 생략시 현재 target)
+- scan       args: {{ "path"?: string, "scenario"?: string }}  - 증거 인벤토리 작성 (path 생략시 현재 target; scenario 있으면 함께 설정)
+- scenario   args: {{ "text": string }}          - 조사 시나리오 설정 (selector/analyzer LLM 컨텍스트). "clear" 면 해제
 - plan       args: {{}}                          - selector 실행
 - run        args: {{}}                          - 선별 도구 실행
 - analyze    args: {{}}                          - 의심항목 추출
@@ -87,7 +88,12 @@ Context:
 
 _DISPATCH = {
     "scan": lambda s, c, a: repl_mod.do_scan(
-        s, c, path=Path(a["path"]) if a.get("path") else None
+        s, c,
+        path=Path(a["path"]) if a.get("path") else None,
+        scenario=a.get("scenario"),
+    ),
+    "scenario": lambda s, c, a: repl_mod.do_scenario(
+        s, c, str(a.get("text", ""))
     ),
     "plan": lambda s, c, a: repl_mod.do_plan(s, c),
     "run": lambda s, c, a: repl_mod.do_run(s, c),

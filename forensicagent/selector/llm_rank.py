@@ -27,6 +27,8 @@ _SYSTEM_PROMPT = (
     "Rules:\n"
     " - Avoid redundancy: if two tools cover the same category, prefer the "
     "more authoritative one and lower the other's priority.\n"
+    " - If an investigation scenario is given, raise the priority of tools "
+    "whose output would directly answer it, and lower unrelated ones.\n"
     " - Higher priority = run sooner. Range 1..10, 10 = run first.\n"
     " - Briefly justify each ranking in `reason` (one short sentence, KO or EN).\n"
     " - Reply with ONLY a JSON object of the form:\n"
@@ -46,6 +48,7 @@ def _inventory_summary(inventory: Inventory) -> str:
 def _candidates_block(
     candidates: list[ToolSelection],
     metas: dict[str, ToolMetadata],
+    rag_snippets: dict[str, str] | None = None,
 ) -> str:
     lines = []
     for c in candidates:
@@ -59,6 +62,11 @@ def _candidates_block(
             f"runtime={m.estimated_runtime} parallel={m.parallelizable} "
             f"targets={len(c.target_evidence)} :: {short}"
         )
+        # RAG 로 검색된 도메인 스니펫을 도구별 컨텍스트로 덧붙인다 (있을 때만).
+        snip = (rag_snippets or {}).get(c.tool_id)
+        if snip:
+            compact = " ".join(snip.split())[:280]
+            lines.append(f"    context: {compact}")
     return "\n".join(lines)
 
 
@@ -67,6 +75,9 @@ def rank_with_llm(
     metas: dict[str, ToolMetadata],
     inventory: Inventory,
     client: OllamaClient | None = None,
+    *,
+    scenario: str | None = None,
+    rag_snippets: dict[str, str] | None = None,
 ) -> tuple[list[ToolSelection], bool, bool]:
     """LLM 으로 priority/reason 보강.
 
@@ -79,9 +90,23 @@ def rank_with_llm(
         return [], False, False
 
     client = client or OllamaClient()
+    scenario_block = ""
+    if scenario and scenario.strip():
+        scenario_block = (
+            f"Investigation scenario (prioritize tools that help answer this):\n"
+            f"{scenario.strip()}\n\n"
+        )
+    rag_note = ""
+    if rag_snippets:
+        rag_note = (
+            "Candidates are pre-sorted by semantic relevance (RAG). Treat that "
+            "order as a strong prior and use each tool's `context:` line as "
+            "domain knowledge, but you may still adjust.\n\n"
+        )
     user_msg = (
+        f"{scenario_block}{rag_note}"
         f"Evidence inventory: {_inventory_summary(inventory)}\n\n"
-        f"Candidate tools:\n{_candidates_block(candidates, metas)}\n\n"
+        f"Candidate tools:\n{_candidates_block(candidates, metas, rag_snippets)}\n\n"
         "Return the JSON object now."
     )
 

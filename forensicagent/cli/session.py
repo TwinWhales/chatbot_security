@@ -21,6 +21,7 @@ from forensicagent.tools.schema import ToolMetadata
 class SessionOptions:
     no_llm: bool = False
     quick: bool = False
+    use_rag: bool = True   # RAG 순서/컨텍스트 보강 (의존성 없으면 런타임 자동 폴백).
     max_depth: int = 5
     timeout_sec: int = 0
     forced_tools: list[str] = field(default_factory=list)
@@ -33,6 +34,11 @@ class SessionState:
     output_dir: Path
     tool_metas: dict[str, ToolMetadata]
     options: SessionOptions = field(default_factory=SessionOptions)
+
+    # 조사 시나리오 — 사용자가 /scenario 로 넣는 자유 텍스트. Selector 의 LLM
+    # 우선순위와 Analyzer 의 finding 추출에 컨텍스트로 주입된다. reset_run 이
+    # 지워도 유지되는 세션 수준 컨텍스트.
+    scenario: Optional[str] = None
 
     inventory: Optional[Inventory] = None
     plan: Optional[Plan] = None
@@ -72,7 +78,7 @@ def make_session(
     options: Optional[SessionOptions] = None,
 ) -> SessionState:
     target = (path or Path(os.getcwd())).resolve()
-    out_dir = (output_dir or Path.cwd() / settings.OUTPUT_DIR_NAME).resolve()
+    out_dir = output_dir.resolve() if output_dir else settings.default_output_dir(target)
     return SessionState(
         target_path=target,
         output_dir=out_dir,

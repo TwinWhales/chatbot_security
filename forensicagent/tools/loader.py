@@ -40,8 +40,10 @@ def load_all_tools(directory: str | Path | None = None) -> dict[str, ToolMetadat
     """디렉토리의 모든 *.yaml/*.yml 을 로드. tool_id → ToolMetadata.
 
     잘못된 파일이 있어도 다른 파일 로드는 계속하고, stderr 로 보고한다.
+    directory 를 생략하면 config.resolve_tools_dir() 의 공용 fallback 사슬
+    (env → ~/.forensicagent/tools → repo tools_metadata → cwd) 을 따른다.
     """
-    base = Path(directory or settings.TOOLS_METADATA_DIR)
+    base = Path(directory) if directory is not None else settings.resolve_tools_dir()
     out: dict[str, ToolMetadata] = {}
     if not base.exists():
         logger.warning("tool metadata dir not found: %s", base)
