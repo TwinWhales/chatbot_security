@@ -19,6 +19,7 @@ import json
 import logging
 import shlex
 import shutil
+import string
 import subprocess
 from pathlib import Path
 from typing import Any, Optional, Protocol
@@ -26,6 +27,13 @@ from typing import Any, Optional, Protocol
 from forensicagent.tools.schema import ToolMetadata
 
 logger = logging.getLogger(__name__)
+
+_FMT = string.Formatter()
+
+
+def _placeholder_names(template: str) -> set[str]:
+    """Extract `{name}` placeholders from a format string without raising."""
+    return {field for _, field, _, _ in _FMT.parse(template) if field}
 
 
 class ToolAdapter(Protocol):
@@ -83,14 +91,26 @@ class GenericAdapter:
     # ---- command building ----
 
     def build_command(self, evidence_path: str, **vars: str) -> list[str]:
-        """Pick the first command_template and substitute placeholders.
+        """Pick the first command_template whose placeholders we can satisfy.
 
-        Selector 가 더 똑똑한 템플릿 선택을 한다면 evidence_path 외에
-        추가 변수를 vars 로 넘긴다.
+        Tokenization happens BEFORE substitution so values containing spaces
+        (Windows paths like `C:\\path with spaces\\evt.pf`) stay a single
+        argv element regardless of the caller.
         """
-        tpl = self._meta.command_templates[0].template
-        substituted = tpl.format(evidence_path=evidence_path, **vars)
-        return shlex.split(substituted, posix=False)
+        available: dict[str, str] = {"evidence_path": evidence_path, **vars}
+        last_missing: set[str] | None = None
+        for ct in self._meta.command_templates:
+            needed = _placeholder_names(ct.template)
+            missing = needed - available.keys()
+            if missing:
+                last_missing = missing
+                continue
+            tokens = shlex.split(ct.template, posix=False)
+            return [t.format(**available) for t in tokens]
+        raise KeyError(
+            f"no command_template can be satisfied for {self._meta.tool_id}; "
+            f"last template missing vars: {sorted(last_missing or set())}"
+        )
 
     # ---- output parsing ----
 

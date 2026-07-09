@@ -82,7 +82,7 @@ def _execute_one(
         )
 
     try:
-        argv = adapter.build_command(evidence)
+        argv = adapter.build_command(evidence, output_dir=str(output_dir))
     except (KeyError, IndexError, ValueError) as e:
         return ExecutionResult(
             tool_id=meta.tool_id,

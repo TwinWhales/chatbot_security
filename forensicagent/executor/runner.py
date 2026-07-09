@@ -59,6 +59,16 @@ def run_tool(
     start = time.perf_counter()
     try:
         with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
+            # 어떤 옵션으로 실행했는지 stderr 파일 상단에 기록한다.
+            # (stdout 은 도구의 정형 출력이라 Analyzer 가 그대로 파싱 —
+            #  헤더를 넣으면 JSON 이 깨지므로 stderr 쪽에만 남긴다.)
+            header = (
+                "=== COMMAND EXECUTED ===\n"
+                f"{' '.join(argv)}\n"
+                "========================\n\n"
+            ).encode("utf-8")
+            err_f.write(header)
+            err_f.flush()
             proc = subprocess.Popen(
                 argv,
                 stdout=out_f,
