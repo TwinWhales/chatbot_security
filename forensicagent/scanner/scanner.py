@@ -20,18 +20,25 @@ from forensicagent.scanner.types import Evidence, Inventory
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_DEPTH = 5
-# Skip files larger than this when reading magic bytes (we already read only
-# the first 32 bytes, so this is mostly a safety net for weird FS reports).
-# A 0 means no upper bound — we still header-read regardless of size.
+# scan() 의 크기 상한 게이트. 이 값을 넘는 파일은 검사하지 않고 skipped_files
+# 로만 집계한다 (거대 파일이 스캔을 느리게 만드는 경우 방어). 0 = 무제한.
 MAX_FILE_SIZE_BYTES = 0
 
 # Directories to never descend into.
 _IGNORE_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv"}
 
 
-def _walk(root: Path, max_depth: int) -> list[Path]:
-    """심볼릭 링크 무시 + 깊이 제한 BFS."""
+def _walk(root: Path, max_depth: int) -> tuple[list[Path], bool]:
+    """심볼릭 링크 무시 + 깊이 제한 BFS.
+
+    Returns:
+        (files, depth_limit_hit).
+        depth_limit_hit 은 max_depth 때문에 실제로 하위 디렉토리 하강을
+        끊은 적이 있으면 True — 이 경우 더 깊은 증거를 놓쳤을 수 있다.
+        (_IGNORE_DIRS 로 의도적으로 건너뛴 디렉토리는 여기 포함하지 않는다.)
+    """
     files: list[Path] = []
+    depth_limit_hit = False
     root = root.resolve()
 
     stack: list[tuple[Path, int]] = [(root, 0)]
@@ -54,11 +61,14 @@ def _walk(root: Path, max_depth: int) -> list[Path]:
                         continue
                     if depth + 1 <= max_depth:
                         stack.append((p, depth + 1))
+                    else:
+                        # max_depth 초과로 이 디렉토리를 하강하지 못함.
+                        depth_limit_hit = True
                 elif entry.is_file(follow_symlinks=False):
                     files.append(p)
             except OSError:
                 continue
-    return files
+    return files, depth_limit_hit
 
 
 def scan(
@@ -87,7 +97,8 @@ def scan(
         return inv
 
     with Stopwatch() as sw_walk:
-        files = _walk(root_path, max_depth)
+        files, depth_limit_hit = _walk(root_path, max_depth)
+    inv.depth_limit_hit = depth_limit_hit
     if stage_ms is not None:
         stage_ms["scan_walk"] = stage_ms.get("scan_walk", 0) + sw_walk.elapsed_ms
 
@@ -96,6 +107,11 @@ def scan(
             try:
                 size = p.stat().st_size
             except OSError:
+                inv.skipped_files += 1
+                continue
+            # 크기 상한 게이트 (0 = 무제한). 초과 파일은 검사하지 않고 skip 로 집계.
+            if MAX_FILE_SIZE_BYTES > 0 and size > MAX_FILE_SIZE_BYTES:
+                logger.debug("skip oversized %s (%d bytes)", p, size)
                 inv.skipped_files += 1
                 continue
             inv.scanned_files += 1
