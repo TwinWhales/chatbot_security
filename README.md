@@ -68,7 +68,7 @@ Scanner → Selector → (사용자 승인) → Executor → Analyzer → Report
 | 단계 | 책임 | 디렉토리 |
 |---|---|---|
 | **Scanner** | CWD 의 파일을 magic bytes + 확장자 + 파일명 + 부모 디렉토리 힌트로 식별. 9 magic 시그니처 + 22 확장자 + 6 정규식 + 6 디렉토리 키워드. | `forensicagent/scanner/` |
-| **Selector** | 2 단계 하이브리드. **Stage 1** = 결정론 매칭 (evidence_type ∩ applicable_evidence_types). **Stage 2** = LLM 에게 후보들의 우선순위 + 보강된 reason 만 JSON 으로 요청. 파싱 실패 시 Stage 1 결과 그대로 fallback. | `forensicagent/selector/` |
+| **Selector** | 3 단계 하이브리드. **Stage 1** = 결정론 매칭 (evidence_type ∩ applicable_evidence_types) — 실행 자격 게이트. **RAG** = 증거+시나리오로 도구 메타데이터 컬렉션을 벡터 검색해 후보를 관련도순 재정렬하고 도메인 스니펫을 프롬프트에 주입. **Stage 2** = LLM 에게 우선순위 + 보강된 reason 을 JSON 으로 요청. RAG 는 순서/컨텍스트에만 영향(자격 게이트는 불변), 의존성/질의 실패 시 결정론+LLM 경로로 자동 폴백. LLM 파싱 실패 시 Stage 1 결과 그대로 fallback. | `forensicagent/selector/` |
 | **Executor** | 어댑터 패턴. `GenericAdapter` 가 YAML 의 `command_templates` 와 `install_check` 만으로 동작. `subprocess.Popen` + 타임아웃, `shell=False` (인젝션 차단), stdout/stderr 는 메모리가 아니라 **파일로**. `parallelizable=true` 면 ThreadPool, 아니면 직렬. | `forensicagent/executor/` |
 | **Analyzer** | 출력 크기에 따라 분기 — **Case A** (≤100 KB, rules + LLM 둘 다) / **Case B** (≤4 MB, rules 가 추리고 LLM 으로 자연어 보강) / **Case C** (>4 MB, rules only, LLM 안 부름). `suspicious_indicators.id` 별 specific matcher + 미등록은 키워드 AND fallback. dedup + severity 내림차순. | `forensicagent/analyzer/` |
 | **Reporter** | terminal (Rich 표) + JSON (기계 가독) + Markdown (사람 가독) 동시 출력. 한 파일이 한 포맷, 정해진 디렉토리. | `forensicagent/reporter/` |
@@ -78,9 +78,17 @@ Scanner → Selector → (사용자 승인) → Executor → Analyzer → Report
 - **Scanner / Selector 분리**: "무엇이 있는가" 와 "무엇을 돌릴까" 는 다른
   결정이다. Selector 는 Scanner 결과 + 도구 메타데이터만 보면 되고, 파일
   시스템에 다시 접근하지 않는다.
-- **Selector 의 2 단계**: 결정론 필터 단계가 50 → 10~15 개로 줄여주므로,
-  LLM 컨텍스트가 작아지고 비용/속도가 보존된다. LLM 은 우선순위만 정한다
-  (도구를 직접 호출하지 않으니 LLM 이 hallucinate 한 도구가 실행될 위험 없음).
+- **Selector 의 다단계**: 결정론 필터 단계가 50 → 10~15 개로 줄여주므로,
+  LLM 컨텍스트가 작아지고 비용/속도가 보존된다. 그 사이에 RAG 가 도구
+  메타데이터 코퍼스를 벡터 검색해 (i) 후보를 관련도순으로 재정렬하고
+  (ii) 로컬 LLM 의 약한 포렌식 도메인 지식을 검색된 스니펫으로 보강한다.
+  **RAG 는 절대 자격을 바꾸지 않는다** — Stage 1 을 통과한 도구의 순서와
+  프롬프트 컨텍스트에만 영향을 준다. LLM 은 우선순위만 정한다 (도구를 직접
+  호출하지 않으니 hallucinate 한 도구가 실행될 위험 없음).
+- **RAG 는 옵션이자 폴백-안전**: chromadb / sentence-transformers / 임베딩
+  모델 / 인덱스가 없으면 조용히 결정론+LLM 경로로 폴백한다. 즉 **RAG 가
+  없어도 파이프라인은 항상 동작**하고, `--no-llm` 과도 독립적으로 조합된다.
+  런타임 활성화는 도구 코퍼스 인덱싱 1 회가 전제: `forensicagent rag index-tools`.
 - **Executor 의 어댑터 패턴**: 도구마다 출력 포맷이 다 다르므로, 새 도구를
   추가하는 비용 = YAML 1 개 작성 (혹은 어댑터 클래스 1 개) 수준이다.
 - **Analyzer 의 Case A/B/C**: 로컬 LLM 의 컨텍스트 길이 제약을 코드 흐름에
@@ -153,11 +161,84 @@ known_false_positives:                      # LLM 시스템 프롬프트에 음�
 
 각 사이클 끝에 리포트의 `stage_ms` 키에 들어가는 값:
 - `scan_walk`, `scan_detect` — Scanner
-- `select_filter`, `select_rank`, `select_force` — Selector
+- `select_filter`, `select_rag`, `select_rank`, `select_force` — Selector
 - `execute` — Executor 전체 (도구별 duration_seconds 는 ExecutionResult)
 - `analyze_rules:<tool_id>`, `analyze_llm:<tool_id>` — Analyzer 도구별
 
 JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
+
+---
+
+## Benchmark / RAG performance
+
+**"RAG 로 도구 선별" 이 결정론 베이스라인 대비 실제로 순서 품질을 개선하는가?**
+를 정량화하는 하니스가 `bench/` 에 있다. 아래 수치는 합성 골든셋에 대해
+`forensicagent bench --with-llm` 를 실제로 돌려 얻은 것이다.
+
+### 어떻게 측정했나 (방법론)
+
+- **골든셋**: **14 개 합성·손라벨 영어 케이스** (`bench/goldenset.json`). 각
+  케이스 = 증거 인벤토리(evidence_type + 파일명) + (선택) 영어 시나리오 +
+  **도구별 relevance 등급**(2=핵심 / 1=보조 / 0=무관하지만 자격은 있음).
+  실제 CTF 가 아니라 한 명이 손으로 라벨한 합성 데이터.
+- **4 개 모드 비교**: `deterministic` / `llm` / `rag` / `rag+llm`. 각 케이스를
+  각 모드로 Selector 에 태워 선택 도구·순서·타이밍을 캡처.
+- **핵심 통제**: Stage 1 결정론 자격 게이트는 **모드 간 동일**하다 (같은 도구
+  집합만 통과). 따라서 모드 간 차이는 순전히 **"순서 품질"** 이지, 어떤 도구가
+  자격을 얻느냐가 아니다.
+- **지표**: NDCG@k (지수 gain `(2^rel-1)/log2(rank+1)`), MRR, Precision@k,
+  Recall@k (k=3,5; relevant 임계값 등급≥1). 값은 케이스 평균.
+- **임베딩**: `all-MiniLM-L6-v2` (CPU). 도구 코퍼스는 도구 YAML 자체
+  (`rag/tool_indexer.py`).
+
+### 핵심 결과 (deterministic → RAG)
+
+| metric | deterministic | RAG | delta |
+|---|---|---|---|
+| **NDCG@3** | 0.8249 | 0.8644 | **+0.0395** |
+| **P@3** | 0.6429 | 0.7143 | **+0.0714** |
+| **R@3** | 0.8810 | 0.9643 | **+0.0833** |
+| **MRR** | 0.9524 | 0.9643 | **+0.0119** |
+| NDCG@5 / P@5 / R@5 | — | — | ~flat |
+
+- **top-3 순서 품질이 일관되게 개선**된다. `@5` 지표는 대부분 케이스의 자격
+  통과 도구 수(eligible)가 5 이하라 상위 5 안에 전부 들어가므로 순서가
+  무의미 → flat (NDCG@5 는 한 케이스의 미세 재정렬로 -0.0097).
+- **타이밍**: RAG 검색(임베딩+벡터질의) **~47 ms/쿼리**, LLM 랭킹 **~2.7 s/쿼리**
+  (14b @ CPU), 인덱스 빌드 11 도구 ~27 s (1 회).
+- **정직한 발견**: 이 셋에서 **LLM 랭킹은 순서를 바꾸지 않았다**
+  (`llm == deterministic`, `rag+llm == rag`, 위 delta 와 동일). 즉 순서 개선은
+  **전적으로 RAG 기여**이고, 값비싼 LLM 랭킹은 이 합성셋에선 순서에 기여가 없었다.
+- per-case 는 혼재한다(정직하게 그대로 보고): registry 계열 큰 개선
+  (`registry-usb-history` +0.52, `registry-runkey-persistence` +0.49), 반면
+  evtx 계열은 MiniLM 이 `evtxecmd` 를 `chainsaw` 위로 올려 라벨 대비 -0.20.
+
+### 재현
+
+```bash
+pip install chromadb sentence-transformers
+forensicagent rag index-tools          # 도구 코퍼스 인덱싱 (1회)
+forensicagent bench                    # deterministic vs RAG (빠름)
+forensicagent bench --with-llm         # +LLM/+RAG+LLM 모드 (Ollama 필요, 느림)
+forensicagent bench --no-rebuild       # 인덱스 재빌드 생략
+# 또는: python -m bench.run [--with-llm] [--no-rebuild]
+```
+
+전체 표(집계 + delta + 케이스별 + 방법론 + 한계)는
+[`bench/bench_report.md`](bench/bench_report.md) 에 JSON(`bench_result.json`)과
+함께 저장된다.
+
+### 한계 (수치를 믿기 전에)
+
+- **n=14 합성·단일 라벨러** — 통계적으로 견고하지 않은 지표(indicative). 라벨은
+  분석가 한 명의 판단.
+- 도구 11 개뿐. 일부 evidence type 은 자격 도구가 1 개라 순서가 자명(지표=1.0,
+  모드 무관) → 측정 delta 를 희석. 신호는 다-도구 케이스(registry_hive /
+  evtx_log / source_code_*)에 있다.
+- `all-MiniLM-L6-v2` 는 영어 중심이라 벤치도 영어. 한국어 시나리오는 더 낮게
+  나옴(`FORENSICAGENT_EMBEDDING_MODEL=BAAI/bge-m3` 로 교체 가능).
+- **순서 품질만** 측정 — end-to-end triage 정확도·도구 실행·finding 품질은 아님.
+- RAG 안전속성(자격 밖 도구 승격 불가)·폴백은 이 벤치가 아니라 **단위테스트**가 보증.
 
 ---
 
@@ -294,6 +375,8 @@ forensicagent --quick                  # estimated_runtime: short 만
 forensicagent --tools chainsaw,volatility3   # 특정 도구 강제
 forensicagent --dry-run                # 계획만 출력
 forensicagent --no-llm                 # 결정론만 (Selector/Analyzer LLM off)
+forensicagent --no-rag                 # RAG 재정렬/컨텍스트 끄고 결정론 순서
+forensicagent --scenario "로그인 실패 후 성공 흔적 조사"   # 시나리오 주입
 forensicagent --path /case-03 --output-dir /reports
 ```
 
@@ -305,12 +388,20 @@ forensicagent --path /case-03 --output-dir /reports
 ```bash
 forensicagent tools list               # 사용 가능한 도구
 forensicagent tools info chainsaw      # YAML 상세
-forensicagent doctor                   # 환경 점검
+forensicagent doctor                   # 환경 점검 (RAG 인덱스 카운트 포함)
+forensicagent rag index-tools          # 도구 YAML → 런타임 선별용 벡터 인덱스 (재실행 = 재인덱싱)
+forensicagent rag status               # 인덱스 존재/카운트 확인
 forensicagent --version
 ```
 
 LLM 이 없어도 (Ollama 미설치) `--no-llm` 으로 결정론적으로 돌릴 수 있다 —
 Selector Stage 2 + Analyzer LLM 만 건너뛰고 룰 매처는 그대로 작동.
+
+**RAG 활성화 (선택)**: `pip install chromadb sentence-transformers` 후
+`forensicagent rag index-tools` 로 도구 코퍼스를 1 회 인덱싱하면, Selector 가
+런타임에 벡터 검색으로 후보를 관련도순 재정렬하고 Analyzer 에 도메인 스니펫을
+주입한다. 의존성/인덱스가 없으면 자동으로 결정론+LLM 경로로 폴백하므로,
+설치하지 않아도 파이프라인은 그대로 동작한다.
 
 ---
 
@@ -343,10 +434,10 @@ forensicagent/
 │   ├── detectors.py      # magic / ext / filename / parent dir 시그니처
 │   ├── scanner.py        # 깊이 제한 BFS, 심볼릭 미추적, 헤더만 읽음
 │   └── types.py          # Evidence, Inventory
-├── selector/             # Layer 3 — 도구 선택 (2단계)
-│   ├── filter.py         # Stage 1 결정론
-│   ├── llm_rank.py       # Stage 2 LLM
-│   └── selector.py       # 오케스트레이션 + --quick/--tools
+├── selector/             # Layer 3 — 도구 선택 (결정론 → RAG → LLM)
+│   ├── filter.py         # Stage 1 결정론 (자격 게이트)
+│   ├── llm_rank.py       # Stage 2 LLM (+ RAG 스니펫 컨텍스트)
+│   └── selector.py       # 오케스트레이션 + RAG 재정렬 + --quick/--tools/--no-rag
 ├── executor/             # Layer 4 — 도구 실행
 │   ├── adapter.py        # GenericAdapter + register_adapter
 │   ├── runner.py         # subprocess + timeout + 파일 저장
@@ -361,9 +452,11 @@ forensicagent/
 │   ├── json_out.py       # JSON 직렬화
 │   ├── md_out.py         # Markdown 직렬화
 │   └── reporter.py       # 오케스트레이션
-├── rag/                  # 도구 메타데이터 ChromaDB (lookup-heavy)
+├── rag/                  # 런타임 도구 선별 RAG (ChromaDB)
 │   ├── vector_store.py   # PersistentClient + cosine hnsw
-│   └── embedder.py       # SentenceTransformer + OpenAI 라우팅
+│   ├── embedder.py       # SentenceTransformer + OpenAI 라우팅
+│   ├── tool_indexer.py   # tools_metadata/*.yaml → TOOL_COLLECTION 인덱싱
+│   └── retrieval.py      # 런타임 검색 (Selector/Analyzer 공유, 폴백-안전)
 ├── llm/                  # Ollama 클라이언트
 │   └── ollama_client.py  # chat / json_chat (재시도 + 예외 분리)
 ├── observability/        # cross-cutting

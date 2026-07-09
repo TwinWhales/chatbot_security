@@ -15,11 +15,11 @@
 |---|---|---|
 | CLI | Typer + Rich 진입점, 인터랙티브 UX, 모듈 오케스트레이션 | `forensicagent/cli/` |
 | Scanner | CWD 재귀 스캔. magic bytes + 확장자 + 파일명 패턴으로 증거 식별 | `forensicagent/scanner/` |
-| Selector | 2단계 하이브리드. (1) 결정론 메타데이터 필터 → (2) LLM 우선순위 | `forensicagent/selector/` |
+| Selector | 하이브리드. (1) 결정론 메타데이터 필터=자격 게이트 → (RAG) 벡터 검색으로 후보 재정렬+스니펫 주입 → (2) LLM 우선순위. RAG 는 순서/컨텍스트만, 의존성/질의 실패 시 자동 폴백 | `forensicagent/selector/` |
 | Executor | subprocess 격리 실행, 타임아웃, 도구별 어댑터, 결과 파일 저장 | `forensicagent/executor/` |
 | Analyzer | 도구 출력 → suspicious_indicators 룰 + LLM 하이브리드 추출 | `forensicagent/analyzer/` |
 | Reporter | Rich 터미널 + JSON/MD 동시 저장 | `forensicagent/reporter/` |
-| RAG | 도구 YAML 메타데이터 인덱싱 + lookup (ChromaDB) | `forensicagent/rag/` |
+| RAG | 도구 YAML 메타데이터를 전용 컬렉션(TOOL_COLLECTION)에 인덱싱(`tool_indexer`) + 런타임 검색(`retrieval`, Selector/Analyzer 가 실제 사용). `forensicagent rag index-tools` 로 빌드. ChromaDB | `forensicagent/rag/` |
 | (cross-cutting) | Stopwatch, StageTimings, percentile — 모든 모듈에서 측정 | `forensicagent/observability/` |
 
 각 모듈은 다른 모듈의 출력 dict 를 입력으로 받는 순수 함수 위주이고,
@@ -103,6 +103,19 @@ Phase 1-5 의 모든 코드가 들어왔고 전 파이프라인이 end-to-end �
 (Scanner → Selector → Executor → Analyzer → Reporter, JSON + MD 리포트
 생성까지). README.md / GUIDELINE.md / PROJECT_TOUR.md 가 사용자/협업자용
 정식 문서 (understand_code.md 는 PROJECT_TOUR § 2 에 통합되어 삭제됨).
+
+**2026-07-09 추가 (RAG 런타임 배선 + 벤치)**: "RAG 로 도구 선별" 이 실제
+런타임 경로가 됐다 — `rag/tool_indexer.py`(도구 YAML → TOOL_COLLECTION) +
+`rag/retrieval.py`(폴백-안전). Selector 가 Stage1 후보를 RAG 관련도로 재정렬
+(자격 게이트 불변) + 스니펫을 LLM 프롬프트에 주입, Analyzer 도 도메인 스니펫
+주입. 의존성/인덱스 없으면 결정론+LLM 경로로 자동 폴백. 시나리오 입력
+(`/scenario`, `--scenario`)도 추가. `bench/` 에 정량 벤치 하니스 — 14 개 합성
+손라벨 영어 골든셋으로 deterministic vs RAG 순서 품질 측정: **NDCG@3
+0.8249→0.8644(+0.0395), P@3 +0.0714, R@3 +0.0833, MRR +0.0119** (@5 는 대부분
+eligible≤5 라 flat). RAG 검색 ~47ms/쿼리 vs LLM 랭킹 ~2.7s, 이 셋에선 LLM 이
+순서를 안 바꿔(llm==deterministic) 개선은 전적으로 RAG. 재현: `forensicagent
+rag index-tools` → `forensicagent bench [--with-llm]`. 전체 리포트
+`bench/bench_report.md`. 테스트 89 → **128**.
 
 **2026-05-21 추가**: Claude Code 식 인터랙티브 REPL 을 얹었다. 진입점은
 2 갈래 — 인자 없이 + TTY 면 `forensic>` 셸 진입 (`cli/repl.py` 의 슬래시
