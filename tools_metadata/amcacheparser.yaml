@@ -13,7 +13,7 @@ platform:
   - linux
 
 input_format:
-  - Amcache.hve
+  - name:Amcache.hve
 
 output_format: csv
 output_size_estimate: small

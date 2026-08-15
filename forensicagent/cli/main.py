@@ -55,9 +55,13 @@ def _approve(c, *, auto: bool, prompt: str) -> bool:
     if auto:
         return True
     if not sys.stdin.isatty():
-        # 비대화형이면 기본 yes (스크립트로 돌릴 때 멈추지 않도록).
-        c.print(f"[dim]{prompt} (non-tty, auto-yes)[/]")
-        return True
+        # CI/IDE/pipe 환경에서 외부 분석 도구를 묵시적으로 실행하지 않는다.
+        # 자동화를 원하면 호출자가 의도를 명시하는 --auto 가 필요하다.
+        c.print(
+            "[yellow]비대화형 입력에서는 실행 승인을 받을 수 없습니다. "
+            "자동 실행하려면 --auto 를 명시하세요.[/]"
+        )
+        return False
     answer = c.input(prompt).strip().lower()
     return answer in ("", "y", "yes")
 
@@ -94,8 +98,8 @@ def root(
     ),
     path: Optional[Path] = typer.Option(
         None, "--path",
-        help="Directory to analyze (default: CWD).",
-        exists=False, file_okay=False, dir_okay=True,
+        help="File or directory to analyze (default: CWD).",
+        exists=False, file_okay=True, dir_okay=True,
     ),
     no_llm: bool = typer.Option(
         False, "--no-llm",
@@ -111,7 +115,7 @@ def root(
     ),
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir",
-        help="Where to write tool outputs + report (default: ./forensicagent_output).",
+        help="Where to write outputs (default: ~/.forensicagent/output/<case>).",
     ),
     timeout: int = typer.Option(
         0, "--timeout",
@@ -152,6 +156,10 @@ def root(
         raise typer.Exit(run_repl(state))
 
     target = (path or Path(os.getcwd())).resolve()
+    out_dir = output_dir.resolve() if output_dir else settings.default_output_dir(target)
+    if not target.exists():
+        c.print(f"[red]분석 경로가 없습니다:[/] {target}")
+        raise typer.Exit(2)
     c.print(f"[bold]forensicagent[/] {__version__}")
     c.print(f"[*] 작업 디렉토리: {target}")
 
@@ -160,15 +168,26 @@ def root(
 
     # ---------- 1. Scanner ----------
     c.print("[*] 증거 스캔 중...")
-    inv = scan(target, max_depth=max_depth, stage_ms=stage_ms)
+    inv = scan(
+        target,
+        max_depth=max_depth,
+        include_unknown=False,
+        exclude_paths=[out_dir],
+        stage_ms=stage_ms,
+    )
     if not inv.evidence_list:
-        c.print("[yellow]식별된 증거가 없습니다.[/]")
+        suffix = (
+            f" (미식별 파일 {inv.unidentified_files}개)"
+            if inv.unidentified_files else ""
+        )
+        c.print(f"[yellow]지원되는 증거가 없습니다{suffix}.[/]")
         raise typer.Exit(0)
     c.print(render_inventory(inv))
     c.print(
         f"[*] 스캔 완료: {inv.scanned_files} 파일 검사, "
         f"{len(inv.evidence_list)} 증거 식별 "
-        f"(소요 {stage_ms.get('scan_walk', 0) + stage_ms.get('scan_detect', 0)} ms)."
+        f"(미식별 {inv.unidentified_files}, "
+        f"소요 {stage_ms.get('scan_walk', 0) + stage_ms.get('scan_detect', 0)} ms)."
     )
 
     # ---------- 2. Selector ----------
@@ -193,8 +212,11 @@ def root(
     )
 
     if not plan.selected_tools:
-        c.print("[yellow]적용 가능한 도구가 없습니다.[/]")
-        raise typer.Exit(0)
+        c.print(
+            "[yellow]적용 가능한 도구가 없습니다. 식별된 증거의 형식과 "
+            "tools_metadata 입력 규칙을 확인하세요.[/]"
+        )
+        raise typer.Exit(2)
 
     c.print(f"\n[*] 적용 가능한 도구 {len(plan.selected_tools)} 개 선별됨:")
     for i, sel in enumerate(plan.selected_tools, 1):
@@ -207,17 +229,23 @@ def root(
     if plan.llm_used:
         msg = "LLM 우선순위 보강 ok" if not plan.llm_fallback else "LLM 실패 → 기본 우선순위 fallback"
         c.print(f"[dim]({msg})[/]")
+    if plan.unhandled_evidence:
+        c.print(
+            f"[yellow]주의: 식별됐지만 지원 도구가 없는 증거 "
+            f"{len(plan.unhandled_evidence)}개가 있습니다.[/]"
+        )
 
     if dry_run:
         c.print("\n[dim]--dry-run: stopping after plan.[/]")
         raise typer.Exit(0)
 
     if not _approve(c, auto=auto, prompt="\n계속 진행할까요? [Y/n] "):
+        if not sys.stdin.isatty():
+            raise typer.Exit(2)
         c.print("[yellow]사용자 취소.[/]")
         raise typer.Exit(0)
 
     # ---------- 3. Executor ----------
-    out_dir = (output_dir.resolve() if output_dir else settings.default_output_dir(target))
     raw_out_dir = out_dir / "raw"
     c.print(f"\n[*] 도구 실행 중 (output → {out_dir})...")
     bundle = execute(
@@ -230,7 +258,10 @@ def root(
     )
 
     success_n = sum(1 for r in bundle.results if r.status == "success")
-    fail_n = sum(1 for r in bundle.results if r.status in ("failed", "timeout"))
+    fail_n = sum(
+        1 for r in bundle.results
+        if r.status in ("failed", "timeout", "output_missing")
+    )
     skip_n = sum(1 for r in bundle.results if r.status == "skipped")
     c.print(
         f"[*] 실행 완료: success={success_n}, failed={fail_n}, skipped={skip_n}"
@@ -266,18 +297,25 @@ def root(
         c.print("")
         for fmt, p in paths.items():
             c.print(f"[green]리포트 저장됨 ({fmt}):[/] {p}")
+    if plan.selected_tools and success_n == 0:
+        c.print(
+            "[red]실행 가능한 도구가 하나도 성공하지 않았습니다. "
+            "리포트의 skipped/failed 원인과 `forensicagent doctor` 결과를 "
+            "확인하세요.[/]"
+        )
+        raise typer.Exit(3)
 
 
 @app.command("shell")
 def shell_cmd(
     path: Optional[Path] = typer.Option(
         None, "--path",
-        help="Initial target directory (default: CWD).",
-        exists=False, file_okay=False, dir_okay=True,
+        help="Initial target file or directory (default: CWD).",
+        exists=False, file_okay=True, dir_okay=True,
     ),
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir",
-        help="Where to write tool outputs + report (default: ./forensicagent_output).",
+        help="Where to write outputs (default: ~/.forensicagent/output/<case>).",
     ),
     no_llm: bool = typer.Option(
         False, "--no-llm",

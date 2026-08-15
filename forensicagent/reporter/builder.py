@@ -78,8 +78,37 @@ def build(
             if order.get(a.case_used, 0) > order.get(existing.case_used, 0):
                 existing.case_used = a.case_used
 
-    # summary 재생성 (머지 후 정확한 카운트).
+    # 동일 규칙/증거가 여러 exporter 또는 LLM+rule 경로에서 반복되면 안정적인
+    # fingerprint로 한 번만 보고한다. 더 높은 severity 결과를 유지한다.
+    from forensicagent.analyzer.types import SEVERITY_RANK
+    for analysis in merged_analyses.values():
+        unique: dict[str, object] = {}
+        for finding in analysis.findings:
+            key = finding.fingerprint or finding.refresh_fingerprint()
+            previous = unique.get(key)
+            if previous is None or SEVERITY_RANK[finding.severity] > SEVERITY_RANK[getattr(previous, "severity")]:
+                unique[key] = finding
+        analysis.findings = list(unique.values())  # type: ignore[assignment]
+
+    # summary 재생성 (머지 후 정확한 카운트). 실행 실패/skip은 무탐지와
+    # 구분한다. 이것을 덮어쓰면 "도구가 안 돌았는데 0 findings"로 오해한다.
     for a in merged_analyses.values():
+        executions = bundle_map.get(a.tool_id, ToolBundle(a.tool_id)).execution
+        successful = [e for e in executions if e.status == "success"]
+        if executions and not successful:
+            statuses: dict[str, int] = {}
+            for execution in executions:
+                statuses[execution.status] = statuses.get(execution.status, 0) + 1
+            status_text = ", ".join(
+                f"{name}={count}" for name, count in sorted(statuses.items())
+            )
+            first_error = next(
+                (e.error_message for e in executions if e.error_message), ""
+            )
+            a.summary = f"not analyzed: no successful execution ({status_text})"
+            if first_error:
+                a.summary += f"; {first_error[:240]}"
+            continue
         from forensicagent.analyzer.types import by_severity_count
         cnt = by_severity_count(a.findings)
         sev = (
@@ -122,7 +151,9 @@ def build(
 
     tools_run = sum(1 for b in ordered if any(e.status == "success" for e in b.execution))
     tools_failed = sum(
-        1 for b in ordered if any(e.status in ("failed", "timeout") for e in b.execution)
+        1
+        for b in ordered
+        if any(e.status in ("failed", "timeout", "output_missing") for e in b.execution)
     )
     tools_skipped = sum(
         1 for b in ordered if all(e.status == "skipped" for e in b.execution)

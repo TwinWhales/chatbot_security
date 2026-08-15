@@ -12,7 +12,9 @@ platform:
   - any
 
 input_format:
-  - .py
+  - ext:.py
+  - ext:.pyi
+target_mode: scan_root
 
 output_format: json
 output_size_estimate: small
@@ -25,7 +27,7 @@ install_check:
 
 command_templates:
   - name: "Single file scan (JSON)"
-    template: "bandit -f json -q --exit-zero {evidence_path}"
+    template: "bandit -r -f json -q --exit-zero {evidence_path}"
     when: "단일 .py 파일에서 OWASP/CWE 패턴 (hardcoded passwords, SQL 인젝션, weak crypto, shell injection 등) 을 정적 분석으로 탐지. --exit-zero 는 finding 이 있어도 exit 0 으로 — forensicagent 는 데이터를 원하지 게이트가 아님."
 
 usage_description: |

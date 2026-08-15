@@ -161,6 +161,7 @@ def rank_with_llm(
                     reason=reason or c.reason,
                     target_evidence=c.target_evidence,
                     command_template=c.command_template,
+                    run_specs=list(c.run_specs),
                     estimated_runtime=c.estimated_runtime,
                     priority=prio,
                 )

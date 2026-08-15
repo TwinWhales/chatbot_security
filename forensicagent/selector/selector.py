@@ -1,6 +1,6 @@
 """Selector orchestrator — 2단계 하이브리드.
 
-  Stage 1 (filter.py)   결정론 evidence_type 매칭
+  Stage 1 (filter.py)   결정론 evidence_type + input_format 매칭
   Stage 2 (llm_rank.py) LLM 우선순위 보강 (실패시 Stage 1 결과 그대로)
 
 CLI 플래그 매핑:
@@ -12,28 +12,64 @@ CLI 플래그 매핑:
 from __future__ import annotations
 
 import logging
+import math
 from typing import Iterable
 
+from forensicagent import config as settings
 from forensicagent.llm import OllamaClient
 from forensicagent.observability import Stopwatch
 from forensicagent.scanner.types import Inventory
-from forensicagent.selector.filter import filter_by_evidence, skipped_by_evidence_gap
+from forensicagent.selector.filter import (
+    filter_by_evidence,
+    skipped_by_evidence_gap,
+    unhandled_evidence_paths,
+)
 from forensicagent.selector.llm_rank import rank_with_llm
+from forensicagent.selector.run_specs import populate_run_specs
 from forensicagent.selector.types import Plan, ToolSelection
 from forensicagent.tools.schema import ToolMetadata
 
 logger = logging.getLogger(__name__)
 
+_RAG_QUERY_MAX_EVIDENCE = 50
+
+
+def _finalize_run_specs(
+    plan: Plan,
+    tools: dict[str, ToolMetadata],
+    scenario: str | None,
+) -> Plan:
+    populate_run_specs(plan.selected_tools, tools, scenario)
+    return plan
+
 
 def _rag_query(inventory: Inventory, scenario: str | None) -> str:
-    """RAG 질의 텍스트 — 증거 타입 분포 + (있으면) 시나리오."""
+    """Build a bounded RAG query with evidence types and representative names."""
     by_type: dict[str, int] = {}
+    evidence_details: list[str] = []
+    seen_details: set[tuple[str, str]] = set()
     for e in inventory.evidence_list:
         if e.evidence_type == "unknown":
             continue
         by_type[e.evidence_type] = by_type.get(e.evidence_type, 0) + 1
-    ev = ", ".join(f"{t}({n})" for t, n in sorted(by_type.items())) or "unknown evidence"
+        detail_key = (e.filename.casefold(), e.evidence_type)
+        if (
+            detail_key not in seen_details
+            and len(evidence_details) < _RAG_QUERY_MAX_EVIDENCE
+        ):
+            seen_details.add(detail_key)
+            evidence_details.append(f"{e.filename} [{e.evidence_type}]")
+    ev = (
+        ", ".join(f"{t}({n})" for t, n in sorted(by_type.items()))
+        or "unknown evidence"
+    )
     parts = [f"Evidence present: {ev}."]
+    if evidence_details:
+        omitted = max(0, sum(by_type.values()) - len(evidence_details))
+        detail_text = ", ".join(evidence_details)
+        if omitted:
+            detail_text += f", and {omitted} additional evidence files"
+        parts.append(f"Evidence files and types: {detail_text}.")
     if scenario and scenario.strip():
         parts.append(f"Investigation scenario: {scenario.strip()}")
     parts.append("Which forensic tools are most relevant?")
@@ -46,29 +82,25 @@ def _build_forced(
     tools: dict[str, ToolMetadata],
 ) -> list[ToolSelection]:
     out: list[ToolSelection] = []
-    by_type: dict[str, list[str]] = {}
-    for e in inventory.evidence_list:
-        by_type.setdefault(e.evidence_type, []).append(e.path)
-
     for tid in force_tools:
         meta = tools.get(tid)
         if meta is None:
             logger.warning("--tools requested unknown tool_id=%r, skipping", tid)
             continue
-        targets: list[str] = []
-        for et in meta.applicable_evidence_types:
-            targets.extend(by_type.get(et, []))
-        out.append(
-            ToolSelection(
-                tool_id=tid,
-                tool_version=meta.version_supported,
-                reason="forced by --tools",
-                target_evidence=targets,
-                command_template=meta.command_templates[0].template,
-                estimated_runtime=meta.estimated_runtime,
-                priority=10,
+        # --tools forces the tool choice, not unsafe or redundant targets.
+        # Reuse the same evidence-type/input-format/scan-root routing contract
+        # as Stage 1 so a forced recursive code tool still runs only once.
+        matches = filter_by_evidence(inventory, {tid: meta})
+        if not matches:
+            logger.warning(
+                "--tools requested tool_id=%r but no compatible evidence was found",
+                tid,
             )
-        )
+            continue
+        selection = matches[0]
+        selection.reason = "forced by --tools"
+        selection.priority = 10
+        out.append(selection)
     return out
 
 
@@ -92,6 +124,7 @@ def select(
     그대로. 의존성/질의 실패 시 조용히 결정론 순서로 폴백.
     """
     plan = Plan()
+    plan.unhandled_evidence = unhandled_evidence_paths(inventory, tools)
 
     if force_tools:
         with Stopwatch() as sw:
@@ -101,7 +134,7 @@ def select(
             stage_ms["select_force"] = (
                 stage_ms.get("select_force", 0) + sw.elapsed_ms
             )
-        return plan
+        return _finalize_run_specs(plan, tools, scenario)
 
     # ---- Stage 1: deterministic filter ----
     with Stopwatch() as sw:
@@ -115,7 +148,7 @@ def select(
     plan.stage_one_candidates = len(candidates)
 
     if not candidates:
-        return plan
+        return _finalize_run_specs(plan, tools, scenario)
 
     # ---- RAG: 순서 힌트 + 스니펫 (Stage1 자격은 불변, 실패 시 조용히 폴백) ----
     rag_snippets: dict[str, str] = {}
@@ -131,7 +164,7 @@ def select(
     if not use_llm:
         # RAG 가 candidates 를 in-place 재정렬했으므로 그 순서로 확정.
         plan.selected_tools = candidates
-        return plan
+        return _finalize_run_specs(plan, tools, scenario)
 
     with Stopwatch() as sw:
         ranked, used, fallback = rank_with_llm(
@@ -144,7 +177,7 @@ def select(
     plan.selected_tools = ranked
     plan.llm_used = used
     plan.llm_fallback = fallback
-    return plan
+    return _finalize_run_specs(plan, tools, scenario)
 
 
 def _apply_rag(
@@ -157,6 +190,11 @@ def _apply_rag(
 
     RAG 를 못 쓰면(None) 아무것도 바꾸지 않고 빈 dict 를 반환한다.
     """
+    # One eligible tool cannot be reranked. Avoid paying the cold-start cost
+    # of importing the local embedding stack for a result that is immutable.
+    if len(candidates) < 2:
+        return {}
+
     from forensicagent.rag.retrieval import retrieve_tools
 
     eligible = {c.tool_id for c in candidates}
@@ -164,13 +202,48 @@ def _apply_rag(
         _rag_query(inventory, scenario),
         top_k=len(candidates),
         tool_ids=eligible,
+        min_score=settings.RAG_MIN_SIMILARITY,
     )
     if not hits:  # None(폴백) 또는 [](관련 히트 없음) → 순서 불변.
         return {}
 
-    score = {h.tool_id: h.score for h in hits}
-    snippets = {h.tool_id: h.snippet for h in hits}
-    # 관련도 내림차순. 점수 없는(검색 안 걸린) 후보는 -1 로 뒤로.
-    candidates.sort(key=lambda c: score.get(c.tool_id, -1.0), reverse=True)
-    plan.rag_used = True
+    scores: dict[str, float] = {}
+    snippets: dict[str, str] = {}
+    for hit in hits:
+        if hit.tool_id not in eligible:
+            continue
+        try:
+            score = float(hit.score)
+        except (TypeError, ValueError):
+            continue
+        if (
+            not math.isfinite(score)
+            or not 0.0 <= score <= 1.0
+            or score < settings.RAG_MIN_SIMILARITY
+        ):
+            continue
+        # Retrieval normally deduplicates tools. If a custom backend returns
+        # duplicates, retain the strongest valid hit and matching snippet.
+        if hit.tool_id not in scores or score > scores[hit.tool_id]:
+            scores[hit.tool_id] = score
+            snippets[hit.tool_id] = hit.snippet
+    # Partial retrieval must not demote missing Stage-1 candidates. Snippets
+    # from valid hits may still enrich Stage 2 while ordering stays deterministic.
+    if set(scores) != eligible:
+        return snippets
+
+    margin = max(0.0, settings.RAG_MIN_SCORE_MARGIN)
+    if max(scores.values()) - min(scores.values()) < margin:
+        return snippets
+
+    before = [candidate.tool_id for candidate in candidates]
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: scores[candidate.tool_id],
+        reverse=True,
+    )
+    after = [candidate.tool_id for candidate in ranked]
+    if after != before:
+        candidates[:] = ranked
+        plan.rag_used = True
     return snippets

@@ -5,8 +5,8 @@ build-backend = "hatchling.build"
 [project]
 name = "forensicagent"
 version = "0.0.1"
-description = "Forensic auto-triage CLI agent — local LLM picks tools, runs them, extracts suspicious findings."
-readme = "CLAUDE.md"
+description = "Forensic auto-triage CLI agent that selects tools, runs them, and extracts grounded findings."
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
@@ -21,7 +21,6 @@ dependencies = [
     "sentence-transformers>=3.0.0",
     "pyyaml>=6.0",
     "pydantic>=2.7.0",
-    "requests>=2.31.0",
     "python-magic-bin>=0.4.14; sys_platform == 'win32'",
     "python-magic>=0.4.27; sys_platform != 'win32'",
     "python-dotenv>=1.0.0",
@@ -29,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["openai>=1.0.0"]
-crawlers = ["beautifulsoup4>=4.12.0"]
+crawlers = ["requests>=2.31.0", "beautifulsoup4>=4.12.0"]
 dev = ["pytest>=8.0", "pytest-mock>=3.12"]
 # pip-installable forensic tools. `pip install -e .[forensic-tools]` 또는
 # `forensicagent install --all` 로 채울 수 있음. plaso 는 Windows 에서 MSVC
@@ -40,7 +39,35 @@ forensic-tools = ["volatility3>=2.5.0", "binwalk>=2.3.0"]
 forensicagent = "forensicagent.cli.main:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["forensicagent"]
+packages = ["forensicagent", "bench"]
+exclude = [
+    "/bench/bench_cli/**",
+    "/bench/bench_full/**",
+    "/bench/bench_scripts/**",
+    "/bench/bench_report.md",
+    "/bench/bench_result.json",
+]
+
+# Tool YAMLs are runtime assets, not development-only files. Install them
+# inside the package so a wheel works outside a source checkout.
+[tool.hatch.build.targets.wheel.force-include]
+"tools_metadata" = "forensicagent/builtin_tools"
+"bench/goldenset.json" = "bench/goldenset.json"
+
+# Crawled corpora are development inputs, not source-distribution assets. In
+# addition to bloating the sdist, their generated filenames can exceed the
+# Windows extraction path limit used by `python -m build`.
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/data/**",
+    "/seed_docs/**",
+    "/forensicagent_output/**",
+    "/bench/bench_cli/**",
+    "/bench/bench_full/**",
+    "/bench/bench_scripts/**",
+    "/bench/bench_report.md",
+    "/bench/bench_result.json",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

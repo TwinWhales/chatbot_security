@@ -51,6 +51,10 @@ class TestMagicBytes:
         p = _write_bytes(tmp_path, "trace", b"\x4d\x3c\xb2\xa1" + b"\x00" * 20)
         assert detect_by_magic(p)[0] == "pcap"
 
+    def test_pcap_nanosecond_other_endian(self, tmp_path: Path) -> None:
+        p = _write_bytes(tmp_path, "trace", b"\xa1\xb2\x3c\x4d" + b"\x00" * 20)
+        assert detect_by_magic(p)[0] == "pcap"
+
     def test_pcapng_shb(self, tmp_path: Path) -> None:
         p = _write_bytes(tmp_path, "trace", b"\x0a\x0d\x0d\x0a" + b"\x00" * 20)
         assert detect_by_magic(p)[0] == "pcap"
@@ -70,12 +74,55 @@ class TestMagicBytes:
         p = _write_bytes(tmp_path, "FOO.pf", b"SCCA" + b"\x00" * 20)
         assert detect_by_magic(p)[0] == "prefetch"
 
+    def test_prefetch_plain_real_header_offset(self, tmp_path: Path) -> None:
+        # Plain Prefetch stores its version DWORD first and SCCA at offset 4.
+        p = _write_bytes(
+            tmp_path,
+            "FOO.pf",
+            (30).to_bytes(4, "little") + b"SCCA" + b"\x00" * 20,
+        )
+        hit = detect_by_magic(p)
+        assert hit is not None
+        assert hit[0] == "prefetch"
+        assert hit[2] >= 0.95
+
+    def test_scca_at_offset_four_requires_known_prefetch_version(self, tmp_path: Path) -> None:
+        p = _write_bytes(
+            tmp_path,
+            "not-prefetch.bin",
+            (999).to_bytes(4, "little") + b"SCCA" + b"\x00" * 20,
+        )
+        assert detect_by_magic(p) is None
+
     def test_disk_image_e01(self, tmp_path: Path) -> None:
         p = _write_bytes(tmp_path, "image", b"EVF\x09\x0d\x0a\xff\x00" + b"\x00" * 20)
         assert detect_by_magic(p)[0] == "disk_image"
 
     def test_sqlite_browser_artifact(self, tmp_path: Path) -> None:
         p = _write_bytes(tmp_path, "History", b"SQLite format 3\x00" + b"\x00" * 20)
+        assert detect_by_magic(p)[0] == "browser_artifact"
+
+    def test_generic_sqlite_is_not_assumed_browser(self, tmp_path: Path) -> None:
+        p = _write_bytes(
+            tmp_path,
+            "business.sqlite",
+            b"SQLite format 3\x00" + b"\x00" * 20,
+        )
+        assert detect_by_magic(p)[0] == "sqlite_database"
+
+    def test_sqlite_under_browser_parent_is_browser_artifact(self, tmp_path: Path) -> None:
+        p = (
+            tmp_path
+            / "AppData"
+            / "Local"
+            / "Google"
+            / "Chrome"
+            / "User Data"
+            / "Default"
+            / "Favicons"
+        )
+        p.parent.mkdir(parents=True)
+        p.write_bytes(b"SQLite format 3\x00" + b"\x00" * 20)
         assert detect_by_magic(p)[0] == "browser_artifact"
 
     def test_unknown_bytes_no_match(self, tmp_path: Path) -> None:
@@ -101,13 +148,15 @@ class TestExtension:
         [
             (".evtx", "evtx_log"),
             (".pcap", "pcap"),
-            (".raw", "memory_dump"),
             (".dmp", "memory_dump"),
             (".lime", "memory_dump"),
             (".e01", "disk_image"),
+            (".mft", "ntfs_metadata"),
             (".pf", "prefetch"),
-            (".sqlite", "browser_artifact"),
+            (".sqlite", "sqlite_database"),
+            (".db", "sqlite_database"),
             (".log", "text_log"),
+            (".txt", "text_document"),
         ],
     )
     def test_known_extensions(self, tmp_path: Path, ext: str, etype: str) -> None:
@@ -121,6 +170,14 @@ class TestExtension:
 
     def test_no_extension(self, tmp_path: Path) -> None:
         assert detect_by_extension(tmp_path / "noext") is None
+
+    def test_generic_raw_is_not_assumed_memory(self, tmp_path: Path) -> None:
+        assert detect_by_extension(tmp_path / "disk.raw") is None
+
+    def test_browser_sqlite_extension_uses_context(self, tmp_path: Path) -> None:
+        hit = detect_by_extension(tmp_path / "Places.sqlite")
+        assert hit is not None
+        assert hit[0] == "browser_artifact"
 
 
 # ---------------------------------------------------------------------------
@@ -136,8 +193,17 @@ class TestFilenamePattern:
             ("SYSTEM", "registry_hive"),
             ("SOFTWARE", "registry_hive"),
             ("SAM", "registry_hive"),
+            ("Amcache.hve", "registry_hive"),
             ("memory.raw", "memory_dump"),
+            ("memdump.raw", "memory_dump"),
+            ("host-physmem.raw", "memory_dump"),
+            ("winpmem.raw", "memory_dump"),
             ("memory.bin", "memory_dump"),
+            ("$MFT", "ntfs_metadata"),
+            ("$J", "ntfs_metadata"),
+            ("$Boot", "ntfs_metadata"),
+            ("$SDS", "ntfs_metadata"),
+            ("$I30", "ntfs_metadata"),
             ("History", "browser_artifact"),
             ("Cookies", "browser_artifact"),
             ("syslog", "text_log"),
@@ -221,3 +287,14 @@ class TestCompositeDetect:
     def test_unknown(self, tmp_path: Path) -> None:
         p = _write_bytes(tmp_path, "thing.xyz", b"\x00\x01\x02")
         assert detect(p) is None
+
+    def test_generic_raw_remains_unknown(self, tmp_path: Path) -> None:
+        p = _write_bytes(tmp_path, "disk.raw", b"\x00" * 100)
+        assert detect(p) is None
+
+    def test_named_raw_memory_dump(self, tmp_path: Path) -> None:
+        p = _write_bytes(tmp_path, "memdump.raw", b"\x00" * 100)
+        hit = detect(p)
+        assert hit is not None
+        assert hit[0] == "memory_dump"
+        assert hit[3] == "filename_pattern"

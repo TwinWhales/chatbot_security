@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -38,6 +41,35 @@ class Finding:
     evidence_ref: EvidenceRef = field(default_factory=EvidenceRef)
     suggested_followup: str = ""
     source: str = "rule"                  # "rule" | "llm" — 추적용
+    # Stable rule identity is separate from the presentation title. Empty
+    # defaults keep construction/deserialization of legacy reports compatible.
+    rule_id: str = ""
+    fingerprint: str = ""
+    confidence: float = 1.0
+
+    def __post_init__(self) -> None:
+        try:
+            self.confidence = max(0.0, min(1.0, float(self.confidence)))
+        except (TypeError, ValueError):
+            self.confidence = 0.0
+        if not self.fingerprint:
+            self.refresh_fingerprint()
+
+    def refresh_fingerprint(self) -> str:
+        """Recompute the deterministic identity after evidence enrichment."""
+        excerpt = re.sub(r"\s+", " ", self.evidence_ref.raw_excerpt).strip()
+        canonical = {
+            "rule_id": (self.rule_id or self.title).strip().casefold(),
+            "source_file": self.evidence_ref.source_file.strip().casefold(),
+            "event_id": self.evidence_ref.event_id,
+            "timestamp": self.evidence_ref.timestamp.strip(),
+            "excerpt": excerpt[:800],
+        }
+        payload = json.dumps(
+            canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        self.fingerprint = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        return self.fingerprint
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +81,9 @@ class Finding:
             "evidence_ref": self.evidence_ref.to_dict(),
             "suggested_followup": self.suggested_followup,
             "source": self.source,
+            "rule_id": self.rule_id,
+            "fingerprint": self.fingerprint,
+            "confidence": self.confidence,
         }
 
 

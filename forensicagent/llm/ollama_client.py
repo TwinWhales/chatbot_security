@@ -41,6 +41,19 @@ class ChatMessage:
         return {"role": self.role, "content": self.content}
 
 
+def _response_content(response: Any) -> str:
+    """Read content from both legacy dict and modern Pydantic Ollama replies."""
+    if isinstance(response, dict):
+        message = response.get("message") or {}
+    else:
+        message = getattr(response, "message", None)
+    if isinstance(message, dict):
+        value = message.get("content", "")
+    else:
+        value = getattr(message, "content", "") if message is not None else ""
+    return str(value or "")
+
+
 class OllamaClient:
     """forensicagent 의 모든 LLM 호출이 통과하는 단일 진입점."""
 
@@ -73,7 +86,7 @@ class OllamaClient:
 
     # ---------- low level ----------
 
-    def _client(self):
+    def _client(self, *, timeout: float | None = None):
         # Lazy import — ollama 패키지가 없거나 데몬이 죽었을 때
         # forensicagent 자체는 부팅되어야 한다 (doctor 가 그걸 알려줘야 함).
         try:
@@ -82,7 +95,10 @@ class OllamaClient:
             raise OllamaUnavailable(
                 "ollama python package not installed (pip install ollama)"
             ) from e
-        return ollama.Client(host=self.base_url)
+        kwargs: dict[str, Any] = {"host": self.base_url}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return ollama.Client(**kwargs)
 
     def is_available(self) -> tuple[bool, str]:
         """doctor 가 쓰기 좋은 형태로 가용성 점검.
@@ -90,7 +106,7 @@ class OllamaClient:
         반환: (ok, detail_message)
         """
         try:
-            client = self._client()
+            client = self._client(timeout=settings.LLM_HEALTH_TIMEOUT_SEC)
         except OllamaUnavailable as e:
             return False, str(e)
 
@@ -119,9 +135,16 @@ class OllamaClient:
             if name:
                 names.append(name)
 
-        if self.model not in names and not any(
-            n.startswith(self.model.split(":")[0] + ":") for n in names
-        ):
+        # A different size/tag of the same family is not interchangeable.  The
+        # old family-prefix fallback reported qwen2.5:3b as satisfying a
+        # qwen2.5:14b request and the first real inference then failed.
+        if ":" in self.model:
+            ready = self.model in names
+        else:
+            ready = self.model in names or any(
+                n.startswith(self.model + ":") for n in names
+            )
+        if not ready:
             return False, (
                 f"ollama is reachable but model '{self.model}' not pulled. "
                 f"Available: {', '.join(names) or '(none)'}"
@@ -138,7 +161,7 @@ class OllamaClient:
     ) -> str:
         """plain text chat. 빈 응답이면 빈 문자열 반환."""
         try:
-            client = self._client()
+            client = self._client(timeout=settings.LLM_REQUEST_TIMEOUT_SEC)
         except OllamaUnavailable:
             raise
 
@@ -157,7 +180,7 @@ class OllamaClient:
             )
         except Exception as e:  # noqa: BLE001
             raise OllamaUnavailable(f"ollama chat failed: {e}") from e
-        return (resp.get("message") or {}).get("content", "") or ""
+        return _response_content(resp)
 
     # ---------- structured JSON chat ----------
 
@@ -188,7 +211,7 @@ class OllamaClient:
             * 비강제: 모델이 자기 자연스러운 키로 응답해서 매핑 필요.
         """
         try:
-            client = self._client()
+            client = self._client(timeout=settings.LLM_REQUEST_TIMEOUT_SEC)
         except OllamaUnavailable:
             raise
 
@@ -235,7 +258,7 @@ class OllamaClient:
             except Exception as e:  # noqa: BLE001
                 raise OllamaUnavailable(f"ollama json_chat failed: {e}") from e
 
-            last_raw = (resp.get("message") or {}).get("content", "") or ""
+            last_raw = _response_content(resp)
             try:
                 return json.loads(last_raw)
             except json.JSONDecodeError as e:

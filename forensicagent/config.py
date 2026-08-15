@@ -4,17 +4,21 @@ All tunable parameters live here so individual modules stay declarative.
 Resolution order for every value below:
 
   1. process env var (highest — wins even if .env disagrees)
-  2. `.env` file (loaded once at import time)
+  2. trusted `.env` file (loaded once at import time)
   3. hard-coded default in this module
 
 The `.env` lookup itself is also overridable: set ``FORENSICAGENT_DOTENV``
 to a specific file path, otherwise we try ``$PROJECT_ROOT/.env`` then
-``$CWD/.env``.  Missing files are silently skipped — .env is optional.
+``~/.forensicagent/.env``.  The evidence working directory is deliberately
+not searched: a case folder is untrusted input and must not be able to replace
+the tool catalog or command configuration. Missing files are silently skipped.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from pathlib import Path
 
 
@@ -35,7 +39,7 @@ def _load_dotenv_if_present() -> None:
     explicit = os.getenv("FORENSICAGENT_DOTENV")
     candidates = [Path(explicit)] if explicit else [
         PROJECT_ROOT / ".env",
-        Path.cwd() / ".env",
+        Path.home() / ".forensicagent" / ".env",
     ]
     for p in candidates:
         if p.is_file():
@@ -77,8 +81,9 @@ def resolve_tools_dir() -> Path:
 
       1. FORENSICAGENT_TOOLS_DIR env  ┐ (둘 다 TOOLS_METADATA_DIR 에 반영됨)
       2. ~/.forensicagent/tools       ┘
-      3. repo PROJECT_ROOT/tools_metadata   (어느 cwd 에서 실행하든 리포 자산 사용)
-      4. cwd/tools_metadata
+      3. wheel 에 포함된 forensicagent/builtin_tools
+      4. repo PROJECT_ROOT/tools_metadata   (어느 cwd 에서 실행하든 리포 자산 사용)
+      5. (없음) — 분석 대상 cwd의 임의 YAML은 신뢰하지 않는다.
 
     *.yaml/*.yml 이 실제로 들어있는 첫 후보를 반환. 아무 곳에도 없으면
     1 번(primary)을 그대로 반환 → 호출자가 '비어있음' 을 감지해 안내.
@@ -86,7 +91,11 @@ def resolve_tools_dir() -> Path:
     primary = Path(TOOLS_METADATA_DIR)
     if primary.exists() and any(primary.glob("*.y*ml")):
         return primary
-    for fallback in (PROJECT_ROOT / "tools_metadata", Path.cwd() / "tools_metadata"):
+    package_builtin = Path(__file__).resolve().parent / "builtin_tools"
+    for fallback in (
+        package_builtin,
+        PROJECT_ROOT / "tools_metadata",
+    ):
         if fallback.exists() and any(fallback.glob("*.y*ml")):
             return fallback
     return primary
@@ -115,15 +124,28 @@ def _env_bool(name: str, default: bool) -> bool:
 # + LLM path. So turning this on never breaks a run that lacks the deps.
 USE_RAG = _env_bool("FORENSICAGENT_USE_RAG", True)
 RAG_TOP_K = int(os.getenv("FORENSICAGENT_RAG_TOP_K", "5"))
+# A semantic hit below this score is treated as noise.  The previous runtime
+# reranked candidates for *any* Chroma hit, even when every score was close to
+# zero, which made the deterministic order less reliable on out-of-domain (and
+# especially Korean) queries.
+RAG_MIN_SIMILARITY = float(
+    os.getenv("FORENSICAGENT_RAG_MIN_SIMILARITY", "0.25")
+)
+# Even above the absolute floor, do not reorder candidates whose scores are
+# effectively tied.  Selector applies this margin after it has a complete set
+# of eligible-tool scores.
+RAG_MIN_SCORE_MARGIN = float(
+    os.getenv("FORENSICAGENT_RAG_MIN_SCORE_MARGIN", "0.10")
+)
 
 # === Crawled corpus root (used by rag.indexer) ===
 SEED_DOCS_DIR = _abs_path("FORENSICAGENT_SEED_DOCS_DIR", PROJECT_ROOT / "seed_docs")
 
 # === Default output dir ===
 # If user sets FORENSICAGENT_OUTPUT_DIR (abs or rel-to-PROJECT_ROOT) we use
-# that directly. Otherwise we leave OUTPUT_DIR_NAME as a relative name that
-# CLI helpers join with the *current evidence cwd* so each case gets its own
-# output sibling — the historical default.
+# that directly. Otherwise outputs live under the per-user state directory,
+# never inside the evidence tree. Writing reports/raw tool output into evidence
+# both changes the case and caused subsequent scans to ingest their own output.
 _OUTPUT_DIR_RAW = os.getenv("FORENSICAGENT_OUTPUT_DIR")
 if _OUTPUT_DIR_RAW:
     _p = Path(_OUTPUT_DIR_RAW).expanduser()
@@ -140,12 +162,17 @@ def default_output_dir(working_dir: Path | None = None) -> Path:
     """Resolve the default output directory.
 
     * If FORENSICAGENT_OUTPUT_DIR was set, return it (absolute).
-    * Otherwise join `OUTPUT_DIR_NAME` to ``working_dir`` (or cwd).
+    * Otherwise create a stable case-specific path under
+      ``~/.forensicagent/output`` (or FORENSICAGENT_HOME).
     """
     if OUTPUT_DIR is not None:
         return OUTPUT_DIR
-    base = (working_dir or Path.cwd()).resolve()
-    return (base / OUTPUT_DIR_NAME).resolve()
+    evidence = (working_dir or Path.cwd()).resolve()
+    label_source = evidence.stem if evidence.is_file() else evidence.name
+    label = re.sub(r"[^A-Za-z0-9._-]+", "_", label_source).strip("._-")
+    label = label or "case"
+    digest = hashlib.sha256(str(evidence).casefold().encode("utf-8")).hexdigest()[:8]
+    return (USER_HOME / "output" / f"{label}_{digest}").resolve()
 
 
 # === Embedding settings ===
@@ -159,8 +186,19 @@ EMBEDDING_MODEL = os.getenv(
 # === LLM (Ollama) settings ===
 LLM_PROVIDER = os.getenv("FORENSICAGENT_LLM_PROVIDER", "ollama")
 LLM_BASE_URL = os.getenv("FORENSICAGENT_LLM_BASE_URL", "http://localhost:11434")
-LLM_MODEL = os.getenv("FORENSICAGENT_LLM_MODEL", "qwen2.5:14b")
+# 7b is the documented laptop-friendly baseline and is substantially more
+# likely to be installed than 14b. Higher-capacity models remain selectable
+# through FORENSICAGENT_LLM_MODEL without weakening exact-tag validation.
+LLM_MODEL = os.getenv("FORENSICAGENT_LLM_MODEL", "qwen2.5:7b")
 LLM_TEMPERATURE = float(os.getenv("FORENSICAGENT_LLM_TEMPERATURE", "0.1"))
+# Fast health checks must not inherit the effectively unbounded timeout used
+# for real local-model inference.
+LLM_HEALTH_TIMEOUT_SEC = float(
+    os.getenv("FORENSICAGENT_LLM_HEALTH_TIMEOUT_SEC", "5")
+)
+LLM_REQUEST_TIMEOUT_SEC = float(
+    os.getenv("FORENSICAGENT_LLM_REQUEST_TIMEOUT_SEC", "300")
+)
 
 # === Execution settings ===
 DEFAULT_TIMEOUT_SEC = int(os.getenv("FORENSICAGENT_TIMEOUT_SEC", "300"))

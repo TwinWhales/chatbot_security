@@ -14,7 +14,7 @@ platform:
   - macos
 
 input_format:
-  - .evtx
+  - ext:.evtx
 
 output_format: json
 output_size_estimate: small
@@ -30,13 +30,12 @@ command_templates:
     template: "chainsaw hunt {evidence_path} -s {sigma_path} --mapping {mapping_path} --json"
     when: "evtx 로그에서 알려진 위협 패턴 탐지가 필요할 때 (대부분의 기본 사용)."
   - name: "Search by event id"
-    template: "chainsaw search {evidence_path} -e {event_ids} --json"
+    template: "chainsaw search -t {event_query} --json {evidence_path}"
     when: |
-      특정 Event ID 만 빠르게 보고 싶을 때. NOTE: 실제 실행은
-      ChainsawAdapter(executor/chainsaw_adapter.py)가 담당한다 — 증거
-      파일명으로 채널을 판별해 그 채널의 Event ID 만 alternation regex
-      (`-e "4624|4625"`)로 묶어 넣는다. `-e` 는 쉼표 리스트가 아니라 단일
-      정규식이라 이 템플릿의 `{event_ids}` 를 콤마로 채우면 0 hits 가 난다.
+      특정 Event ID 만 빠르게 보고 싶을 때. 실제 실행은
+      ChainsawAdapter(executor/chainsaw_adapter.py)가 담당한다. 증거 파일명으로
+      채널을 판별한 뒤 `Event.System.EventID: =<id>` Tau 표현식을 만들고,
+      여러 식은 `--match-any`로 결합해 EventID 필드만 정확히 비교한다.
 
 usage_description: |
   Chainsaw 는 Windows EVTX 로그를 빠르게 파싱하고 Sigma 룰 기반으로

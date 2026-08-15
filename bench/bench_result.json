@@ -8,77 +8,52 @@
     ],
     "modes": [
       "deterministic",
-      "rag",
-      "llm",
-      "rag_llm"
+      "rag"
     ],
-    "llm_note": "LLM modes enabled (qwen2.5:14b: ollama ok, model qwen2.5:14b ready (6 pulled)).",
-    "rag_used_cases": 13
+    "llm_note": "LLM modes not requested (--with-llm off).",
+    "rag_used_cases": 2
   },
   "index": {
-    "rebuilt": true,
-    "tools_indexed": 11,
-    "embedding_ms": 24730,
-    "chroma_ms": 510,
-    "elapsed_s": 27.16,
-    "errors": []
+    "rebuilt": false
   },
   "aggregate": {
     "deterministic": {
-      "ndcg@3": 0.8249,
-      "ndcg@5": 0.8744,
-      "mrr": 0.9524,
+      "ndcg@3": 0.9295,
+      "ndcg@5": 0.9485,
+      "mrr": 1.0,
+      "core_mrr": 0.8929,
       "p@3": 0.6429,
-      "p@5": 0.4429,
-      "r@3": 0.881,
-      "r@5": 0.9762
+      "p@5": 0.4143,
+      "r@3": 0.9714,
+      "r@5": 1.0,
+      "core_r@3": 0.9524,
+      "core_r@5": 1.0
     },
     "rag": {
-      "ndcg@3": 0.8644,
-      "ndcg@5": 0.8647,
-      "mrr": 0.9643,
-      "p@3": 0.7143,
-      "p@5": 0.4429,
-      "r@3": 0.9643,
-      "r@5": 0.9762
-    },
-    "llm": {
-      "ndcg@3": 0.8249,
-      "ndcg@5": 0.8744,
-      "mrr": 0.9524,
+      "ndcg@3": 0.9422,
+      "ndcg@5": 0.9613,
+      "mrr": 1.0,
+      "core_mrr": 0.9286,
       "p@3": 0.6429,
-      "p@5": 0.4429,
-      "r@3": 0.881,
-      "r@5": 0.9762
-    },
-    "rag_llm": {
-      "ndcg@3": 0.8644,
-      "ndcg@5": 0.8647,
-      "mrr": 0.9643,
-      "p@3": 0.7143,
-      "p@5": 0.4429,
-      "r@3": 0.9643,
-      "r@5": 0.9762
+      "p@5": 0.4143,
+      "r@3": 0.9714,
+      "r@5": 1.0,
+      "core_r@3": 0.9524,
+      "core_r@5": 1.0
     }
   },
   "delta": {
     "rag_vs_deterministic": {
-      "ndcg@3": 0.0395,
-      "ndcg@5": -0.0097,
-      "mrr": 0.0119,
-      "p@3": 0.0714,
+      "ndcg@3": 0.0127,
+      "ndcg@5": 0.0128,
+      "mrr": 0.0,
+      "core_mrr": 0.0357,
+      "p@3": 0.0,
       "p@5": 0.0,
-      "r@3": 0.0833,
-      "r@5": 0.0
-    },
-    "rag_llm_vs_llm": {
-      "ndcg@3": 0.0395,
-      "ndcg@5": -0.0097,
-      "mrr": 0.0119,
-      "p@3": 0.0714,
-      "p@5": 0.0,
-      "r@3": 0.0833,
-      "r@5": 0.0
+      "r@3": 0.0,
+      "r@5": 0.0,
+      "core_r@3": 0.0,
+      "core_r@5": 0.0
     }
   },
   "timing_ms": {
@@ -89,18 +64,8 @@
     },
     "rag": {
       "select_filter": 0.0,
-      "select_rag": 46.71,
+      "select_rag": 4355.43,
       "select_rank": 0.0
-    },
-    "llm": {
-      "select_filter": 0.0,
-      "select_rag": 0.0,
-      "select_rank": 2720.71
-    },
-    "rag_llm": {
-      "select_filter": 0.0,
-      "select_rag": 29.14,
-      "select_rank": 2648.71
     }
   },
   "per_case": [
@@ -120,22 +85,12 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
-          "order": [
-            "evtxecmd",
-            "chainsaw"
-          ],
-          "ndcg@3": 0.7967,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.7967,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
           "order": [
             "chainsaw",
             "evtxecmd"
@@ -146,20 +101,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "evtxecmd",
-            "chainsaw"
-          ],
-          "ndcg@3": 0.7967,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.7967,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -179,22 +124,12 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
-          "order": [
-            "evtxecmd",
-            "chainsaw"
-          ],
-          "ndcg@3": 0.7967,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.7967,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
           "order": [
             "chainsaw",
             "evtxecmd"
@@ -205,20 +140,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "evtxecmd",
-            "chainsaw"
-          ],
-          "ndcg@3": 0.7967,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.7967,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -238,22 +163,12 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
-          "order": [
-            "evtxecmd",
-            "chainsaw"
-          ],
-          "ndcg@3": 0.7967,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.7967,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
           "order": [
             "chainsaw",
             "evtxecmd"
@@ -264,20 +179,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "evtxecmd",
-            "chainsaw"
-          ],
-          "ndcg@3": 0.7967,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.7967,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -297,22 +202,12 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
-          "order": [
-            "evtxecmd",
-            "chainsaw"
-          ],
-          "ndcg@3": 0.7967,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.7967,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
           "order": [
             "chainsaw",
             "evtxecmd"
@@ -323,12 +218,98 @@
           "ndcg@5": 1.0,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
+        }
+      }
+    },
+    {
+      "id": "registry-runkey-persistence",
+      "n_eligible": 2,
+      "scenario": true,
+      "modes": {
+        "deterministic": {
           "order": [
-            "evtxecmd",
-            "chainsaw"
+            "recmd",
+            "regripper"
+          ],
+          "ndcg@3": 1.0,
+          "p@3": 0.6667,
+          "r@3": 1.0,
+          "ndcg@5": 1.0,
+          "p@5": 0.4,
+          "r@5": 1.0,
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
+        },
+        "rag": {
+          "order": [
+            "recmd",
+            "regripper"
+          ],
+          "ndcg@3": 1.0,
+          "p@3": 0.6667,
+          "r@3": 1.0,
+          "ndcg@5": 1.0,
+          "p@5": 0.4,
+          "r@5": 1.0,
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
+        }
+      }
+    },
+    {
+      "id": "amcache-program-execution",
+      "n_eligible": 1,
+      "scenario": true,
+      "modes": {
+        "deterministic": {
+          "order": [
+            "amcacheparser"
+          ],
+          "ndcg@3": 1.0,
+          "p@3": 0.3333,
+          "r@3": 1.0,
+          "ndcg@5": 1.0,
+          "p@5": 0.2,
+          "r@5": 1.0,
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
+        },
+        "rag": {
+          "order": [
+            "amcacheparser"
+          ],
+          "ndcg@3": 1.0,
+          "p@3": 0.3333,
+          "r@3": 1.0,
+          "ndcg@5": 1.0,
+          "p@5": 0.2,
+          "r@5": 1.0,
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
+        }
+      }
+    },
+    {
+      "id": "registry-usb-history",
+      "n_eligible": 2,
+      "scenario": true,
+      "modes": {
+        "deterministic": {
+          "order": [
+            "recmd",
+            "regripper"
           ],
           "ndcg@3": 0.7967,
           "p@3": 0.6667,
@@ -336,208 +317,26 @@
           "ndcg@5": 0.7967,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
-        }
-      }
-    },
-    {
-      "id": "registry-runkey-persistence",
-      "n_eligible": 4,
-      "scenario": true,
-      "modes": {
-        "deterministic": {
-          "order": [
-            "amcacheparser",
-            "mftecmd",
-            "recmd",
-            "regripper"
-          ],
-          "ndcg@3": 0.4636,
-          "p@3": 0.6667,
-          "r@3": 0.6667,
-          "ndcg@5": 0.7032,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 0.5,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
           "order": [
-            "regripper",
-            "amcacheparser",
-            "recmd",
-            "mftecmd"
-          ],
-          "ndcg@3": 0.9514,
-          "p@3": 1.0,
-          "r@3": 1.0,
-          "ndcg@5": 0.9514,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "amcacheparser",
-            "mftecmd",
             "recmd",
             "regripper"
           ],
-          "ndcg@3": 0.4636,
+          "ndcg@3": 0.7967,
           "p@3": 0.6667,
-          "r@3": 0.6667,
-          "ndcg@5": 0.7032,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "regripper",
-            "amcacheparser",
-            "recmd",
-            "mftecmd"
-          ],
-          "ndcg@3": 0.9514,
-          "p@3": 1.0,
           "r@3": 1.0,
-          "ndcg@5": 0.9514,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        }
-      }
-    },
-    {
-      "id": "amcache-program-execution",
-      "n_eligible": 4,
-      "scenario": true,
-      "modes": {
-        "deterministic": {
-          "order": [
-            "amcacheparser",
-            "mftecmd",
-            "recmd",
-            "regripper"
-          ],
-          "ndcg@3": 0.8473,
-          "p@3": 0.6667,
-          "r@3": 0.6667,
-          "ndcg@5": 0.9515,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag": {
-          "order": [
-            "amcacheparser",
-            "recmd",
-            "regripper",
-            "mftecmd"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 1.0,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "amcacheparser",
-            "mftecmd",
-            "recmd",
-            "regripper"
-          ],
-          "ndcg@3": 0.8473,
-          "p@3": 0.6667,
-          "r@3": 0.6667,
-          "ndcg@5": 0.9515,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "amcacheparser",
-            "recmd",
-            "regripper",
-            "mftecmd"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 1.0,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        }
-      }
-    },
-    {
-      "id": "registry-usb-history",
-      "n_eligible": 4,
-      "scenario": true,
-      "modes": {
-        "deterministic": {
-          "order": [
-            "amcacheparser",
-            "mftecmd",
-            "recmd",
-            "regripper"
-          ],
-          "ndcg@3": 0.1377,
-          "p@3": 0.3333,
-          "r@3": 0.5,
-          "ndcg@5": 0.4935,
+          "ndcg@5": 0.7967,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 0.3333
-        },
-        "rag": {
-          "order": [
-            "amcacheparser",
-            "regripper",
-            "recmd",
-            "mftecmd"
-          ],
-          "ndcg@3": 0.659,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.659,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 0.5
-        },
-        "llm": {
-          "order": [
-            "amcacheparser",
-            "mftecmd",
-            "recmd",
-            "regripper"
-          ],
-          "ndcg@3": 0.1377,
-          "p@3": 0.3333,
-          "r@3": 0.5,
-          "ndcg@5": 0.4935,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 0.3333
-        },
-        "rag_llm": {
-          "order": [
-            "amcacheparser",
-            "regripper",
-            "recmd",
-            "mftecmd"
-          ],
-          "ndcg@3": 0.659,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 0.659,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 0.5
+          "mrr": 1.0,
+          "core_mrr": 0.5,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -556,7 +355,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.2,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
           "order": [
@@ -568,31 +370,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.2,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "volatility3"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.3333,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.2,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "volatility3"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.3333,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.2,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -611,7 +392,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.2,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
           "order": [
@@ -623,31 +407,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.2,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "pecmd"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.3333,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.2,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "pecmd"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.3333,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.2,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -666,7 +429,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.2,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
           "order": [
@@ -678,31 +444,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.2,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "mftecmd"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.3333,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.2,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "mftecmd"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.3333,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.2,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -723,27 +468,16 @@
           "ndcg@5": 0.9514,
           "p@5": 0.6,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
           "order": [
-            "gitleaks",
             "semgrep",
-            "bandit"
-          ],
-          "ndcg@3": 0.8146,
-          "p@3": 1.0,
-          "r@3": 1.0,
-          "ndcg@5": 0.8146,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "bandit",
             "gitleaks",
-            "semgrep"
+            "bandit"
           ],
           "ndcg@3": 0.9514,
           "p@3": 1.0,
@@ -751,21 +485,10 @@
           "ndcg@5": 0.9514,
           "p@5": 0.6,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "gitleaks",
-            "semgrep",
-            "bandit"
-          ],
-          "ndcg@3": 0.8146,
-          "p@3": 1.0,
-          "r@3": 1.0,
-          "ndcg@5": 0.8146,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -786,7 +509,10 @@
           "ndcg@5": 0.8213,
           "p@5": 0.6,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 0.5,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
           "order": [
@@ -800,35 +526,10 @@
           "ndcg@5": 1.0,
           "p@5": 0.6,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "bandit",
-            "gitleaks",
-            "semgrep"
-          ],
-          "ndcg@3": 0.8213,
-          "p@3": 1.0,
-          "r@3": 1.0,
-          "ndcg@5": 0.8213,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "gitleaks",
-            "semgrep",
-            "bandit"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 1.0,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.6,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
@@ -848,22 +549,12 @@
           "ndcg@5": 0.7967,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 0.5,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         },
         "rag": {
-          "order": [
-            "semgrep",
-            "gitleaks"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "llm": {
           "order": [
             "gitleaks",
             "semgrep"
@@ -874,99 +565,55 @@
           "ndcg@5": 0.7967,
           "p@5": 0.4,
           "r@5": 1.0,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "semgrep",
-            "gitleaks"
-          ],
-          "ndcg@3": 1.0,
-          "p@3": 0.6667,
-          "r@3": 1.0,
-          "ndcg@5": 1.0,
-          "p@5": 0.4,
-          "r@5": 1.0,
-          "mrr": 1.0
+          "mrr": 1.0,
+          "core_mrr": 0.5,
+          "core_r@3": 1.0,
+          "core_r@5": 1.0
         }
       }
     },
     {
       "id": "mixed-intrusion-triage",
-      "n_eligible": 7,
+      "n_eligible": 5,
       "scenario": true,
       "modes": {
         "deterministic": {
           "order": [
-            "amcacheparser",
             "chainsaw",
             "evtxecmd",
-            "mftecmd",
             "recmd",
             "regripper",
             "volatility3"
           ],
-          "ndcg@3": 0.5307,
+          "ndcg@3": 0.6462,
           "p@3": 1.0,
-          "r@3": 0.5,
-          "ndcg@5": 0.5242,
-          "p@5": 0.8,
-          "r@5": 0.6667,
-          "mrr": 1.0
+          "r@3": 0.6,
+          "ndcg@5": 0.9131,
+          "p@5": 1.0,
+          "r@5": 1.0,
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 0.3333,
+          "core_r@5": 1.0
         },
         "rag": {
           "order": [
-            "amcacheparser",
-            "recmd",
-            "regripper",
-            "evtxecmd",
-            "mftecmd",
-            "chainsaw",
-            "volatility3"
-          ],
-          "ndcg@3": 0.4898,
-          "p@3": 1.0,
-          "r@3": 0.5,
-          "ndcg@5": 0.494,
-          "p@5": 0.8,
-          "r@5": 0.6667,
-          "mrr": 1.0
-        },
-        "llm": {
-          "order": [
-            "amcacheparser",
             "chainsaw",
             "evtxecmd",
-            "mftecmd",
             "recmd",
             "regripper",
             "volatility3"
           ],
-          "ndcg@3": 0.5307,
+          "ndcg@3": 0.6462,
           "p@3": 1.0,
-          "r@3": 0.5,
-          "ndcg@5": 0.5242,
-          "p@5": 0.8,
-          "r@5": 0.6667,
-          "mrr": 1.0
-        },
-        "rag_llm": {
-          "order": [
-            "amcacheparser",
-            "recmd",
-            "regripper",
-            "evtxecmd",
-            "mftecmd",
-            "chainsaw",
-            "volatility3"
-          ],
-          "ndcg@3": 0.4898,
-          "p@3": 1.0,
-          "r@3": 0.5,
-          "ndcg@5": 0.494,
-          "p@5": 0.8,
-          "r@5": 0.6667,
-          "mrr": 1.0
+          "r@3": 0.6,
+          "ndcg@5": 0.9131,
+          "p@5": 1.0,
+          "r@5": 1.0,
+          "mrr": 1.0,
+          "core_mrr": 1.0,
+          "core_r@3": 0.3333,
+          "core_r@5": 1.0
         }
       }
     }

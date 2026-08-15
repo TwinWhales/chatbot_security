@@ -10,6 +10,7 @@ Severity 결정 가이드라인은 시스템 프롬프트로 강제하고, 모�
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from forensicagent.analyzer.types import EvidenceRef, Finding, Severity
@@ -21,6 +22,43 @@ logger = logging.getLogger(__name__)
 
 
 VALID_SEVERITIES = {"info", "low", "medium", "high", "critical"}
+
+_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "severity": {
+                        "type": "string",
+                        "enum": ["info", "low", "medium", "high", "critical"],
+                    },
+                    "category": {"type": "string"},
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "raw_excerpt": {"type": "string"},
+                    "suggested_followup": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+                "required": [
+                    "severity",
+                    "category",
+                    "title",
+                    "description",
+                    "raw_excerpt",
+                    "suggested_followup",
+                    "confidence",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "summary": {"type": "string"},
+    },
+    "required": ["findings", "summary"],
+    "additionalProperties": False,
+}
 
 _SEVERITY_GUIDE = (
     "Severity scale:\n"
@@ -49,7 +87,8 @@ def _system_prompt(meta: ToolMetadata) -> str:
         '    "title": "<one short sentence>",\n'
         '    "description": "<2-3 sentences>",\n'
         '    "raw_excerpt": "<the line(s) that triggered this>",\n'
-        '    "suggested_followup": "<one short sentence>" }\n'
+        '    "suggested_followup": "<one short sentence>",\n'
+        '    "confidence": 0.0 }\n'
         "], \"summary\": \"<one-sentence overall summary>\" }"
     )
 
@@ -97,20 +136,30 @@ def extract(
             "is suspicious, do not invent findings not in the output):\n"
             f"{rag_context.strip()}\n\n"
         )
+    messages = [
+        ChatMessage(role="system", content=_system_prompt(metadata)),
+        ChatMessage(
+            role="user",
+            content=(
+                f"{scenario_block}{rag_block}"
+                f"Tool output:\n```\n{payload}\n```\n\nReturn the JSON now."
+            ),
+        ),
+    ]
     try:
-        parsed: Any = client.json_chat(
-            [
-                ChatMessage(role="system", content=_system_prompt(metadata)),
-                ChatMessage(
-                    role="user",
-                    content=(
-                        f"{scenario_block}{rag_block}"
-                        f"Tool output:\n```\n{payload}\n```\n\nReturn the JSON now."
-                    ),
-                ),
-            ],
-            retry=1,
-        )
+        try:
+            parsed: Any = client.json_chat(
+                messages,
+                retry=1,
+                format_schema=_RESPONSE_SCHEMA,
+            )
+        except TypeError as exc:
+            # Lightweight test/dry-run clients written against the old
+            # protocol may not accept format_schema. Do not hide unrelated
+            # TypeErrors raised *inside* a client implementation.
+            if "format_schema" not in str(exc):
+                raise
+            parsed = client.json_chat(messages, retry=1)
     except OllamaUnavailable as e:
         logger.info("LLM unavailable for %s: %s", metadata.tool_id, e)
         return [], "", False, True
@@ -130,21 +179,39 @@ def extract(
     for it in items:
         if not isinstance(it, dict):
             continue
-        sev = it.get("severity", "low")
+        sev = str(it.get("severity", "low")).casefold()
         if sev not in VALID_SEVERITIES:
             sev = "low"
+        excerpt = str(it.get("raw_excerpt", "")).strip()
+        # An LLM finding is admissible only when its quoted evidence exists in
+        # the exact grounded input. This prevents invented evidence from being
+        # promoted into a deterministic report.
+        if not excerpt or excerpt not in payload:
+            logger.warning(
+                "drop ungrounded LLM finding for %s: excerpt not in input",
+                metadata.tool_id,
+            )
+            continue
+        title = str(it.get("title", ""))[:200]
+        slug = re.sub(r"[^a-z0-9]+", "-", title.casefold()).strip("-")[:80]
+        try:
+            confidence = min(0.6, max(0.0, float(it.get("confidence", 0.4))))
+        except (TypeError, ValueError):
+            confidence = 0.4
         out.append(
             Finding(
                 severity=sev,  # type: ignore[arg-type]
                 category=str(it.get("category", "anomaly"))[:64],
-                title=str(it.get("title", ""))[:200],
+                title=title,
                 description=str(it.get("description", "")),
                 evidence_ref=EvidenceRef(
                     source_file=evidence_path,
-                    raw_excerpt=str(it.get("raw_excerpt", ""))[:600],
+                    raw_excerpt=excerpt[:600],
                 ),
                 suggested_followup=str(it.get("suggested_followup", "")),
                 source="llm",
+                rule_id=f"llm:{slug or 'finding'}",
+                confidence=confidence,
             )
         )
 

@@ -14,7 +14,13 @@ def console() -> Console:
     return _console
 
 
-def render_inventory(inv: Inventory) -> Table:
+def render_inventory(inv: Inventory, *, max_rows: int = 30) -> Table:
+    """Render a bounded inventory preview.
+
+    Full inventories remain available in the JSON/Markdown report. Keeping the
+    terminal preview bounded prevents a source tree or mounted image from
+    flooding the console with thousands of rows before planning begins.
+    """
     table = Table(
         title=f"Evidence inventory - {inv.scan_root}",
         title_style="bold cyan",
@@ -27,7 +33,9 @@ def render_inventory(inv: Inventory) -> Table:
     table.add_column("platform")
     table.add_column("conf", justify="right")
 
-    for e in inv.evidence_list:
+    evidence = inv.evidence_list
+    shown = evidence if max_rows <= 0 else evidence[:max_rows]
+    for e in shown:
         table.add_row(
             _type_style(e),
             e.path,
@@ -35,6 +43,12 @@ def render_inventory(inv: Inventory) -> Table:
             e.detected_by,
             e.platform_hint,
             f"{e.confidence:.2f}",
+        )
+    omitted = len(evidence) - len(shown)
+    if omitted:
+        table.caption = (
+            f"showing {len(shown)} of {len(evidence)} detected items; "
+            f"{omitted} more are retained in the report"
         )
     return table
 

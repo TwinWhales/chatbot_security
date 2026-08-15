@@ -6,20 +6,19 @@ category: disk_analysis
 subcategory: ntfs_metadata
 
 applicable_evidence_types:
-  - disk_image
-  - registry_hive  # SDS / Boot 등 일부 NTFS metadata 도 처리
+  - ntfs_metadata
 
 platform:
   - windows
   - linux  # dotnet runtime 으로 cross-platform
 
 input_format:
-  - "$MFT"
-  - "$J"
-  - "$Boot"
-  - "$SDS"
-  - "$I30"
-  - .mft
+  - "name:$MFT"
+  - "name:$J"
+  - "name:$Boot"
+  - "name:$SDS"
+  - "name:$I30"
+  - ext:.mft
 
 output_format: csv
 output_size_estimate: medium

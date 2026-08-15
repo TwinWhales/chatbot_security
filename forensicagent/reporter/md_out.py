@@ -8,6 +8,30 @@ from forensicagent.analyzer.types import SEVERITY_RANK, Finding
 from forensicagent.reporter.types import Report
 
 
+def _md_text(value: object) -> str:
+    """Escape untrusted/tool-controlled text used outside code spans."""
+    text = " ".join(str(value).splitlines())
+    for char in ("\\", "`", "*", "_", "{", "}", "[", "]", "<", ">", "|", "#"):
+        text = text.replace(char, f"\\{char}")
+    return text
+
+
+def _inline_code(value: object) -> str:
+    """Create a safe inline code span even when the value contains backticks."""
+    text = " ".join(str(value).splitlines())
+    longest = 0
+    run = 0
+    for char in text:
+        if char == "`":
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    fence = "`" * (longest + 1)
+    padding = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{padding}{text}{padding}{fence}"
+
+
 def _sev_emoji(sev: str) -> str:
     return {
         "critical": "🔴",
@@ -37,14 +61,15 @@ def write_md(report: Report, path: str | Path) -> Path:
 
     lines.append("# Forensic Triage Report")
     lines.append("")
-    lines.append(f"- **run_id**: `{m.run_id}`")
-    lines.append(f"- **started**: {m.started_at}")
-    lines.append(f"- **finished**: {m.finished_at}")
-    lines.append(f"- **working_directory**: `{m.working_directory}`")
+    lines.append(f"- **run_id**: {_inline_code(m.run_id)}")
+    lines.append(f"- **started**: {_md_text(m.started_at)}")
+    lines.append(f"- **finished**: {_md_text(m.finished_at)}")
+    lines.append(f"- **working_directory**: {_inline_code(m.working_directory)}")
     lines.append(
-        f"- **host**: {m.host_info.get('system', '?')} "
-        f"{m.host_info.get('release', '')} ({m.host_info.get('machine', '?')}) "
-        f"python {m.host_info.get('python', '?')}"
+        f"- **host**: {_md_text(m.host_info.get('system', '?'))} "
+        f"{_md_text(m.host_info.get('release', ''))} "
+        f"({_md_text(m.host_info.get('machine', '?'))}) "
+        f"python {_md_text(m.host_info.get('python', '?'))}"
     )
     lines.append("")
 
@@ -59,7 +84,7 @@ def write_md(report: Report, path: str | Path) -> Path:
     )
     lines.append(f"- by severity: {sev_line}")
     if s.by_category:
-        cat_line = ", ".join(f"{c}={n}" for c, n in s.by_category.items())
+        cat_line = ", ".join(f"{_md_text(c)}={n}" for c, n in s.by_category.items())
         lines.append(f"- by category: {cat_line}")
     lines.append(f"- total ms: {s.total_ms}")
     lines.append("")
@@ -69,20 +94,20 @@ def write_md(report: Report, path: str | Path) -> Path:
         inv = report.evidence_inventory
         lines.append("## Evidence inventory")
         lines.append("")
-        lines.append(f"- scan root: `{inv.scan_root}`")
+        lines.append(f"- scan root: {_inline_code(inv.scan_root)}")
         lines.append(
             f"- scanned files: {inv.scanned_files}, "
             f"detected: {len(inv.evidence_list)}, "
-            f"skipped: {inv.skipped_files}"
+            f"unidentified: {inv.unidentified_files}, skipped: {inv.skipped_files}"
         )
         lines.append("")
         lines.append("| type | file | size | by | platform | conf |")
         lines.append("|---|---|---:|---|---|---:|")
         for e in inv.evidence_list:
             lines.append(
-                f"| {e.evidence_type} | `{e.path}` | "
-                f"{_human_size(e.size_bytes)} | {e.detected_by} | "
-                f"{e.platform_hint} | {e.confidence:.2f} |"
+                f"| {_md_text(e.evidence_type)} | {_md_text(e.path)} | "
+                f"{_human_size(e.size_bytes)} | {_md_text(e.detected_by)} | "
+                f"{_md_text(e.platform_hint)} | {e.confidence:.2f} |"
             )
         lines.append("")
 
@@ -104,49 +129,68 @@ def write_md(report: Report, path: str | Path) -> Path:
             lines.append(f"### {_sev_emoji(sev)} {sev} ({len(sev_items)})")
             lines.append("")
             for tid, f in sev_items:
-                lines.append(f"- **[{tid}]** {f.title}")
+                lines.append(f"- **[{_md_text(tid)}]** {_md_text(f.title)}")
                 if f.description:
-                    lines.append(f"    - {f.description}")
+                    lines.append(f"    - {_md_text(f.description)}")
                 if f.evidence_ref.source_file:
-                    lines.append(f"    - source: `{f.evidence_ref.source_file}`")
+                    lines.append(
+                        f"    - source: {_inline_code(f.evidence_ref.source_file)}"
+                    )
                 if f.evidence_ref.raw_excerpt:
                     lines.append(
-                        f"    - excerpt: `{f.evidence_ref.raw_excerpt[:160]}`"
+                        f"    - excerpt: {_inline_code(f.evidence_ref.raw_excerpt[:160])}"
                     )
                 if f.suggested_followup:
-                    lines.append(f"    - followup: {f.suggested_followup}")
+                    lines.append(f"    - followup: {_md_text(f.suggested_followup)}")
             lines.append("")
 
     # ---- Tool execution details ----
     lines.append("## Tool execution details")
     lines.append("")
     for b in report.tool_bundles:
-        lines.append(f"### {b.tool_id}")
+        lines.append(f"### {_md_text(b.tool_id)}")
         lines.append("")
         for e in b.execution:
-            lines.append(f"- target: `{e.target_evidence}`")
-            lines.append(f"    - status: **{e.status}** (exit={e.exit_code})")
-            lines.append(f"    - command: `{e.command_executed}`")
+            lines.append(f"- target: {_inline_code(e.target_evidence)}")
+            lines.append(
+                f"    - status: **{_md_text(e.status)}** (exit={e.exit_code})"
+            )
+            lines.append(f"    - command: {_inline_code(e.command_executed)}")
             lines.append(
                 f"    - duration: {e.duration_seconds:.2f}s, "
                 f"output: {_human_size(e.output_size_bytes)}"
             )
             if e.stdout_path:
-                lines.append(f"    - stdout: `{e.stdout_path}`")
+                lines.append(f"    - stdout: {_inline_code(e.stdout_path)}")
             if e.error_message:
-                lines.append(f"    - error: {e.error_message}")
+                lines.append(f"    - error: {_md_text(e.error_message)}")
+            for warning in e.warnings:
+                lines.append(f"    - warning: {_md_text(warning)}")
+            for artifact in e.artifacts:
+                lines.append(
+                    f"    - artifact ({_md_text(artifact.role)}/"
+                    f"{_md_text(artifact.format)}, {_human_size(artifact.size_bytes)}): "
+                    f"{_inline_code(artifact.path)} sha256={_inline_code(artifact.sha256)}"
+                )
         if b.analysis:
             lines.append(
                 f"- analyzer: case={b.analysis.case_used} "
                 f"llm_invoked={b.analysis.llm_invoked} "
                 f"llm_failed={b.analysis.llm_failed}"
             )
-            lines.append(f"- summary: {b.analysis.summary}")
+            lines.append(f"- summary: {_md_text(b.analysis.summary)}")
         lines.append("")
 
     # ---- Appendix: skipped plan items ----
     if report.execution_plan and report.execution_plan.skipped_no_evidence:
         lines.append("## Appendix: tools skipped (no matching evidence)")
+        lines.append("")
+
+    if report.execution_plan and report.execution_plan.unhandled_evidence:
+        lines.append("## Appendix: identified evidence without a compatible tool")
+        lines.append("")
+        for path_value in report.execution_plan.unhandled_evidence:
+            lines.append(f"- {_inline_code(path_value)}")
         lines.append("")
         for tid in report.execution_plan.skipped_no_evidence:
             lines.append(f"- {tid}")

@@ -1,14 +1,103 @@
 """Stage 1 — 결정론 필터링.
 
-증거 인벤토리의 evidence_type 집합과 각 도구의 applicable_evidence_types
-교집합으로 후보를 추린다. LLM 호출 없음. 50 → 10~15 개 까지 줄이는 단계.
+증거의 evidence_type과 도구의 applicable_evidence_types를 먼저 맞추고,
+input_format까지 검증해 실제로 소비 가능한 입력만 후보로 남긴다. LLM 호출 없음.
 """
 
 from __future__ import annotations
 
-from forensicagent.scanner.types import Inventory
+from pathlib import Path
+
+from forensicagent.scanner.types import Evidence, Inventory
 from forensicagent.selector.types import ToolSelection
 from forensicagent.tools.schema import ToolMetadata
+
+
+_ROOT_SCAN_SAFE_TYPES = {
+    "source_code_python",
+    "source_code_javascript",
+    "source_code_generic",
+    "text_log",
+    "text_document",
+}
+
+
+def input_format_matches(evidence: Evidence, formats: list[str]) -> bool:
+    """Match metadata input formats against an evidence filename.
+
+    Canonical syntax is ``any``, ``name:<basename>`` and ``ext:<suffix>``.
+    Empty lists remain wildcard-compatible for third-party metadata.  Legacy
+    ``.suffix`` and bare basename tokens are accepted during migration.
+    """
+    if not formats:
+        return True
+
+    filename = (evidence.filename or Path(evidence.path).name).casefold()
+    for raw in formats:
+        token = raw.strip()
+        folded = token.casefold()
+        if folded == "any":
+            return True
+        if folded.startswith("name:"):
+            if filename == token[5:].strip().casefold():
+                return True
+            continue
+        if folded.startswith("ext:"):
+            suffix = token[4:].strip().casefold()
+            if suffix and not suffix.startswith("."):
+                suffix = f".{suffix}"
+            if suffix and filename.endswith(suffix):
+                return True
+            continue
+
+        # Legacy compatibility: a leading dot denotes a suffix; otherwise it
+        # is an exact basename such as NTUSER.DAT or $MFT.
+        if folded.startswith("."):
+            if filename.endswith(folded):
+                return True
+        elif filename == folded:
+            return True
+    return False
+
+
+def _matching_evidence(
+    inventory: Inventory,
+    meta: ToolMetadata,
+) -> list[Evidence]:
+    applicable = set(meta.applicable_evidence_types)
+    return [
+        evidence
+        for evidence in inventory.evidence_list
+        if evidence.evidence_type != "unknown"
+        and evidence.evidence_type in applicable
+        and input_format_matches(evidence, meta.input_format)
+    ]
+
+
+def _target_paths(
+    inventory: Inventory,
+    meta: ToolMetadata,
+    matches: list[Evidence],
+) -> list[str]:
+    """Choose bounded execution targets without broadening forensic scope."""
+    if meta.target_mode == "scan_root" and matches:
+        root = Path(inventory.scan_root) if inventory.scan_root else None
+        identified_types = {
+            evidence.evidence_type
+            for evidence in inventory.evidence_list
+            if evidence.evidence_type != "unknown"
+        }
+        # Directory aggregation is only safe for a source/text corpus. A case
+        # root that also contains memory/disk images must not make gitleaks or
+        # semgrep traverse those multi-gigabyte artifacts.
+        if (
+            root is not None
+            and root.is_dir()
+            and identified_types
+            and identified_types <= _ROOT_SCAN_SAFE_TYPES
+        ):
+            return [str(root.resolve())]
+    return list(dict.fromkeys(evidence.path for evidence in matches))
 
 
 def filter_by_evidence(
@@ -17,27 +106,17 @@ def filter_by_evidence(
 ) -> list[ToolSelection]:
     """Stage 1 결과를 ToolSelection list 로 반환.
 
-    target_evidence 에는 매칭된 evidence path 들이 들어간다.
+    target_evidence 에는 evidence_type과 input_format이 모두 매칭된 path가 들어간다.
     command_template 은 첫 번째 템플릿을 기본으로 (Selector 가 LLM 으로 더
     구체화하면 덮어쓸 수 있게 둠).
     """
-    # evidence_type → [evidence.path] 인덱스.
-    by_type: dict[str, list[str]] = {}
-    for e in inventory.evidence_list:
-        if e.evidence_type == "unknown":
-            continue
-        by_type.setdefault(e.evidence_type, []).append(e.path)
-
     selections: list[ToolSelection] = []
     for tool_id, meta in tools.items():
-        targets: list[str] = []
-        matched_types: list[str] = []
-        for et in meta.applicable_evidence_types:
-            if et in by_type:
-                targets.extend(by_type[et])
-                matched_types.append(et)
+        matches = _matching_evidence(inventory, meta)
+        targets = _target_paths(inventory, meta, matches)
         if not targets:
             continue
+        matched_types = list(dict.fromkeys(e.evidence_type for e in matches))
 
         reason = (
             f"{', '.join(matched_types)} 증거가 발견되어 "
@@ -62,9 +141,27 @@ def skipped_by_evidence_gap(
     tools: dict[str, ToolMetadata],
 ) -> list[str]:
     """Stage 1 에서 떨어진 도구 id 목록. UX 에 '왜 안 돌렸나' 표시 용."""
-    present = {e.evidence_type for e in inventory.evidence_list}
     return [
         tid
         for tid, m in tools.items()
-        if not set(m.applicable_evidence_types) & present
+        if not _matching_evidence(inventory, m)
     ]
+
+
+def unhandled_evidence_paths(
+    inventory: Inventory,
+    tools: dict[str, ToolMetadata],
+) -> list[str]:
+    """Evidence paths that no configured tool can consume safely."""
+    handled = {
+        evidence.path
+        for meta in tools.values()
+        for evidence in _matching_evidence(inventory, meta)
+    }
+    return list(
+        dict.fromkeys(
+            evidence.path
+            for evidence in inventory.evidence_list
+            if evidence.evidence_type != "unknown" and evidence.path not in handled
+        )
+    )

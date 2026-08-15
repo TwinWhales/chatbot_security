@@ -25,6 +25,7 @@ _MAGIC_SIGNATURES: list[tuple[bytes, EvidenceType, Platform, float]] = [
     (b"\xa1\xb2\xc3\xd4", "pcap", "unknown", 0.98),
     (b"\xd4\xc3\xb2\xa1", "pcap", "unknown", 0.98),
     (b"\x4d\x3c\xb2\xa1", "pcap", "unknown", 0.98),  # nanosecond pcap
+    (b"\xa1\xb2\x3c\x4d", "pcap", "unknown", 0.98),  # nanosecond pcap, other endian
     (b"\x0a\x0d\x0d\x0a", "pcap", "unknown", 0.95),  # pcapng SHB
     # Registry hive (regf): "regf"
     (b"regf", "registry_hive", "windows", 0.98),
@@ -35,8 +36,9 @@ _MAGIC_SIGNATURES: list[tuple[bytes, EvidenceType, Platform, float]] = [
     (b"EVF\x09\x0d\x0a\xff\x00", "disk_image", "unknown", 0.99),
     # Raw VMDK descriptor magic (KDMV) is binary; just pcap-style hint.
     (b"KDMV", "disk_image", "unknown", 0.90),
-    # SQLite (browser artifacts: history/cookies/...): "SQLite format 3\x00"
-    (b"SQLite format 3\x00", "browser_artifact", "unknown", 0.75),
+    # SQLite is a storage format, not necessarily a browser artifact.  Browser
+    # context is applied in detect_by_magic() using filename/parent hints.
+    (b"SQLite format 3\x00", "sqlite_database", "unknown", 0.90),
 ]
 
 _EXTENSION_MAP: dict[str, tuple[EvidenceType, Platform, float]] = {
@@ -45,7 +47,6 @@ _EXTENSION_MAP: dict[str, tuple[EvidenceType, Platform, float]] = {
     ".pcap": ("pcap", "unknown", 0.85),
     ".pcapng": ("pcap", "unknown", 0.85),
     ".cap": ("pcap", "unknown", 0.70),
-    ".raw": ("memory_dump", "unknown", 0.70),
     ".mem": ("memory_dump", "unknown", 0.75),
     ".dmp": ("memory_dump", "windows", 0.70),
     ".vmem": ("memory_dump", "unknown", 0.80),
@@ -56,12 +57,13 @@ _EXTENSION_MAP: dict[str, tuple[EvidenceType, Platform, float]] = {
     ".vhd": ("disk_image", "unknown", 0.80),
     ".vhdx": ("disk_image", "unknown", 0.80),
     ".vmdk": ("disk_image", "unknown", 0.75),
+    ".mft": ("ntfs_metadata", "windows", 0.90),
     ".pf": ("prefetch", "windows", 0.90),
-    ".sqlite": ("browser_artifact", "unknown", 0.60),
-    ".sqlite3": ("browser_artifact", "unknown", 0.60),
-    ".db": ("browser_artifact", "unknown", 0.40),
+    ".sqlite": ("sqlite_database", "unknown", 0.70),
+    ".sqlite3": ("sqlite_database", "unknown", 0.70),
+    ".db": ("sqlite_database", "unknown", 0.45),
     ".log": ("text_log", "unknown", 0.55),
-    ".txt": ("text_log", "unknown", 0.30),
+    ".txt": ("text_document", "unknown", 0.60),
     # --- source code (bandit / semgrep / gitleaks 의 입력) ---
     ".py": ("source_code_python", "unknown", 0.85),
     ".pyi": ("source_code_python", "unknown", 0.80),
@@ -91,8 +93,16 @@ _FILENAME_PATTERNS: list[tuple[re.Pattern[str], EvidenceType, Platform, float]] 
     (re.compile(r"^NTUSER\.DAT$", re.IGNORECASE), "registry_hive", "windows", 0.95),
     (re.compile(r"^UsrClass\.dat$", re.IGNORECASE), "registry_hive", "windows", 0.95),
     (re.compile(r"^(SYSTEM|SOFTWARE|SAM|SECURITY|DEFAULT)$"), "registry_hive", "windows", 0.90),
+    (re.compile(r"^Amcache\.hve$", re.IGNORECASE), "registry_hive", "windows", 0.98),
+    # Extracted NTFS metadata files consumed by MFTECmd.
+    (re.compile(r"^\$(MFT|J|Boot|SDS|I30)$", re.IGNORECASE),
+     "ntfs_metadata", "windows", 0.98),
     # Common memory dump names
-    (re.compile(r"memory\.(raw|mem|dmp|bin)$", re.IGNORECASE), "memory_dump", "unknown", 0.85),
+    (re.compile(
+        r"^(?:.*[-_.])?(?:memory|memdump|ram|physmem|winpmem)"
+        r"(?:[-_.].*)?\.(raw|mem|dmp|bin|vmem)$",
+        re.IGNORECASE,
+    ), "memory_dump", "unknown", 0.88),
     # Browser artifacts (typical filenames)
     (re.compile(r"^(History|Cookies|Web Data|Places\.sqlite|formhistory\.sqlite)$",
                 re.IGNORECASE), "browser_artifact", "unknown", 0.85),
@@ -101,18 +111,49 @@ _FILENAME_PATTERNS: list[tuple[re.Pattern[str], EvidenceType, Platform, float]] 
      "text_log", "linux", 0.85),
 ]
 
+_BROWSER_PARENT_PATHS: list[tuple[str, Platform]] = [
+    ("appdata/local/google/chrome/user data", "windows"),
+    ("appdata/local/microsoft/edge/user data", "windows"),
+    ("appdata/roaming/mozilla/firefox/profiles", "windows"),
+    (".config/google-chrome", "linux"),
+    (".config/chromium", "linux"),
+    (".mozilla/firefox", "linux"),
+    ("library/application support/google/chrome", "macos"),
+    ("library/application support/firefox/profiles", "macos"),
+]
+
 # parent-dir keywords (case-insensitive substring matches in the normalized path)
 _PARENT_DIR_HINTS: list[tuple[str, EvidenceType, Platform, float]] = [
     ("windows/system32/winevt/logs", "evtx_log", "windows", 0.80),
     ("windows/prefetch", "prefetch", "windows", 0.85),
     ("windows/system32/config", "registry_hive", "windows", 0.80),
-    ("appdata/local/google/chrome/user data", "browser_artifact", "windows", 0.70),
-    ("appdata/roaming/mozilla/firefox/profiles", "browser_artifact", "windows", 0.70),
+    *[
+        (needle, "browser_artifact", platform, 0.70)
+        for needle, platform in _BROWSER_PARENT_PATHS
+    ],
     ("var/log", "text_log", "linux", 0.75),
 ]
 
 # How many bytes to read from each file's head for magic detection.
 HEADER_READ_BYTES = 32
+
+_BROWSER_FILENAMES = {
+    "history",
+    "cookies",
+    "web data",
+    "places.sqlite",
+    "formhistory.sqlite",
+}
+
+_PREFETCH_VERSIONS = {17, 23, 26, 30, 31}
+
+
+def _has_browser_context(path: Path) -> bool:
+    """Return True only when SQLite is located/named like a browser DB."""
+    if path.name.casefold() in _BROWSER_FILENAMES:
+        return True
+    norm = str(path).replace("\\", "/").casefold()
+    return any(needle in norm for needle, _ in _BROWSER_PARENT_PATHS)
 
 
 def detect_by_magic(path: Path) -> tuple[EvidenceType, Platform, float] | None:
@@ -124,8 +165,18 @@ def detect_by_magic(path: Path) -> tuple[EvidenceType, Platform, float] | None:
         return None
     if not head:
         return None
+    # Uncompressed Prefetch begins with a version DWORD; SCCA is at offset 4.
+    # Retain the legacy offset-0 signature below for already-collected fixtures.
+    if (
+        len(head) >= 8
+        and head[4:8] == b"SCCA"
+        and int.from_bytes(head[:4], "little") in _PREFETCH_VERSIONS
+    ):
+        return "prefetch", "windows", 0.98
     for sig, etype, plat, conf in _MAGIC_SIGNATURES:
         if head.startswith(sig):
+            if etype == "sqlite_database" and _has_browser_context(path):
+                return "browser_artifact", plat, 0.95
             return etype, plat, conf
     return None
 
@@ -134,7 +185,10 @@ def detect_by_extension(path: Path) -> tuple[EvidenceType, Platform, float] | No
     ext = path.suffix.lower()
     if not ext:
         return None
-    return _EXTENSION_MAP.get(ext)
+    hit = _EXTENSION_MAP.get(ext)
+    if hit and hit[0] == "sqlite_database" and _has_browser_context(path):
+        return "browser_artifact", hit[1], max(hit[2], 0.85)
+    return hit
 
 
 def detect_by_filename(path: Path) -> tuple[EvidenceType, Platform, float] | None:

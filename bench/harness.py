@@ -30,8 +30,9 @@ from bench import metrics as M
 BENCH_DIR = Path(__file__).resolve().parent
 GOLDEN_PATH = BENCH_DIR / "goldenset.json"
 KS = (3, 5)
-METRIC_KEYS = [f"ndcg@{k}" for k in KS] + ["mrr"] + \
-    [f"p@{k}" for k in KS] + [f"r@{k}" for k in KS]
+METRIC_KEYS = [f"ndcg@{k}" for k in KS] + ["mrr", "core_mrr"] + \
+    [f"p@{k}" for k in KS] + [f"r@{k}" for k in KS] + \
+    [f"core_r@{k}" for k in KS]
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,12 @@ def _case_metrics(predicted_ids: list[str], labels: dict[str, int]) -> dict[str,
         out[f"p@{k}"] = M.precision_at_k(rels, k)
         out[f"r@{k}"] = M.recall_at_k(rels, k)
     out["mrr"] = M.mrr(rels)
+    # Grade 1 is useful context, but it made the previous MRR saturate at 1.0
+    # for nearly every synthetic case. Track the first core (grade 2) tool and
+    # core coverage separately so a primary-tool regression is visible.
+    out["core_mrr"] = M.mrr(rels, threshold=2.0)
+    for k in KS:
+        out[f"core_r@{k}"] = M.recall_at_k(rels, k, threshold=2.0)
     return out
 
 

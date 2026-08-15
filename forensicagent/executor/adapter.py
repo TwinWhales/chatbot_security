@@ -18,12 +18,12 @@ from __future__ import annotations
 import json
 import logging
 import shlex
-import shutil
 import string
 import subprocess
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
+from forensicagent.tools.executables import resolve_executable
 from forensicagent.tools.schema import ToolMetadata
 
 logger = logging.getLogger(__name__)
@@ -48,25 +48,31 @@ class GenericAdapter:
 
     def __init__(self, metadata: ToolMetadata) -> None:
         self._meta = metadata
+        self.selected_template: str = ""
 
     # ---- prerequisites ----
 
     def validate_prerequisites(self) -> tuple[bool, str]:
         check = self._meta.install_check
         if check is None:
-            # check 가 없으면 PATH 에 tool_id 가 있는지만 확인 (best effort).
-            if shutil.which(self._meta.tool_id) is None:
-                return False, f"{self._meta.tool_id} not on PATH"
-            return True, f"{self._meta.tool_id} found on PATH"
+            # check 가 없으면 공용 resolver 로 tool_id 를 확인 (best effort).
+            resolved = resolve_executable(self._meta.tool_id)
+            if resolved is None:
+                return False, f"{self._meta.tool_id} not on PATH or tools_bin"
+            return True, f"{self._meta.tool_id} found at {resolved}"
 
         try:
             argv = shlex.split(check.command, posix=False)
         except ValueError as e:
             return False, f"invalid install_check.command: {e}"
 
-        # 명령의 첫 토큰이 PATH 에 없으면 즉시 실패.
-        if argv and shutil.which(argv[0]) is None:
-            return False, f"{argv[0]} not on PATH"
+        # 명령의 첫 토큰이 PATH/tools_bin 에 없으면 즉시 실패. 실제 resolved
+        # path 로 실행해 doctor 와 executor 의 탐색 정책을 동일하게 유지한다.
+        resolved = resolve_executable(argv[0]) if argv else None
+        if resolved is None:
+            missing = argv[0] if argv else "(empty command)"
+            return False, f"{missing} not on PATH or tools_bin"
+        argv[0] = str(resolved)
 
         try:
             proc = subprocess.run(
@@ -90,8 +96,14 @@ class GenericAdapter:
 
     # ---- command building ----
 
-    def build_command(self, evidence_path: str, **vars: str) -> list[str]:
-        """Pick the first command_template whose placeholders we can satisfy.
+    def build_command(
+        self,
+        evidence_path: str,
+        *,
+        preferred_template: str | None = None,
+        **vars: str,
+    ) -> list[str]:
+        """Pick the preferred satisfiable template, then fall back in order.
 
         Tokenization happens BEFORE substitution so values containing spaces
         (Windows paths like `C:\\path with spaces\\evt.pf`) stay a single
@@ -99,14 +111,26 @@ class GenericAdapter:
         """
         available: dict[str, str] = {"evidence_path": evidence_path, **vars}
         last_missing: set[str] | None = None
-        for ct in self._meta.command_templates:
+        templates = list(self._meta.command_templates)
+        if preferred_template:
+            preferred = [ct for ct in templates if ct.template == preferred_template]
+            templates = preferred + [ct for ct in templates if ct.template != preferred_template]
+
+        for ct in templates:
             needed = _placeholder_names(ct.template)
             missing = needed - available.keys()
             if missing:
                 last_missing = missing
                 continue
             tokens = shlex.split(ct.template, posix=False)
-            return [t.format(**available) for t in tokens]
+            argv = [t.format(**available) for t in tokens]
+            if not argv:
+                raise ValueError(f"empty command template for {self._meta.tool_id}")
+            resolved = resolve_executable(argv[0])
+            if resolved is not None:
+                argv[0] = str(resolved)
+            self.selected_template = ct.template
+            return argv
         raise KeyError(
             f"no command_template can be satisfied for {self._meta.tool_id}; "
             f"last template missing vars: {sorted(last_missing or set())}"

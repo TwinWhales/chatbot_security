@@ -1,8 +1,10 @@
 # forensicagent
 
-> 포렌식 자동 분류 CLI 에이전트 — 로컬 LLM 이 증거를 식별하고, 적절한
-> 분석 도구를 RAG 로 선별·실행해서, 도구별 의심 항목을 자동 추출해 리포트로
->제시한다.
+[코드 구조·수정 내역·지원 범위·남은 한계 감사 보고서](AUDIT_REPORT.md)
+
+> 포렌식 자동 분류 CLI 에이전트 — 결정론 Scanner가 증거를 식별하고,
+> 형식 gate와 선택적 RAG/로컬 LLM이 도구 순서를 보강한다. 외부 도구 결과는
+> 근거 기반 규칙으로 의심 항목을 추출해 JSON/Markdown 리포트로 제시한다.
 
 ```
 $ cd ~/ctf/forensics-challenge-03/
@@ -173,7 +175,8 @@ JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
 
 **"RAG 로 도구 선별" 이 결정론 베이스라인 대비 실제로 순서 품질을 개선하는가?**
 를 정량화하는 하니스가 `bench/` 에 있다. 아래 수치는 합성 골든셋에 대해
-`forensicagent bench --with-llm` 를 실제로 돌려 얻은 것이다.
+`forensicagent bench --no-rebuild` 와 동일한 하니스를 2026-08-15에 다시 실행해
+얻은 값이다. LLM 모드는 끄고 결정론 순서와 RAG 순서만 비교했다.
 
 ### 어떻게 측정했나 (방법론)
 
@@ -181,13 +184,14 @@ JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
   케이스 = 증거 인벤토리(evidence_type + 파일명) + (선택) 영어 시나리오 +
   **도구별 relevance 등급**(2=핵심 / 1=보조 / 0=무관하지만 자격은 있음).
   실제 CTF 가 아니라 한 명이 손으로 라벨한 합성 데이터.
-- **4 개 모드 비교**: `deterministic` / `llm` / `rag` / `rag+llm`. 각 케이스를
-  각 모드로 Selector 에 태워 선택 도구·순서·타이밍을 캡처.
+- **이번 측정 모드**: `deterministic` / `rag`. LLM 비교는
+  `--with-llm`을 명시했을 때만 추가된다.
 - **핵심 통제**: Stage 1 결정론 자격 게이트는 **모드 간 동일**하다 (같은 도구
   집합만 통과). 따라서 모드 간 차이는 순전히 **"순서 품질"** 이지, 어떤 도구가
   자격을 얻느냐가 아니다.
 - **지표**: NDCG@k (지수 gain `(2^rel-1)/log2(rank+1)`), MRR, Precision@k,
-  Recall@k (k=3,5; relevant 임계값 등급≥1). 값은 케이스 평균.
+  Recall@k (k=3,5; relevant 임계값 등급≥1). 여기에 핵심 도구만 보는
+  `core_mrr`와 `core_r@k` (등급=2)를 별도로 계산한다. 값은 케이스 평균.
 - **임베딩**: `all-MiniLM-L6-v2` (CPU). 도구 코퍼스는 도구 YAML 자체
   (`rag/tool_indexer.py`).
 
@@ -195,23 +199,25 @@ JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
 
 | metric | deterministic | RAG | delta |
 |---|---|---|---|
-| **NDCG@3** | 0.8249 | 0.8644 | **+0.0395** |
-| **P@3** | 0.6429 | 0.7143 | **+0.0714** |
-| **R@3** | 0.8810 | 0.9643 | **+0.0833** |
-| **MRR** | 0.9524 | 0.9643 | **+0.0119** |
-| NDCG@5 / P@5 / R@5 | — | — | ~flat |
+| **NDCG@3** | 0.9295 | 0.9422 | **+0.0127** |
+| **NDCG@5** | 0.9485 | 0.9613 | **+0.0128** |
+| **P@3** | 0.6429 | 0.6429 | 0.0000 |
+| **R@3** | 0.9714 | 0.9714 | 0.0000 |
+| **MRR** | 1.0000 | 1.0000 | 0.0000 |
+| **Core MRR (grade=2)** | 0.8929 | 0.9286 | **+0.0357** |
+| **Core Recall@3/@5** | 0.9524 / 1.0000 | 0.9524 / 1.0000 | 0.0000 / 0.0000 |
 
-- **top-3 순서 품질이 일관되게 개선**된다. `@5` 지표는 대부분 케이스의 자격
-  통과 도구 수(eligible)가 5 이하라 상위 5 안에 전부 들어가므로 순서가
-  무의미 → flat (NDCG@5 는 한 케이스의 미세 재정렬로 -0.0097).
-- **타이밍**: RAG 검색(임베딩+벡터질의) **~47 ms/쿼리**, LLM 랭킹 **~2.7 s/쿼리**
-  (14b @ CPU), 인덱스 빌드 11 도구 ~27 s (1 회).
-- **정직한 발견**: 이 셋에서 **LLM 랭킹은 순서를 바꾸지 않았다**
-  (`llm == deterministic`, `rag+llm == rag`, 위 delta 와 동일). 즉 순서 개선은
-  **전적으로 RAG 기여**이고, 값비싼 LLM 랭킹은 이 합성셋에선 순서에 기여가 없었다.
-- per-case 는 혼재한다(정직하게 그대로 보고): registry 계열 큰 개선
-  (`registry-usb-history` +0.52, `registry-runkey-persistence` +0.49), 반면
-  evtx 계열은 MiniLM 이 `evtxecmd` 를 `chainsaw` 위로 올려 라벨 대비 -0.20.
+- 낮은 score margin(0.03)은 EVTX 네 케이스에서 `evtxecmd`를 `chainsaw`보다
+  앞세워 NDCG@3를 **-0.0308** 떨어뜨렸다. 기본 margin을 0.10으로 재보정한
+  뒤에는 14개 중 2개 코드 케이스에서만 순서가 바뀌었고 전체 delta가 양수였다.
+- 기존 MRR은 보조 도구도 relevant로 세어 1.0에 포화됐지만, `core_mrr`는
+  핵심 도구(grade=2)의 첫 위치를 반영해 `0.8929 → 0.9286`으로 개선됐다.
+- 이 개선은 작은 합성셋에서의 **순위 품질** 개선이며 탐지율 향상을 직접
+  증명하지 않는다. Precision/Recall은 자격 도구 집합이 같아 변하지 않았다.
+- 후보가 하나면 임베딩을 로드하지 않는다. 이 PC의 cold process에서는 첫
+  MiniLM 로드가 약 25~30초였고, 최종 하니스 평균 `select_rag`는 2.12초/케이스였다.
+  같은 프로세스에서 모델이 로드된 뒤의 질의는 훨씬 짧지만, CLI를 매번 새로
+  실행하면 cold-start 비용을 다시 낼 수 있다.
 
 ### 재현
 
@@ -224,9 +230,8 @@ forensicagent bench --no-rebuild       # 인덱스 재빌드 생략
 # 또는: python -m bench.run [--with-llm] [--no-rebuild]
 ```
 
-전체 표(집계 + delta + 케이스별 + 방법론 + 한계)는
-[`bench/bench_report.md`](bench/bench_report.md) 에 JSON(`bench_result.json`)과
-함께 저장된다.
+`forensicagent bench`를 실행하면 전체 표(집계 + delta + 케이스별 + 방법론 +
+한계)가 `bench/bench_report.md`와 `bench/bench_result.json`에 새로 저장된다.
 
 ### 한계 (수치를 믿기 전에)
 
@@ -296,7 +301,7 @@ pip install -e .       # 'forensicagent' 명령 등록
 
 ```bash
 # 한 번만
-ollama pull qwen2.5:14b      # 또는 llama3.1:8b 등
+ollama pull qwen2.5:7b       # 기본값. 14b 등은 FORENSICAGENT_LLM_MODEL 로 지정
 ollama serve                  # http://localhost:11434
 ```
 

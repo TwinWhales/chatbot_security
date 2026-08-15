@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from forensicagent.analyzer.rules import apply_rules
+from forensicagent.analyzer.rules import apply_rules, supported_indicator_ids
 from forensicagent.analyzer.types import SEVERITY_RANK
 from forensicagent.tools.schema import CommandTemplate, SuspiciousIndicator, ToolMetadata
 
@@ -111,12 +111,17 @@ class TestRunKeyUnusualBinary:
         findings = apply_rules({}, raw, meta)
         assert findings == []
 
+    def test_temp_executable_named_runme_is_not_a_run_key(self):
+        meta = _meta(
+            indicators=[SuspiciousIndicator(id="run_key_unusual_binary", pattern="x")]
+        )
+        assert apply_rules({}, "C:\\Temp\\runme.exe\n", meta) == []
 
-class TestFallbackSubstringMatcher:
-    """등록되지 않은 indicator id 는 pattern 의 키워드 (>=4 chars) 첫 2 개
-    AND 매칭으로 fallback. 너무 광범위하지 않게 50 건 캡."""
 
-    def test_two_keyword_and_match(self):
+class TestUnsupportedIndicator:
+    """등록되지 않은 indicator의 자연어 pattern은 실행하지 않는다."""
+
+    def test_returns_no_findings_and_warns(self, caplog):
         meta = _meta(
             indicators=[
                 SuspiciousIndicator(
@@ -126,20 +131,18 @@ class TestFallbackSubstringMatcher:
                 )
             ]
         )
-        # 'suspicious' + 'pattern' 둘 다 들어간 라인만 매칭.
         raw = "\n".join([
-            "SUSPICIOUS pattern observed in SECURITY",  # match
-            "normal log line",                            # no
-            "another suspicious pattern in event log",   # match
-            "only suspicious without the other word",    # no (missing 'pattern')
+            "SUSPICIOUS pattern observed in SECURITY",
+            "normal log line",
+            "another suspicious pattern in event log",
+            "only suspicious without the other word",
         ])
         findings = apply_rules({}, raw, meta)
-        assert len(findings) == 2
-        for f in findings:
-            assert f.severity == "high"
-            assert f.source == "rule"
+        assert findings == []
+        assert "custom_unregistered" not in supported_indicator_ids()
+        assert "unsupported suspicious indicator id='custom_unregistered'" in caplog.text
 
-    def test_pattern_with_no_4char_keyword_returns_empty(self):
+    def test_short_unknown_pattern_returns_empty(self):
         meta = _meta(
             indicators=[
                 SuspiciousIndicator(id="short", pattern="a b c d", severity_baseline="low")
@@ -147,8 +150,7 @@ class TestFallbackSubstringMatcher:
         )
         assert apply_rules({}, "any text here", meta) == []
 
-    def test_caps_at_50_findings(self):
-        """매처가 폭주하지 않도록 50건에서 멈춰야 한다."""
+    def test_unknown_pattern_does_not_scan_repeated_matching_lines(self):
         meta = _meta(
             indicators=[
                 SuspiciousIndicator(
@@ -158,12 +160,10 @@ class TestFallbackSubstringMatcher:
                 )
             ]
         )
-        # 200 lines all matching 'suspicious' + 'pattern'.
         raw = "\n".join(
             f"line {i}: suspicious pattern repeated again" for i in range(200)
         )
-        findings = apply_rules({}, raw, meta)
-        assert len(findings) <= 50
+        assert apply_rules({}, raw, meta) == []
 
 
 class TestMultipleIndicators:
@@ -174,8 +174,14 @@ class TestMultipleIndicators:
                 SuspiciousIndicator(id="run_key_unusual_binary", pattern="y", severity_baseline="high"),
             ]
         )
-        parsed = {"items": [{"rule_name": "Suspect Login"}]}
-        raw = "  evil = %Temp%\\bad.exe\n"
+        parsed = {"items": [
+            {"rule_name": "Suspect Login"},
+            {
+                "Key Path": "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                "Value Data": "%Temp%\\bad.exe",
+            },
+        ]}
+        raw = ""
         findings = apply_rules(parsed, raw, meta)
         # 1 from sigma_rule_hit + 1 from run_key_unusual_binary.
         assert len(findings) == 2
@@ -221,7 +227,12 @@ class TestRuleIsolation:
                 ]
             )
             # sigma_rule_hit 는 터지지만 run_key_unusual_binary 는 정상 동작해야.
-            findings = apply_rules({}, "  bad = %AppData%\\x.exe\n", meta)
+            findings = apply_rules(
+                {},
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Run\n"
+                "  bad = %AppData%\\x.exe\n",
+                meta,
+            )
             assert len(findings) == 1
             assert findings[0].category == "persistence"
         finally:

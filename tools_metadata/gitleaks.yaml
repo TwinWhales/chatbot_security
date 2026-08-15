@@ -10,12 +10,14 @@ applicable_evidence_types:
   - source_code_javascript
   - source_code_generic
   - text_log
+  - text_document
 
 platform:
   - any
 
 input_format:
   - any
+target_mode: scan_root
 
 output_format: json
 output_size_estimate: small
@@ -28,7 +30,7 @@ install_check:
 
 command_templates:
   - name: "Filesystem secret scan (no git history)"
-    template: "gitleaks detect --no-git --source {evidence_path} --report-format json --report-path - --exit-code 0"
+    template: "gitleaks detect --no-git --source {evidence_path} --report-format json --report-path {output_dir}/gitleaks.json --exit-code 0"
     when: "git history 없이 작업 트리만 — 단일 파일 또는 디렉토리에서 API 키, AWS/GCP/Azure 자격증명, JWT, private key 같은 시크릿 패턴 탐지. --exit-code 0 으로 finding 있어도 exit 0."
 
 usage_description: |

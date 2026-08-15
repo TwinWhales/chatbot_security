@@ -13,7 +13,7 @@ platform:
   - linux
 
 input_format:
-  - .evtx
+  - ext:.evtx
 
 output_format: csv
 output_size_estimate: medium

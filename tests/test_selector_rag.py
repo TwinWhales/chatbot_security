@@ -55,6 +55,94 @@ def test_rag_reorders_candidates(monkeypatch):
     assert set(ids) == {"chainsaw", "evtxecmd"}   # evtx-only → no volatility3
 
 
+def test_rag_partial_scores_do_not_reorder(monkeypatch):
+    monkeypatch.setattr(
+        retrieval_mod,
+        "retrieve_tools",
+        lambda q, **k: [ToolHit("evtxecmd", 0.9, "snip")],
+    )
+
+    plan = select(
+        _evtx_only_inventory(),
+        _evtx_and_mem_tools(),
+        use_llm=False,
+        use_rag=True,
+    )
+
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert plan.rag_used is False
+
+
+def test_rag_rejects_scores_below_configured_similarity(monkeypatch):
+    import forensicagent.selector.selector as selector_mod
+
+    monkeypatch.setattr(selector_mod.settings, "RAG_MIN_SIMILARITY", 0.5)
+    monkeypatch.setattr(
+        retrieval_mod,
+        "retrieve_tools",
+        lambda q, **k: [
+            ToolHit("evtxecmd", 0.9, "high"),
+            ToolHit("chainsaw", 0.49, "noise"),
+        ],
+    )
+
+    plan = select(
+        _evtx_only_inventory(),
+        _evtx_and_mem_tools(),
+        use_llm=False,
+        use_rag=True,
+    )
+
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert plan.rag_used is False
+
+
+def test_rag_near_tied_scores_do_not_reorder(monkeypatch):
+    import forensicagent.selector.selector as selector_mod
+
+    monkeypatch.setattr(selector_mod.settings, "RAG_MIN_SIMILARITY", 0.25)
+    monkeypatch.setattr(selector_mod.settings, "RAG_MIN_SCORE_MARGIN", 0.05)
+    monkeypatch.setattr(
+        retrieval_mod,
+        "retrieve_tools",
+        lambda q, **k: [
+            ToolHit("evtxecmd", 0.80, "slightly higher"),
+            ToolHit("chainsaw", 0.77, "slightly lower"),
+        ],
+    )
+
+    plan = select(
+        _evtx_only_inventory(),
+        _evtx_and_mem_tools(),
+        use_llm=False,
+        use_rag=True,
+    )
+
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert plan.rag_used is False
+
+
+def test_rag_used_false_when_complete_scores_keep_existing_order(monkeypatch):
+    monkeypatch.setattr(
+        retrieval_mod,
+        "retrieve_tools",
+        lambda q, **k: [
+            ToolHit("chainsaw", 0.9, "first"),
+            ToolHit("evtxecmd", 0.4, "second"),
+        ],
+    )
+
+    plan = select(
+        _evtx_only_inventory(),
+        _evtx_and_mem_tools(),
+        use_llm=False,
+        use_rag=True,
+    )
+
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert plan.rag_used is False
+
+
 def test_rag_none_falls_back_to_deterministic(monkeypatch):
     monkeypatch.setattr(retrieval_mod, "retrieve_tools", lambda q, **k: None)
     plan = select(_evtx_only_inventory(), _evtx_and_mem_tools(), use_llm=False, use_rag=True)
@@ -73,6 +161,56 @@ def test_rag_never_promotes_tool_outside_stage1(monkeypatch):
     ids = [t.tool_id for t in plan.selected_tools]
     assert "volatility3" not in ids      # 증거(evtx)에 없는 도구는 절대 실행 계획에 없음
     assert set(ids) == {"chainsaw", "evtxecmd"}
+    assert ids == ["chainsaw", "evtxecmd"]
+    assert plan.rag_used is False
+
+
+def test_rag_invalid_score_does_not_complete_score_set(monkeypatch):
+    monkeypatch.setattr(
+        retrieval_mod,
+        "retrieve_tools",
+        lambda q, **k: [
+            ToolHit("evtxecmd", 0.9, "valid"),
+            ToolHit("chainsaw", float("nan"), "invalid"),
+        ],
+    )
+
+    plan = select(
+        _evtx_only_inventory(),
+        _evtx_and_mem_tools(),
+        use_llm=False,
+        use_rag=True,
+    )
+
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert plan.rag_used is False
+
+
+def test_rag_query_contains_filename_type_and_configured_threshold(monkeypatch):
+    import forensicagent.selector.selector as selector_mod
+
+    captured = {}
+    monkeypatch.setattr(selector_mod.settings, "RAG_MIN_SIMILARITY", 0.42)
+
+    def _capture(query, **kwargs):
+        captured["query"] = query
+        captured["kwargs"] = kwargs
+        return None
+
+    monkeypatch.setattr(retrieval_mod, "retrieve_tools", _capture)
+
+    select(
+        _evtx_only_inventory(),
+        _evtx_and_mem_tools(),
+        use_llm=False,
+        use_rag=True,
+        scenario="Investigate account compromise",
+    )
+
+    assert "S.evtx" in captured["query"]
+    assert "evtx_log" in captured["query"]
+    assert "Investigate account compromise" in captured["query"]
+    assert captured["kwargs"]["min_score"] == 0.42
 
 
 def test_use_rag_false_skips_retrieval(monkeypatch):
@@ -84,6 +222,31 @@ def test_use_rag_false_skips_retrieval(monkeypatch):
 
     monkeypatch.setattr(retrieval_mod, "retrieve_tools", _spy)
     plan = select(_evtx_only_inventory(), _evtx_and_mem_tools(), use_llm=False, use_rag=False)
+    assert called["n"] == 0
+    assert plan.rag_used is False
+
+
+def test_single_eligible_tool_skips_rag_cold_start(monkeypatch):
+    called = {"n": 0}
+
+    def _spy(*a, **k):
+        called["n"] += 1
+        return [ToolHit("volatility3", 0.9, "unused")]
+
+    monkeypatch.setattr(retrieval_mod, "retrieve_tools", _spy)
+    inventory = Inventory(evidence_list=[
+        Evidence(
+            path="memory.raw",
+            filename="memory.raw",
+            size_bytes=1,
+            evidence_type="memory_dump",
+            detected_by="filename",
+        )
+    ])
+
+    plan = select(inventory, _evtx_and_mem_tools(), use_llm=False, use_rag=True)
+
+    assert [item.tool_id for item in plan.selected_tools] == ["volatility3"]
     assert called["n"] == 0
     assert plan.rag_used is False
 

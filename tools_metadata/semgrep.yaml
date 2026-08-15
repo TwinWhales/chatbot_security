@@ -14,16 +14,27 @@ platform:
   - any
 
 input_format:
-  - .py
-  - .js
-  - .ts
-  - .java
-  - .go
-  - .rb
-  - .php
-  - .c
-  - .cpp
-  - .rs
+  - ext:.py
+  - ext:.pyi
+  - ext:.js
+  - ext:.jsx
+  - ext:.ts
+  - ext:.tsx
+  - ext:.mjs
+  - ext:.cjs
+  - ext:.java
+  - ext:.go
+  - ext:.rb
+  - ext:.php
+  - ext:.c
+  - ext:.h
+  - ext:.cpp
+  - ext:.hpp
+  - ext:.rs
+  - ext:.cs
+  - ext:.kt
+  - ext:.swift
+target_mode: scan_root
 
 output_format: json
 output_size_estimate: medium

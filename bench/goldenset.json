@@ -51,7 +51,7 @@
         {"evidence_type": "registry_hive", "filename": "SOFTWARE"},
         {"evidence_type": "registry_hive", "filename": "SYSTEM"}
       ],
-      "labels": {"regripper": 2, "recmd": 2, "amcacheparser": 1, "mftecmd": 0}
+      "labels": {"regripper": 2, "recmd": 2}
     },
     {
       "id": "amcache-program-execution",
@@ -60,7 +60,7 @@
       "evidence": [
         {"evidence_type": "registry_hive", "filename": "Amcache.hve"}
       ],
-      "labels": {"amcacheparser": 2, "recmd": 1, "regripper": 1, "mftecmd": 0}
+      "labels": {"amcacheparser": 2}
     },
     {
       "id": "registry-usb-history",
@@ -70,7 +70,7 @@
         {"evidence_type": "registry_hive", "filename": "SYSTEM"},
         {"evidence_type": "registry_hive", "filename": "SOFTWARE"}
       ],
-      "labels": {"regripper": 2, "recmd": 1, "amcacheparser": 0, "mftecmd": 0}
+      "labels": {"regripper": 2, "recmd": 1}
     },
     {
       "id": "memory-implant-triage",
@@ -96,7 +96,7 @@
       "description": "Filesystem timeline from MFT",
       "scenario": "Build a filesystem timeline and find recently created executables from the MFT.",
       "evidence": [
-        {"evidence_type": "disk_image", "filename": "disk.raw"}
+        {"evidence_type": "ntfs_metadata", "filename": "$MFT"}
       ],
       "labels": {"mftecmd": 2}
     },
@@ -140,7 +140,7 @@
         {"evidence_type": "registry_hive", "filename": "NTUSER.DAT"},
         {"evidence_type": "memory_dump", "filename": "memdump.raw"}
       ],
-      "labels": {"chainsaw": 2, "volatility3": 2, "regripper": 2, "recmd": 1, "evtxecmd": 1, "amcacheparser": 1, "mftecmd": 0}
+      "labels": {"chainsaw": 2, "volatility3": 2, "regripper": 2, "recmd": 1, "evtxecmd": 1}
     }
   ]
 }

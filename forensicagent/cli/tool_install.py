@@ -14,8 +14,6 @@ doctor 의 PATH 검사가 이 디렉토리들도 자동으로 본다.
 
 from __future__ import annotations
 
-import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -28,7 +26,11 @@ from typing import Literal, Optional
 
 from rich.console import Console
 
-from forensicagent import config as settings
+from forensicagent.tools.executables import (
+    find_executable,
+    installed_bin_dirs,
+    tools_bin_root,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +119,50 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         ),
     ),
 
+    # Eric Zimmerman's Windows forensic utilities are distributed as signed
+    # release binaries and via the official Get-ZimmermanTools script rather
+    # than PyPI. Keep them manual so the installer never guesses an asset URL.
+    "amcacheparser": ToolSpec(
+        name="AmcacheParser.exe",
+        kind="manual",
+        description="Eric Zimmerman Amcache parser",
+        homepage="https://github.com/EricZimmerman/AmcacheParser",
+        manual_hint="Install with the official Get-ZimmermanTools script or place the complete release under ~/.forensicagent/tools_bin/.",
+        only_on="win32",
+    ),
+    "evtxecmd": ToolSpec(
+        name="EvtxECmd.exe",
+        kind="manual",
+        description="Eric Zimmerman EVTX parser",
+        homepage="https://github.com/EricZimmerman/evtx",
+        manual_hint="Install with the official Get-ZimmermanTools script or place the complete release under ~/.forensicagent/tools_bin/.",
+        only_on="win32",
+    ),
+    "mftecmd": ToolSpec(
+        name="MFTECmd.exe",
+        kind="manual",
+        description="Eric Zimmerman NTFS metadata parser",
+        homepage="https://github.com/EricZimmerman/MFTECmd",
+        manual_hint="Install with the official Get-ZimmermanTools script or place the complete release under ~/.forensicagent/tools_bin/.",
+        only_on="win32",
+    ),
+    "pecmd": ToolSpec(
+        name="PECmd.exe",
+        kind="manual",
+        description="Eric Zimmerman Prefetch parser",
+        homepage="https://github.com/EricZimmerman/PECmd",
+        manual_hint="Install with the official Get-ZimmermanTools script or place the complete release under ~/.forensicagent/tools_bin/.",
+        only_on="win32",
+    ),
+    "recmd": ToolSpec(
+        name="RECmd.exe",
+        kind="manual",
+        description="Eric Zimmerman Registry parser",
+        homepage="https://github.com/EricZimmerman/RECmd",
+        manual_hint="Install the complete release, including BatchExamples, with the official Get-ZimmermanTools script or under ~/.forensicagent/tools_bin/.",
+        only_on="win32",
+    ),
+
     # ---- manual (라이선스/설치 마법사/MSVC 빌드 필요/버전 변동 큰 URL) ----
     "plaso": ToolSpec(
         name="plaso",
@@ -200,46 +246,6 @@ TOOL_SPECS: dict[str, ToolSpec] = {
 
 
 # ---------------------------------------------------------------------------
-# Locations
-# ---------------------------------------------------------------------------
-
-
-def _tools_bin_root() -> Path:
-    """Zip 추출 도구가 설치되는 디렉토리."""
-    root = Path(settings.USER_HOME) / "tools_bin"
-    return root
-
-
-def installed_bin_dirs() -> list[Path]:
-    """tools_bin 의 모든 하위 디렉토리. doctor 의 PATH 보강용."""
-    root = _tools_bin_root()
-    if not root.exists():
-        return []
-    return [p for p in root.iterdir() if p.is_dir()]
-
-
-def find_executable(name: str) -> Optional[str]:
-    """PATH + tools_bin 양쪽에서 도구 찾기."""
-    p = shutil.which(name)
-    if p:
-        return p
-    for bin_dir in installed_bin_dirs():
-        # 정확 매치 우선
-        for ext in ("", ".exe", ".bat"):
-            cand = bin_dir / f"{name}{ext}"
-            if cand.is_file():
-                return str(cand)
-        # 재귀 한 단계 (chainsaw 같은 일부 zip 은 chainsaw/chainsaw/chainsaw.exe 식)
-        for sub in bin_dir.iterdir():
-            if sub.is_dir():
-                for ext in ("", ".exe", ".bat"):
-                    cand = sub / f"{name}{ext}"
-                    if cand.is_file():
-                        return str(cand)
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Installers
 # ---------------------------------------------------------------------------
 
@@ -274,7 +280,7 @@ def install_zip(spec: ToolSpec, c: Console) -> bool:
     if not spec.zip_url:
         c.print(f"[red]{spec.name}: zip_url not set[/]")
         return False
-    target_dir = _tools_bin_root() / spec.name
+    target_dir = tools_bin_root() / spec.name
     target_dir.mkdir(parents=True, exist_ok=True)
 
     c.print(f"[*] 다운로드: {spec.zip_url}")

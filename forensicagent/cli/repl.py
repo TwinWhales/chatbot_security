@@ -50,9 +50,13 @@ def do_scenario(state: SessionState, c, text: str = "") -> None:
             c.print("[dim](시나리오 없음 — /scenario <설명> 으로 설정)[/]")
         return
     if text.lower() in ("clear", "none", "reset"):
+        if state.scenario is not None:
+            state.invalidate_after_inventory()
         state.scenario = None
         c.print("[*] 시나리오 해제됨.")
         return
+    if state.scenario != text:
+        state.invalidate_after_inventory()
     state.scenario = text
     c.print(f"[green]시나리오 설정됨:[/] {text}")
     c.print("[dim](/plan 과 /analyze 의 LLM 단계에 컨텍스트로 주입됩니다.)[/]")
@@ -63,22 +67,32 @@ def do_scan(
     scenario: Optional[str] = None,
 ) -> None:
     if scenario and scenario.strip():
-        state.scenario = scenario.strip()
+        new_scenario = scenario.strip()
+        if state.scenario != new_scenario:
+            state.invalidate_after_inventory()
+        state.scenario = new_scenario
         c.print(f"[green]시나리오 설정됨:[/] {state.scenario}")
     target = (path or state.target_path).resolve()
     if not target.exists():
         c.print(f"[red]경로가 없습니다:[/] {target}")
         return
-    state.target_path = target
+    # 재스캔은 성공/실패 여부와 무관하게 이전 plan/run/report를 재사용하면 안 된다.
+    state.set_target(target)
     c.print(f"[*] 스캔 시작: {target}")
     inv = scan(
         target,
         max_depth=state.options.max_depth,
+        include_unknown=False,
+        exclude_paths=[state.output_dir],
         stage_ms=state.stage_ms,
     )
     state.inventory = inv
     if not inv.evidence_list:
-        c.print("[yellow]식별된 증거가 없습니다.[/]")
+        suffix = (
+            f" (미식별 파일 {inv.unidentified_files}개)"
+            if inv.unidentified_files else ""
+        )
+        c.print(f"[yellow]지원되는 증거가 없습니다{suffix}.[/]")
         return
     c.print(render_inventory(inv))
     walk = state.stage_ms.get("scan_walk", 0)
@@ -106,6 +120,7 @@ def do_plan(state: SessionState, c) -> None:
         stage_ms=state.stage_ms,
     )
     state.plan = plan
+    state.invalidate_after_plan()
     if not plan.selected_tools:
         c.print("[yellow]적용 가능한 도구가 없습니다.[/]")
         return
@@ -139,8 +154,12 @@ def do_run(state: SessionState, c) -> None:
         stage_ms=state.stage_ms,
     )
     state.bundle = bundle
+    state.invalidate_after_execution()
     s = sum(1 for r in bundle.results if r.status == "success")
-    f = sum(1 for r in bundle.results if r.status in ("failed", "timeout"))
+    f = sum(
+        1 for r in bundle.results
+        if r.status in ("failed", "timeout", "output_missing")
+    )
     k = sum(1 for r in bundle.results if r.status == "skipped")
     c.print(f"[*] 실행 완료: success={s}, failed={f}, skipped={k}")
 
@@ -159,6 +178,7 @@ def do_analyze(state: SessionState, c) -> None:
         stage_ms=state.stage_ms,
     )
     state.analyses = analyses
+    state.invalidate_after_analysis()
     total = sum(len(a.findings) for a in analyses)
     c.print(f"[*] 분석 완료: {len(analyses)} 도구, {total} findings.")
     for a in analyses:
@@ -299,20 +319,26 @@ def do_set(state: SessionState, c, key: str, value: str) -> None:
     if key == "no_llm":
         o.no_llm = _to_bool(value)
         state._client = None  # 다음 호출 때 다시 생성
+        state.invalidate_after_inventory()
     elif key == "quick":
         o.quick = _to_bool(value)
+        state.invalidate_after_inventory()
     elif key == "rag":
         o.use_rag = _to_bool(value)
+        state.invalidate_after_inventory()
     elif key == "max_depth":
         o.max_depth = int(value)
+        state.reset_run()
     elif key == "timeout":
         o.timeout_sec = int(value)
+        state.invalidate_after_plan()
     elif key == "tools":
         o.forced_tools = [t.strip() for t in value.split(",") if t.strip()]
+        state.invalidate_after_inventory()
     elif key in ("output_dir", "out"):
-        state.output_dir = Path(value).resolve()
+        state.set_output_dir(Path(value))
     elif key == "path":
-        state.target_path = Path(value).resolve()
+        state.set_target(Path(value))
     else:
         c.print(f"[red]알 수 없는 키:[/] {key}")
         c.print(
@@ -361,7 +387,7 @@ def do_cd(state: SessionState, c, path: str) -> None:
     if not p.exists() or not p.is_dir():
         c.print(f"[red]디렉토리가 아닙니다:[/] {p}")
         return
-    state.target_path = p
+    state.set_target(p)
     c.print(f"[*] target_path -> {p}")
 
 

@@ -14,13 +14,13 @@ platform:
   - macos
 
 input_format:
-  - .raw
-  - .mem
-  - .dmp
-  - .lime
-  - .vmem
+  - ext:.raw
+  - ext:.mem
+  - ext:.dmp
+  - ext:.lime
+  - ext:.vmem
 
-output_format: text
+output_format: csv
 output_size_estimate: medium
 parallelizable: false
 estimated_runtime: long
@@ -31,16 +31,19 @@ install_check:
 
 command_templates:
   - name: "Process list (pslist)"
-    template: "vol -f {evidence_path} windows.pslist.PsList"
+    template: "vol -q -r csv -f {evidence_path} windows.pslist.PsList"
     when: "메모리에서 실행 중이던 프로세스 트리 확인. malfind 보다 가볍게 시작."
+  - name: "Process command lines (cmdline)"
+    template: "vol -q -r csv -f {evidence_path} windows.cmdline.CmdLine"
+    when: "프로세스 인자와 실행 경로를 확인해 사용자 쓰기 가능 경로 실행을 탐지."
   - name: "Network scan (netscan)"
-    template: "vol -f {evidence_path} windows.netscan.NetScan"
+    template: "vol -q -r csv -f {evidence_path} windows.netscan.NetScan"
     when: "메모리에서 활성/잔존 네트워크 연결 식별 (의심 외부 IP 통신)."
   - name: "Malfind injected code"
-    template: "vol -f {evidence_path} windows.malfind.Malfind"
+    template: "vol -q -r csv -f {evidence_path} windows.malfind.Malfind"
     when: "프로세스 주소공간에 주입된 코드/PE 헤더 탐색. CPU 무거움."
   - name: "Pstree parent-child"
-    template: "vol -f {evidence_path} windows.pstree.PsTree"
+    template: "vol -q -r csv -f {evidence_path} windows.pstree.PsTree"
     when: "부모-자식 관계의 비정상 패턴 (lsass→cmd 등) 확인."
 
 usage_description: |

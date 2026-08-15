@@ -35,14 +35,16 @@ def retrieve_tools(
     *,
     top_k: int | None = None,
     tool_ids: set[str] | None = None,
+    min_score: float | None = None,
 ) -> list[ToolHit] | None:
     """query 로 TOOL_COLLECTION 을 검색해 tool_id 별 히트를 돌려준다.
 
     Args:
         query: 자연어 질의 (증거 요약 + scenario 등).
         top_k: 가져올 최대 개수. None 이면 settings.RAG_TOP_K.
-        tool_ids: 주어지면 이 집합 안의 tool_id 만 통과시킨다 (Selector 의
-            Stage1 자격 게이트를 RAG 가 절대 우회하지 못하게 하는 안전장치).
+        tool_ids: 주어지면 Chroma 질의 자체를 이 집합으로 제한한다. Selector 의
+            Stage1 자격 게이트를 RAG 가 절대 우회하지 못하게 하는 안전장치다.
+        min_score: 최소 cosine similarity. None 이면 설정값을 사용한다.
 
     Returns:
         None(폴백 신호) 또는 ToolHit 리스트.
@@ -52,9 +54,20 @@ def retrieve_tools(
     if not query or not query.strip():
         return None
 
-    want = top_k or settings.RAG_TOP_K
-    # eligible 집합이 있으면 그 크기만큼은 받아와야 전부 점수화된다.
+    if tool_ids is not None and not tool_ids:
+        return []
+    want = settings.RAG_TOP_K if top_k is None else top_k
+    if want <= 0:
+        return []
+    # eligible 집합이 있으면 그 크기만큼은 받아와야 전부 점수화된다.  과거에는
+    # 전역 top-N을 받은 뒤 Python에서 필터링해, 관련 eligible tool이 전역 top-N
+    # 밖에 있으면 히트가 0개가 되는 버그가 있었다.
     n_results = max(want, len(tool_ids)) if tool_ids else want
+    where = (
+        {"tool_id": {"$in": sorted(tool_ids)}}
+        if tool_ids is not None
+        else None
+    )
 
     try:
         from forensicagent.rag.embedder import embed_text
@@ -68,11 +81,14 @@ def retrieve_tools(
             logger.info("tool collection empty; RAG disabled for this run")
             return None
         vec = embed_text(query)
-        chunks = store.query(vec, top_k=n_results)
+        chunks = store.query(vec, top_k=n_results, where=where)
     except Exception as e:  # noqa: BLE001 — deps/model/index/query 모든 실패 폴백.
         logger.info("RAG retrieval unavailable, falling back: %s", e)
         return None
 
+    threshold = (
+        settings.RAG_MIN_SIMILARITY if min_score is None else float(min_score)
+    )
     hits: list[ToolHit] = []
     seen: set[str] = set()
     for ch in chunks:
@@ -81,6 +97,8 @@ def retrieve_tools(
             continue
         if tool_ids is not None and tid not in tool_ids:
             continue          # Stage1 밖의 도구는 절대 승격시키지 않는다.
+        if ch.similarity_score < threshold:
+            continue
         seen.add(tid)
         hits.append(
             ToolHit(tool_id=tid, score=ch.similarity_score, snippet=ch.content)

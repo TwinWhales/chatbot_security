@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Iterable
 
 from forensicagent.observability import Stopwatch
 from forensicagent.scanner.detectors import detect
@@ -25,10 +26,35 @@ DEFAULT_MAX_DEPTH = 5
 MAX_FILE_SIZE_BYTES = 0
 
 # Directories to never descend into.
-_IGNORE_DIRS = {".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv"}
+_IGNORE_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".pytest_cache",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    "forensicagent_output",
+}
 
 
-def _walk(root: Path, max_depth: int) -> tuple[list[Path], bool]:
+def _is_excluded(path: Path, excludes: tuple[Path, ...]) -> bool:
+    """Whether path is an explicitly excluded path or one of its descendants."""
+    # Scandir paths are already absolute.  abspath normalizes ``..`` without
+    # touching the filesystem, unlike resolve() which is costly for every file
+    # (especially on OneDrive/network-backed evidence trees).
+    normalized = Path(os.path.abspath(path))
+    return any(normalized == base or normalized.is_relative_to(base) for base in excludes)
+
+
+def _walk(
+    root: Path,
+    max_depth: int,
+    exclude_paths: tuple[Path, ...] = (),
+) -> tuple[list[Path], bool]:
     """심볼릭 링크 무시 + 깊이 제한 BFS.
 
     Returns:
@@ -44,6 +70,8 @@ def _walk(root: Path, max_depth: int) -> tuple[list[Path], bool]:
     stack: list[tuple[Path, int]] = [(root, 0)]
     while stack:
         cur, depth = stack.pop()
+        if _is_excluded(cur, exclude_paths):
+            continue
         try:
             entries = list(os.scandir(cur))
         except (OSError, PermissionError) as e:
@@ -56,8 +84,10 @@ def _walk(root: Path, max_depth: int) -> tuple[list[Path], bool]:
                 if entry.is_symlink():
                     continue
                 p = Path(entry.path)
+                if _is_excluded(p, exclude_paths):
+                    continue
                 if entry.is_dir(follow_symlinks=False):
-                    if entry.name in _IGNORE_DIRS:
+                    if entry.name.casefold() in _IGNORE_DIRS:
                         continue
                     if depth + 1 <= max_depth:
                         stack.append((p, depth + 1))
@@ -76,6 +106,7 @@ def scan(
     *,
     max_depth: int = DEFAULT_MAX_DEPTH,
     include_unknown: bool = True,
+    exclude_paths: Iterable[str | Path] | None = None,
     stage_ms: dict[str, int] | None = None,
 ) -> Inventory:
     """CWD 또는 지정 디렉토리를 스캔해 Evidence 인벤토리 반환.
@@ -84,6 +115,8 @@ def scan(
         root: 스캔 시작점.
         max_depth: 디렉토리 재귀 깊이 제한 (root 자체는 depth 0).
         include_unknown: 식별 실패한 파일도 인벤토리에 unknown 으로 남길지.
+        exclude_paths: 스캔하지 않을 파일/디렉터리. 상대 경로는 root 기준이며,
+            디렉터리를 지정하면 모든 하위 경로를 탐색 단계에서 제외한다.
         stage_ms: observability 누적 dict 가 있으면 "scan_walk", "scan_detect" 기록.
 
     Returns:
@@ -96,8 +129,21 @@ def scan(
         logger.warning("scan root does not exist: %s", root_path)
         return inv
 
+    exclude_base = root_path if root_path.is_dir() else root_path.parent
+    normalized_excludes: list[Path] = []
+    for raw in exclude_paths or ():
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = exclude_base / candidate
+        normalized_excludes.append(Path(os.path.abspath(candidate)))
+    excludes = tuple(normalized_excludes)
+
     with Stopwatch() as sw_walk:
-        files, depth_limit_hit = _walk(root_path, max_depth)
+        if root_path.is_file():
+            files = [] if _is_excluded(root_path, excludes) else [root_path]
+            depth_limit_hit = False
+        else:
+            files, depth_limit_hit = _walk(root_path, max_depth, excludes)
     inv.depth_limit_hit = depth_limit_hit
     if stage_ms is not None:
         stage_ms["scan_walk"] = stage_ms.get("scan_walk", 0) + sw_walk.elapsed_ms
@@ -118,6 +164,7 @@ def scan(
 
             hit = detect(p)
             if hit is None:
+                inv.unidentified_files += 1
                 if include_unknown:
                     inv.evidence_list.append(
                         Evidence(
@@ -125,7 +172,7 @@ def scan(
                             filename=p.name,
                             size_bytes=size,
                             evidence_type="unknown",
-                            detected_by="extension",
+                            detected_by="unclassified",
                             platform_hint="unknown",
                             confidence=0.0,
                         )

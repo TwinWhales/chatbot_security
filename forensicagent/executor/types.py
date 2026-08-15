@@ -5,7 +5,33 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
-ExecStatus = Literal["success", "failed", "timeout", "skipped"]
+ExecStatus = Literal["success", "failed", "timeout", "skipped", "output_missing"]
+ArtifactRole = Literal["stdout", "stderr", "generated"]
+
+
+@dataclass
+class OutputArtifact:
+    """One immutable output captured from a tool invocation."""
+
+    path: str
+    role: ArtifactRole
+    format: str = "binary"
+    size_bytes: int = 0
+    sha256: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "role": self.role,
+            "format": self.format,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+        }
+
+
+# The product language uses "produced artifact" while the concrete type name
+# stays concise.  Keep both names public for downstream consumers.
+ProducedArtifact = OutputArtifact
 
 
 @dataclass
@@ -21,10 +47,15 @@ class ExecutionResult:
     output_format: str = "text"
     output_size_bytes: int = 0
     error_message: str = ""             # status != success 일 때 사람이 읽는 요약
-
     # parsed_output 는 어댑터가 가벼운 dict 로 변환했을 때만 채움.
     # 대용량 raw 출력은 stdout_path 로만 노출하고 inline 화 X (명세 2.3).
     parsed_output: Optional[dict[str, Any]] = None
+
+    # Appended fields preserve positional construction compatibility with the
+    # original ExecutionResult contract.
+    command_template_used: str = ""
+    artifacts: list[OutputArtifact] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -32,6 +63,7 @@ class ExecutionResult:
             "target_evidence": self.target_evidence,
             "status": self.status,
             "command_executed": self.command_executed,
+            "command_template_used": self.command_template_used,
             "stdout_path": self.stdout_path,
             "stderr_path": self.stderr_path,
             "exit_code": self.exit_code,
@@ -39,6 +71,8 @@ class ExecutionResult:
             "output_format": self.output_format,
             "output_size_bytes": self.output_size_bytes,
             "error_message": self.error_message,
+            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+            "warnings": list(self.warnings),
             "parsed_output": self.parsed_output,
         }
 

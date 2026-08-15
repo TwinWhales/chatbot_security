@@ -13,13 +13,13 @@ platform:
   - linux
 
 input_format:
-  - NTUSER.DAT
-  - SYSTEM
-  - SOFTWARE
-  - SECURITY
-  - SAM
-  - DEFAULT
-  - UsrClass.dat
+  - name:NTUSER.DAT
+  - name:SYSTEM
+  - name:SOFTWARE
+  - name:SECURITY
+  - name:SAM
+  - name:DEFAULT
+  - name:UsrClass.dat
 
 output_format: csv
 output_size_estimate: medium
@@ -32,14 +32,14 @@ install_check:
 
 command_templates:
   - name: "Run all batch files on hive"
-    template: "RECmd.exe -d {evidence_path} --bn BatchExamples/RECmd_Batch_MC.reb --csv {output_dir}"
+    template: "RECmd.exe -f {evidence_path} --bn BatchExamples/RECmd_Batch_MC.reb --csv {output_dir}"
     when: "Maxim Suhanov 가 정리한 RECmd_Batch_MC 배치 한 번에 돌리는 표준 워크플로 - persistence/execution/user activity 다 한 번에."
   - name: "Single batch"
     template: "RECmd.exe -f {evidence_path} --bn {batch_path} --csv {output_dir}"
     when: "특정 아티팩트만 (예: ShellBags 만, UserAssist 만) 빠르게 보고 싶을 때."
   - name: "Search for key/value"
-    template: "RECmd.exe -d {evidence_path} --sk {search_key} --csv {output_dir}"
-    when: "특정 키 이름 / 값으로 모든 하이브 검색 (IoC hunting)."
+    template: "RECmd.exe -f {evidence_path} --sk {search_key} --csv {output_dir}"
+    when: "특정 키 이름 / 값으로 단일 하이브 검색 (IoC hunting)."
 
 usage_description: |
   RECmd 는 Registry hive 의 batch 처리 전문 도구. RegRipper 가 plugin 단위

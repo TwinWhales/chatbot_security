@@ -72,3 +72,68 @@ def test_zero_limit_means_no_size_gate(tmp_path, monkeypatch):
     inv = scan(tmp_path, max_depth=2)
     names = {Path(e.path).name for e in inv.evidence_list}
     assert "big.bin" in names
+
+
+def test_scan_accepts_a_file_root(tmp_path):
+    target = tmp_path / "Security.evtx"
+    _write(target, b"ElfFile\x00" + b"\x00" * 32)
+
+    inv = scan(target)
+
+    assert inv.scanned_files == 1
+    assert len(inv.evidence_list) == 1
+    assert inv.evidence_list[0].path == str(target.resolve())
+    assert inv.evidence_list[0].evidence_type == "evtx_log"
+
+
+def test_unknown_provenance_is_unclassified(tmp_path):
+    _write(tmp_path / "unknown.xyz", b"not a known format")
+
+    inv = scan(tmp_path)
+
+    assert len(inv.evidence_list) == 1
+    assert inv.unidentified_files == 1
+    assert inv.evidence_list[0].evidence_type == "unknown"
+    assert inv.evidence_list[0].detected_by == "unclassified"
+    assert inv.to_dict()["unidentified_files"] == 1
+
+
+def test_unidentified_count_survives_unknown_inventory_filter(tmp_path):
+    _write(tmp_path / "unknown.xyz", b"not a known format")
+
+    inv = scan(tmp_path, include_unknown=False)
+
+    assert inv.scanned_files == 1
+    assert inv.unidentified_files == 1
+    assert inv.evidence_list == []
+
+
+def test_exclude_paths_prunes_directory_descendants(tmp_path):
+    _write(tmp_path / "case" / "Security.evtx", b"ElfFile\x00" + b"\x00" * 8)
+    _write(tmp_path / "output" / "copied.evtx", b"ElfFile\x00" + b"\x00" * 8)
+
+    inv = scan(tmp_path, exclude_paths=["output"])
+    names = {Path(e.path).name for e in inv.evidence_list}
+
+    assert names == {"Security.evtx"}
+
+
+def test_exclude_paths_can_skip_a_file(tmp_path):
+    _write(tmp_path / "keep.txt")
+    _write(tmp_path / "skip.txt")
+
+    inv = scan(tmp_path, exclude_paths=[tmp_path / "skip.txt"])
+    names = {Path(e.path).name for e in inv.evidence_list}
+
+    assert names == {"keep.txt"}
+
+
+def test_default_generated_directories_are_ignored(tmp_path):
+    for dirname in (".pytest_cache", "build", "dist", "forensicagent_output"):
+        _write(tmp_path / dirname / f"{dirname.strip('.')}.txt")
+    _write(tmp_path / "case.txt")
+
+    inv = scan(tmp_path)
+    names = {Path(e.path).name for e in inv.evidence_list}
+
+    assert names == {"case.txt"}

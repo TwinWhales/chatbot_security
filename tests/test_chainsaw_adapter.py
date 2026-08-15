@@ -1,8 +1,7 @@
-"""ChainsawAdapter — 파일(채널)별 Event ID 타겟팅 + alternation regex 테스트.
+"""ChainsawAdapter — 파일(채널)별 Event ID 타겟팅 + Tau 질의 테스트.
 
 핵심 회귀 방지 대상:
-  * chainsaw `-e` 는 단일 정규식이라 여러 ID 는 alternation `4624|4625` 로
-    묶어야 한다 (쉼표 리스트 `4624,4625` 는 0 hits — 이게 원래 버그).
+  * Event ID는 직렬화된 전체 레코드 정규식이 아니라 Tau 필드 질의로 찾는다.
   * Event ID 는 채널마다 다르다: 4624/4625 는 Security, 4104 는 PowerShell
     Operational. 파일명으로 올바른 ID 를 골라야 한다.
 
@@ -28,7 +27,7 @@ def _chainsaw_meta() -> ToolMetadata:
         command_templates=[
             CommandTemplate(
                 name="search",
-                template="chainsaw search {evidence_path} -e {event_ids} --json",
+                template="chainsaw search -t {event_query} --json {evidence_path}",
                 when="특정 Event ID 검색.",
             )
         ],
@@ -43,27 +42,37 @@ def _chainsaw_meta() -> ToolMetadata:
 # ---- channel → event id mapping ----
 
 def test_security_channel_gets_logon_ids():
-    assert event_ids_for_file("Security.evtx") == ["4624", "4625"]
+    ids = event_ids_for_file("Security.evtx")
+    assert "4624" in ids
+    assert "4625" in ids
+    assert "1102" in ids
 
 
 def test_powershell_channel_gets_scriptblock_id():
     assert event_ids_for_file(
         "Microsoft-Windows-PowerShell%4Operational.evtx"
-    ) == ["4104"]
+    ) == ["4103", "4104"]
 
 
 def test_channel_detection_is_case_insensitive():
-    assert event_ids_for_file("security.EVTX") == ["4624", "4625"]
+    assert "4624" in event_ids_for_file("security.EVTX")
 
 
 def test_powershell_takes_precedence_and_is_not_treated_as_security():
     # PowerShell 파일명엔 'security' 가 없어 로그온 ID 로 새지 않아야 한다.
     ids = event_ids_for_file("microsoft-windows-powershell%4operational.evtx")
-    assert ids == ["4104"]
+    assert ids == ["4103", "4104"]
 
 
-def test_unknown_channel_falls_back_to_logon_ids():
-    assert event_ids_for_file("Application.evtx") == ["4624", "4625"]
+def test_unknown_channel_uses_small_cross_channel_fallback():
+    assert "4104" in event_ids_for_file("Application.evtx")
+
+
+def test_system_and_sysmon_channels_get_channel_specific_ids():
+    assert event_ids_for_file("System.evtx") == ["104", "7045"]
+    assert "1" in event_ids_for_file(
+        "Microsoft-Windows-Sysmon%4Operational.evtx"
+    )
 
 
 # ---- command building ----
@@ -73,17 +82,15 @@ def test_registry_wires_chainsaw_to_specialized_adapter():
     assert isinstance(adapter, ChainsawAdapter)
 
 
-def test_build_command_uses_alternation_not_comma():
+def test_build_command_uses_tau_and_match_any():
     adapter = ChainsawAdapter(_chainsaw_meta())
     argv = adapter.build_command(r"C:\ev\Security.evtx", output_dir="out")
-    assert argv == [
-        "chainsaw", "search", r"C:\ev\Security.evtx",
-        "-e", "4624|4625", "--json",
-    ]
-    # 쉼표(0 hits 버그)가 절대 들어가면 안 된다.
-    joined = " ".join(argv)
-    assert "4624,4625" not in joined
-    assert "|" in argv[argv.index("-e") + 1]
+    assert argv[:2] == ["chainsaw", "search"]
+    assert "-e" not in argv
+    assert "--match-any" in argv
+    assert "Event.System.EventID: =4624" in argv
+    assert "Event.System.EventID: =4625" in argv
+    assert argv[-2:] == ["--json", r"C:\ev\Security.evtx"]
 
 
 def test_build_command_per_file_event_ids():
@@ -92,7 +99,7 @@ def test_build_command_per_file_event_ids():
         r"C:\ev\Microsoft-Windows-PowerShell%4Operational.evtx",
         output_dir="out",
     )
-    assert ps[ps.index("-e") + 1] == "4104"
+    assert "Event.System.EventID: =4104" in ps
 
 
 def test_path_with_spaces_stays_single_argv_element():

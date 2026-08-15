@@ -13,11 +13,11 @@ platform:
   - linux
 
 input_format:
-  - NTUSER.DAT
-  - SYSTEM
-  - SOFTWARE
-  - SECURITY
-  - SAM
+  - name:NTUSER.DAT
+  - name:SYSTEM
+  - name:SOFTWARE
+  - name:SECURITY
+  - name:SAM
 
 output_format: text
 output_size_estimate: small
@@ -39,7 +39,7 @@ command_templates:
     template: "rip -r {evidence_path} -p services"
     when: "SYSTEM 하이브의 서비스 키. 의심 서비스 식별."
   - name: "Full profile"
-    template: "rip -r {evidence_path} -f system"
+    template: "rip -r {evidence_path} -f {profile}"
     when: "프로파일 기반 일괄 처리 (hive 종류에 맞춰 'system'/'software'/'ntuser' 선택)."
 
 usage_description: |

@@ -13,9 +13,10 @@
 
 from __future__ import annotations
 
-import shutil
+import importlib.util
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from rich.console import Console
@@ -23,6 +24,7 @@ from rich.table import Table
 
 from forensicagent import config as settings
 from forensicagent.llm import OllamaClient
+from forensicagent.tools.executables import find_executable
 
 
 # Optional forensic tools surveyed by doctor. Missing ones are just hints —
@@ -32,6 +34,11 @@ _OPTIONAL_TOOLS = [
     "vol",  # volatility3
     "chainsaw",
     "rip",  # RegRipper
+    "AmcacheParser.exe",
+    "EvtxECmd.exe",
+    "MFTECmd.exe",
+    "PECmd.exe",
+    "RECmd.exe",
     "log2timeline.py",
     "psort.py",
     "plaso",
@@ -47,6 +54,14 @@ _OPTIONAL_TOOLS = [
     "semgrep",
     "gitleaks",
 ]
+
+_TOOL_SPEC_ALIASES = {
+    "AmcacheParser.exe": "amcacheparser",
+    "EvtxECmd.exe": "evtxecmd",
+    "MFTECmd.exe": "mftecmd",
+    "PECmd.exe": "pecmd",
+    "RECmd.exe": "recmd",
+}
 
 
 @dataclass
@@ -68,15 +83,26 @@ def _check_python() -> CheckResult:
 
 
 def _check_import(module: str, hint: str = "") -> CheckResult:
+    """Check module discoverability without importing heavy dependencies."""
     try:
-        __import__(module)
-        return CheckResult(name=module, ok=True, detail="importable")
-    except ImportError as e:
+        spec = importlib.util.find_spec(module)
+    except (AttributeError, ImportError, ValueError) as e:
         return CheckResult(
             name=module,
             ok=False,
             detail=f"missing: {e}. {hint}",
         )
+    if spec is None:
+        return CheckResult(
+            name=module,
+            ok=False,
+            detail=f"missing: module spec not found. {hint}",
+        )
+    return CheckResult(
+        name=module,
+        ok=True,
+        detail="available (discovery only; not imported)",
+    )
 
 
 def _check_libmagic() -> CheckResult:
@@ -111,14 +137,51 @@ def _check_ollama() -> CheckResult:
 
 
 def _check_rag_index() -> CheckResult:
-    """런타임 도구 선별 RAG 인덱스 존재/카운트. 미배선이어도 파이프라인은 동작하므로 optional."""
-    from forensicagent.rag.tool_indexer import tool_collection_status
+    """Probe Chroma persistence files without opening Chroma or an embedder."""
+    name = f"rag tool index ({settings.TOOL_COLLECTION})"
+    if not settings.USE_RAG:
+        return CheckResult(
+            name=name,
+            ok=False,
+            detail="FORENSICAGENT_USE_RAG=off",
+            optional=True,
+        )
 
-    ok, n, detail = tool_collection_status()
+    root = Path(settings.CHROMA_PERSIST_DIR)
+    markers = (
+        root / "chroma.sqlite3",
+        root / "chroma-collections.parquet",
+        root / "chroma-embeddings.parquet",
+    )
+    try:
+        present = [path for path in markers if path.is_file() and path.stat().st_size]
+    except OSError as e:
+        return CheckResult(
+            name=name,
+            ok=False,
+            detail=f"cannot inspect {root}: {e}",
+            optional=True,
+        )
+
+    if not present:
+        return CheckResult(
+            name=name,
+            ok=False,
+            detail=(
+                f"no persistent index files under {root} - run "
+                "`forensicagent rag index-tools`"
+            ),
+            optional=True,
+        )
+
+    marker_names = ", ".join(path.name for path in present)
     return CheckResult(
-        name=f"rag tool index ({settings.TOOL_COLLECTION})",
-        ok=ok and n > 0,
-        detail=f"{n} tools indexed — {detail}",
+        name=name,
+        ok=True,
+        detail=(
+            f"persistent index storage found ({marker_names}); "
+            "collection not opened during doctor"
+        ),
         optional=True,
     )
 
@@ -141,14 +204,15 @@ def _check_embedding_provider() -> CheckResult:
 
 def _check_optional_tools() -> list[CheckResult]:
     # tool_install 의 registry 가 PATH + tools_bin 두 곳을 다 본다.
-    from forensicagent.cli.tool_install import TOOL_SPECS, find_executable
+    from forensicagent.cli.tool_install import TOOL_SPECS
     out: list[CheckResult] = []
     for tool in _OPTIONAL_TOOLS:
         path = find_executable(tool)
         if path is not None:
             detail = path
         else:
-            spec = TOOL_SPECS.get(tool)
+            spec_name = _TOOL_SPEC_ALIASES.get(tool, tool)
+            spec = TOOL_SPECS.get(spec_name)
             if spec is None:
                 detail = "not on PATH"
             elif spec.kind == "pip":
@@ -156,7 +220,10 @@ def _check_optional_tools() -> list[CheckResult]:
             elif spec.kind == "zip":
                 detail = f"not installed - `forensicagent install {tool}` (zip dl)"
             else:
-                detail = f"not installed - 수동: {spec.homepage}"
+                detail = (
+                    f"not installed - `forensicagent install {spec_name}` "
+                    f"(수동 안내: {spec.homepage})"
+                )
         out.append(
             CheckResult(
                 name=tool,

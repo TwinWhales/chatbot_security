@@ -44,15 +44,18 @@ def write(
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Include microseconds + run id so two reports emitted in the same second
+    # never overwrite one another (common in tests and short no-op runs).
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    stem = f"report_{stamp}_{report.meta.run_id[:8]}"
     paths: dict[str, Path] = {}
 
     if "terminal" in formats and console is not None:
         render(report, console)
 
     if "json" in formats:
-        paths["json"] = write_json(report, out_dir / f"report_{stamp}.json")
+        paths["json"] = write_json(report, out_dir / f"{stem}.json")
     if "md" in formats:
-        paths["md"] = write_md(report, out_dir / f"report_{stamp}.md")
+        paths["md"] = write_md(report, out_dir / f"{stem}.md")
 
     return report, paths

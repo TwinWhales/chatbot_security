@@ -34,12 +34,19 @@ def _meta(tool_id="chainsaw"):
 
 
 def test_rag_context_built_from_hits(monkeypatch):
+    captured = {}
+
+    def fake_retrieve(query, **kwargs):
+        captured.update(kwargs)
+        return [ToolHit("chainsaw", 0.9, "domain snippet about logon 4624")]
+
     monkeypatch.setattr(
         retrieval_mod, "retrieve_tools",
-        lambda q, **k: [ToolHit("chainsaw", 0.9, "domain snippet about logon 4624")],
+        fake_retrieve,
     )
     ctx = analyzer_mod._rag_context_for(_meta())
     assert "domain snippet about logon 4624" in ctx
+    assert captured["tool_ids"] == {"chainsaw"}
 
 
 def test_rag_context_empty_on_fallback(monkeypatch):

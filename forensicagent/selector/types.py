@@ -7,6 +7,29 @@ from typing import Any
 
 
 @dataclass
+class RunSpec:
+    """One concrete tool invocation for one evidence target.
+
+    ``ToolSelection`` keeps its legacy aggregate fields for API compatibility,
+    while run specs let a selector choose a different metadata template (and
+    placeholder values) for each target.
+    """
+
+    target_evidence: str
+    command_template: str
+    variables: dict[str, str] = field(default_factory=dict)
+    label: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "target_evidence": self.target_evidence,
+            "command_template": self.command_template,
+            "variables": dict(self.variables),
+            "label": self.label,
+        }
+
+
+@dataclass
 class ToolSelection:
     tool_id: str
     tool_version: str = ""
@@ -15,6 +38,7 @@ class ToolSelection:
     command_template: str = ""
     estimated_runtime: str = "short"  # short | medium | long
     priority: int = 5                  # 1 (low) ~ 10 (high)
+    run_specs: list[RunSpec] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -23,6 +47,7 @@ class ToolSelection:
             "reason": self.reason,
             "target_evidence": list(self.target_evidence),
             "command_template": self.command_template,
+            "run_specs": [spec.to_dict() for spec in self.run_specs],
             "estimated_runtime": self.estimated_runtime,
             "priority": self.priority,
         }
@@ -36,6 +61,7 @@ class Plan:
     llm_fallback: bool = False          # JSON 파싱 실패로 Stage 1 결과를 그대로 썼는지
     rag_used: bool = False              # RAG 검색이 순서/컨텍스트에 실제 반영됐는지
     skipped_no_evidence: list[str] = field(default_factory=list)  # 적용 가능 증거 없음
+    unhandled_evidence: list[str] = field(default_factory=list)  # 소비 가능한 도구가 없는 증거
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,4 +71,5 @@ class Plan:
             "llm_fallback": self.llm_fallback,
             "rag_used": self.rag_used,
             "skipped_no_evidence": list(self.skipped_no_evidence),
+            "unhandled_evidence": list(self.unhandled_evidence),
         }

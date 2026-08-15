@@ -13,7 +13,7 @@ platform:
   - linux
 
 input_format:
-  - .pf
+  - ext:.pf
 
 output_format: csv
 output_size_estimate: small

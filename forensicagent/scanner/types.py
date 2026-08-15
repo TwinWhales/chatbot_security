@@ -15,9 +15,12 @@ EvidenceType = Literal[
     "registry_hive",
     "pcap",
     "disk_image",
+    "ntfs_metadata",
+    "sqlite_database",
     "browser_artifact",
     "prefetch",
     "text_log",
+    "text_document",
     # 코드 보안 (정적 분석 도구가 소비)
     "source_code_python",
     "source_code_javascript",
@@ -25,7 +28,13 @@ EvidenceType = Literal[
     "unknown",
 ]
 
-DetectionMethod = Literal["magic_bytes", "extension", "filename_pattern", "parent_dir"]
+DetectionMethod = Literal[
+    "magic_bytes",
+    "extension",
+    "filename_pattern",
+    "parent_dir",
+    "unclassified",
+]
 Platform = Literal["windows", "linux", "macos", "unknown"]
 
 
@@ -58,12 +67,14 @@ class Inventory:
     skipped_files: int = 0
     scan_root: str = ""
     depth_limit_hit: bool = False
+    unidentified_files: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "scan_root": self.scan_root,
             "scanned_files": self.scanned_files,
             "skipped_files": self.skipped_files,
+            "unidentified_files": self.unidentified_files,
             "depth_limit_hit": self.depth_limit_hit,
             "evidence_list": [e.to_dict() for e in self.evidence_list],
         }

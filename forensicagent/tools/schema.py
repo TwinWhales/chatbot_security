@@ -18,9 +18,12 @@ EvidenceTypeStr = Literal[
     "registry_hive",
     "pcap",
     "disk_image",
+    "ntfs_metadata",
+    "sqlite_database",
     "browser_artifact",
     "prefetch",
     "text_log",
+    "text_document",
     "source_code_python",
     "source_code_javascript",
     "source_code_generic",
@@ -31,6 +34,7 @@ OutputFormat = Literal["json", "csv", "text", "binary"]
 OutputSize = Literal["small", "medium", "large"]
 Runtime = Literal["short", "medium", "long"]
 PlatformStr = Literal["windows", "linux", "macos", "any"]
+TargetMode = Literal["per_file", "scan_root"]
 
 
 class CommandTemplate(BaseModel):
@@ -112,7 +116,17 @@ class ToolMetadata(BaseModel):
     platform: list[PlatformStr] = Field(default_factory=lambda: ["any"])
     input_format: list[str] = Field(
         default_factory=list,
-        description="허용하는 확장자/포맷 (참고용).",
+        description=(
+            "Selector 입력 게이트. any, name:<basename>, ext:<suffix> 문법을 "
+            "지원하며 기존 basename/.suffix 토큰도 호환한다. 빈 목록은 any."
+        ),
+    )
+    target_mode: TargetMode = Field(
+        "per_file",
+        description=(
+            "per_file runs one isolated job per matching artifact; scan_root "
+            "runs one job for a code/text-only scan tree."
+        ),
     )
 
     # ---------- runtime characteristics ----------
