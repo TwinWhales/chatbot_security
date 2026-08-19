@@ -11,6 +11,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+/.artifacts/
 downloads/
 eggs/
 .eggs/
@@ -66,6 +67,10 @@ Thumbs.db
 .omc/
 
 # ---- forensicagent: regeneratable / large artifacts ----
+# Crawled third-party content is local-only. Keep sample.txt + scripts as the
+# reproducible source list and ingestion path.
+/data/
+/seed_docs/
 # RAG database + per-user state (chroma index; rebuild via `rag index-tools`)
 .forensicagent/
 # Chroma persistence if ever pointed inside the repo
@@ -73,10 +78,28 @@ chroma/
 *.sqlite3
 # Per-tool execution outputs (generated each run)
 forensicagent_output/
+# Historical benchmark runs; keep only bench_result/report + goldenset.json.
+/bench/bench_cli/
+/bench/bench_full/
+/bench/bench_scripts/
 # Tool YAML drafts (LLM output - human review pending)
 tools_metadata/_draft/
+/tools_metadata/_failures/
 # Phase 6 evaluation golden set (LLM extracted)
 eval/goldenset/
+
+# Local assistant/session notes. Repository-wide Codex policy lives in
+# AGENTS.md, .agents/, and .codex/ instead.
+/.claude/
+/CLAUDE.md
+/scripts/CLAUDE.md
+/GUIDELINE.md
+/PROJECT_TOUR.md
+
+# Superseded one-off crawlers with local absolute paths.
+/scripts/crawlers/dfirreport_crawler.py
+/scripts/crawlers/eztools_parser.py
+/scripts/crawlers/hacktricks_parser.py
 
 # Project-local Serena runtime state; keep only the reviewed project config.
 .serena/*

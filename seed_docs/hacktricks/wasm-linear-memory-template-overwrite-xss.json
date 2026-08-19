@@ -1,5 +1,0 @@
-{
-  "url": "https://book.hacktricks.xyz/src/pentesting-web/xss-cross-site-scripting/wasm-linear-memory-template-overwrite-xss",
-  "title": "Wasm Linear Memory Template Overwrite Xss - HackTricks",
-  "content": "%.*s"
-}

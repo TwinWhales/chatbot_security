@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/todo/radio-hacking/README",
-    "title": "README",
-    "category": "src/todo/radio-hacking",
-    "source": "HackTricks",
-    "content": "# Radio Hacking\n\n{{#include ../../banners/hacktricks-training.md}}"
-}

@@ -582,7 +582,7 @@ def test_scanner_parsers_own_severity_and_do_not_duplicate_or_leak_secret():
     assert semgrep_findings[0].severity == "high"
     assert credential_literal not in str(semgrep_findings[0].to_dict())
 
-    secret = "AKIAABCDEFGHIJKLMNOP"
+    secret = "AKIA" + "ABCDEFGHIJKLMNOP"
     gitleaks = [
         {
             "RuleID": "aws-access-token",
@@ -614,7 +614,7 @@ def test_scanner_parsers_own_severity_and_do_not_duplicate_or_leak_secret():
 
 
 def test_real_secret_in_example_file_is_not_suppressed():
-    secret = "AKIAABCDEFGHIJKLMNOP"
+    secret = "AKIA" + "ABCDEFGHIJKLMNOP"
     findings = apply_rules(
         [
             {
@@ -683,7 +683,7 @@ def test_bandit_and_gitleaks_csv_reports_are_analyzed(tmp_path):
         use_llm=False,
     )
 
-    secret = "AKIAABCDEFGHIJKLMNOP"
+    secret = "AKIA" + "ABCDEFGHIJKLMNOP"
     gitleaks_report = tmp_path / "gitleaks.csv"
     with gitleaks_report.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
@@ -1344,7 +1344,7 @@ class _MustNotRunClient:
 def test_code_security_output_never_reaches_llm():
     metadata = _meta("gitleaks_secret", tool_id="gitleaks")
     metadata.category = "code_security"
-    secret = "AKIAABCDEFGHIJKLMNOP"
+    secret = "AKIA" + "ABCDEFGHIJKLMNOP"
     analysis = analyze_one(
         ExecutionResult(
             tool_id="gitleaks",

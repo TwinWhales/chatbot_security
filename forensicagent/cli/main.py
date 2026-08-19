@@ -376,16 +376,20 @@ def install_cmd(
         TOOL_SPECS,
     )
     c = console()
+    failures: list[str] = []
     if tools:
         # 사용자가 명시. registry 검증은 install_interactive 가 함.
-        n = install_interactive(c, names=tools)
+        n, failures = install_interactive(c, names=tools)
     elif all_auto:
-        n = install_all_auto(c)
+        n, failures = install_all_auto(c)
     else:
-        n = install_interactive(c, names=None)
+        n, failures = install_interactive(c, names=None)
     c.print(f"\n[bold]설치 완료:[/] {n}개")
     c.print(f"[dim]registry 전체: {len(set(s.name for s in TOOL_SPECS.values()))} 도구[/]")
     c.print("[dim]다시 `forensicagent doctor` 로 확인하세요.[/]")
+    if failures:
+        c.print(f"[red]설치 실패:[/] {', '.join(failures)}")
+        raise typer.Exit(1)
 
 
 @tools_app.command("list")

@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/windows-hardening/lateral-movement/rdpexec",
-    "title": "rdpexec",
-    "category": "src/windows-hardening/lateral-movement",
-    "source": "HackTricks",
-    "content": "# RDPexec\n\n{{#include ../../banners/hacktricks-training.md}}\n\n## How it Works\n\n**RDPexec** is basically to execute commands login into the system using RDP.\n\nFor more information check:\n\n{{#ref}}\n../../network-services-pentesting/pentesting-rdp.md\n{{#endref}}\n\n{{#include ../../banners/hacktricks-training.md}}"
-}

@@ -25,6 +25,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
+from importlib import metadata as importlib_metadata
 from pathlib import Path, PurePosixPath
 from typing import Literal, Optional
 from urllib.parse import urlsplit
@@ -102,7 +103,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         kind="venv",
         description="Multi-language SAST - auto ruleset",
         homepage="https://semgrep.dev/",
-        pip_package="semgrep==1.171.0",
+        pip_package="semgrep==1.173.0",
     ),
 
     # ---- zip 다운로드 가능 (GitHub releases) ----
@@ -264,6 +265,7 @@ _DOWNLOAD_TIMEOUT_SECONDS = 60
 _MAX_ZIP_DOWNLOAD_BYTES = 100 * 1024 * 1024
 _MAX_ZIP_MEMBERS = 10_000
 _MAX_ZIP_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+_ISOLATED_PIP_VERSION = "26.2.1"
 
 
 def _download_verified_zip(url: str, expected_sha256: str, destination: Path) -> None:
@@ -369,9 +371,15 @@ def _platform_ok(spec: ToolSpec) -> bool:
 
 def _spec_installed(spec: ToolSpec) -> bool:
     if spec.kind == "venv":
-        return _venv_executable(
-            tools_bin_root() / spec.name, spec.name
-        ).is_file()
+        root = tools_bin_root() / spec.name
+        return (
+            _venv_executable(root, spec.name).is_file()
+            and spec.pip_package is not None
+            and _venv_requirement_installed(root, spec.pip_package)
+            and _venv_requirement_installed(
+                root, f"pip=={_ISOLATED_PIP_VERSION}"
+            )
+        )
     return find_executable(spec.name) is not None
 
 
@@ -422,44 +430,105 @@ def _venv_executable(root: Path, name: str) -> Path:
     return root / directory / f"{name}{suffix}"
 
 
+def _venv_site_packages(root: Path) -> Path:
+    if sys.platform == "win32":
+        return root / "Lib" / "site-packages"
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    return root / "lib" / version / "site-packages"
+
+
+def _venv_requirement_installed(root: Path, requirement: str) -> bool:
+    distribution, separator, expected = requirement.partition("==")
+    if not separator:
+        return False
+    distribution = distribution.split("[", 1)[0]
+    normalized = re.sub(r"[-_.]+", "-", distribution).casefold()
+    try:
+        for installed in importlib_metadata.distributions(
+            path=[str(_venv_site_packages(root))]
+        ):
+            name = installed.metadata.get("Name", "")
+            if re.sub(r"[-_.]+", "-", name).casefold() == normalized:
+                return installed.version == expected
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def install_venv(spec: ToolSpec, c: Console) -> bool:
     """Install a dependency-heavy CLI into its own project-local venv."""
     package = _exact_pip_requirement(spec, c)
     if package is None:
         return False
-    tools_root = tools_bin_root()
-    target = tools_root / spec.name
-    if target.exists():
-        c.print(f"[red]{spec.name}: partial venv already exists at {target}[/]")
-        return False
     try:
+        tools_root = tools_bin_root().resolve()
         tools_root.mkdir(parents=True, exist_ok=True)
+        target = tools_root / spec.name
+        if target.parent != tools_root or target.resolve() != target:
+            c.print(f"[red]{spec.name}: unsafe isolated venv target[/]")
+            return False
+        had_previous = target.exists() or target.is_symlink()
+        work_dir = Path(tempfile.mkdtemp(prefix=f".{spec.name}-", dir=tools_root))
+    except (OSError, RuntimeError, ValueError) as e:
+        c.print(f"[red]{spec.name}: isolated venv setup failed: {e}[/]")
+        return False
+
+    backup = work_dir / "previous"
+    previous_moved = False
+    try:
+        if had_previous:
+            target.replace(backup)
+            previous_moved = True
         subprocess.run(
             [sys.executable, "-m", "venv", str(target)],
             check=True,
             cwd=settings.PROJECT_ROOT,
         )
         subprocess.run(
-            [str(_venv_python(target)), "-m", "pip", "install", package],
+            [
+                str(_venv_python(target)),
+                "-m",
+                "pip",
+                "install",
+                f"pip=={_ISOLATED_PIP_VERSION}",
+                package,
+            ],
             check=True,
             cwd=settings.PROJECT_ROOT,
         )
-    except (OSError, subprocess.CalledProcessError) as e:
+        executable = _venv_executable(target, spec.name)
+        if not executable.is_file():
+            raise ValueError(f"install completed without {executable}")
+    except BaseException as e:
+        rollback_error: OSError | None = None
         try:
-            shutil.rmtree(target)
+            if not had_previous or previous_moved:
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+                elif target.exists() or target.is_symlink():
+                    target.unlink()
+            if previous_moved and backup.exists():
+                backup.replace(target)
         except OSError as cleanup_error:
-            c.print(f"[yellow]partial venv cleanup failed: {cleanup_error}[/]")
+            rollback_error = cleanup_error
+        if rollback_error is None:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        else:
+            c.print(
+                f"[yellow]rollback incomplete: {rollback_error}; "
+                f"backup retained at {backup}[/]"
+            )
         c.print(f"[red]{spec.name} isolated install failed: {e}[/]")
+        if not isinstance(
+            e, (OSError, subprocess.CalledProcessError, ValueError)
+        ):
+            raise
         return False
 
-    executable = _venv_executable(target, spec.name)
-    if not executable.is_file():
-        try:
-            shutil.rmtree(target)
-        except OSError as cleanup_error:
-            c.print(f"[yellow]partial venv cleanup failed: {cleanup_error}[/]")
-        c.print(f"[red]{spec.name}: install completed without {executable}[/]")
-        return False
+    try:
+        shutil.rmtree(work_dir)
+    except OSError as cleanup_error:
+        c.print(f"[yellow]previous venv cleanup failed: {cleanup_error}[/]")
     c.print(f"[green]ok[/] {spec.name} -> {executable}")
     return True
 
@@ -557,12 +626,15 @@ def _ask_yn(c: Console, prompt: str, default: bool = True) -> bool:
     return ans in ("y", "yes")
 
 
-def install_interactive(c: Console, names: Optional[list[str]] = None) -> int:
+def install_interactive(
+    c: Console, names: Optional[list[str]] = None
+) -> tuple[int, list[str]]:
     """missing 도구를 하나씩 순회하며 y/n 으로 설치.
 
     names 가 주어지면 그것만, 아니면 registry 전체 중 missing 만.
-    반환: 설치 성공 개수.
+    반환: (설치 성공 개수, 자동 설치 실패 도구).
     """
+    failures: list[str] = []
     if names:
         # 별칭 정리 + registry 검증.
         targets = []
@@ -571,8 +643,9 @@ def install_interactive(c: Console, names: Optional[list[str]] = None) -> int:
                 targets.append(TOOL_SPECS[n])
             else:
                 c.print(f"[red]registry 에 없는 도구:[/] {n}")
+                failures.append(n)
         if not targets:
-            return 0
+            return 0, failures
     else:
         # vol 과 volatility3 같은 별칭 중복 제거 — pip_package 기준.
         seen_pkg: set[str] = set()
@@ -586,7 +659,7 @@ def install_interactive(c: Console, names: Optional[list[str]] = None) -> int:
                 targets.append(spec)
         if not targets:
             c.print("[green]모두 설치되어 있거나 현재 플랫폼 비대상입니다.[/]")
-            return 0
+            return 0, failures
 
     c.print(f"[bold]설치 후보 {len(targets)} 개[/]")
     for s in targets:
@@ -613,14 +686,17 @@ def install_interactive(c: Console, names: Optional[list[str]] = None) -> int:
         if _ask_yn(c, prompt, default=True):
             if install_one(spec, c):
                 installed += 1
+            elif spec.kind != "manual":
+                failures.append(spec.name)
         else:
             c.print("[dim]건너뜀.[/]")
-    return installed
+    return installed, failures
 
 
-def install_all_auto(c: Console) -> int:
+def install_all_auto(c: Console) -> tuple[int, list[str]]:
     """pip/zip 으로 자동 설치 가능한 모든 미설치 도구를 install. manual 은 안내만."""
     installed = 0
+    failures: list[str] = []
     seen_pkg: set[str] = set()
     for spec in TOOL_SPECS.values():
         key = spec.pip_package or spec.zip_url or spec.name
@@ -637,4 +713,6 @@ def install_all_auto(c: Console) -> int:
             continue
         if install_one(spec, c):
             installed += 1
-    return installed
+        else:
+            failures.append(spec.name)
+    return installed, failures

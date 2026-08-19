@@ -1,6 +1,7 @@
 from typer.testing import CliRunner
 
 from forensicagent.cli import main as cli_main
+from forensicagent.cli import tool_install
 from forensicagent.scanner.types import Inventory
 
 
@@ -75,3 +76,25 @@ def test_scan_coverage_warning_is_shown_before_empty_inventory_exit(
     assert "depth_limit_hit=true" in result.output
     assert "unreadable_paths=2" in result.output
     assert "reparse_paths=3" in result.output
+
+
+def test_auto_install_failure_is_nonzero_in_every_mode(monkeypatch):
+    spec = tool_install.ToolSpec(
+        name="test-auto",
+        kind="zip",
+        description="test",
+        homepage="https://example.test",
+    )
+    monkeypatch.setattr(tool_install, "TOOL_SPECS", {"test-auto": spec})
+    monkeypatch.setattr(tool_install, "_spec_installed", lambda _spec: False)
+    monkeypatch.setattr(tool_install, "install_one", lambda _spec, _console: False)
+
+    for args in (
+        ["--auto", "install", "test-auto"],
+        ["--auto", "install", "--all"],
+        ["--auto", "install"],
+    ):
+        result = runner.invoke(app, args)
+
+        assert result.exit_code == 1
+        assert "설치 실패:" in result.output

@@ -1,7 +1,0 @@
-2 validation errors for ToolMetadata
-platform
-  Input should be a valid list [type=list_type, input_value='windows', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.13/v/list_type
-output_format
-  Input should be 'json', 'csv', 'text' or 'binary' [type=literal_error, input_value='csv | text', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.13/v/literal_error

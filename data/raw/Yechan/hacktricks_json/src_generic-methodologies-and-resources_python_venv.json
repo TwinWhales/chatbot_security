@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/generic-methodologies-and-resources/python/venv",
-    "title": "venv",
-    "category": "src/generic-methodologies-and-resources/python",
-    "source": "HackTricks",
-    "content": "# venv\n\n{{#include ../../banners/hacktricks-training.md}}\n\n```bash\nsudo apt-get install python3-venv\n#Now, go to the folder you want to create the virtual environment\npython3 -m venv <Dirname>\npython3 -m venv pvenv #In this case the folder \"pvenv\" is going to be created\nsource <Dirname>/bin/activate\nsource pvenv/bin/activate #Activate the environment\n#You can now install whatever python library you need\ndeactivate #To deactivate the virtual environment\n```\n\n```bash\nThe error\nerror: invalid command 'bdist_wheel'\nis fixed running\npip3 install wheel\ninside the virtual environment\n```\n\n{{#include ../../banners/hacktricks-training.md}}"
-}

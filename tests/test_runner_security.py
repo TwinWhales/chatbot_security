@@ -104,20 +104,21 @@ def test_windows_timeout_kills_spawned_descendant_without_taskkill(
         ),
     )
     ready = tmp_path / "descendant-started"
+    release = tmp_path / "release-descendant"
     marker = tmp_path / "descendant-survived"
     child = tmp_path / "child.py"
     child.write_text(
         "import sys, time\n"
         "from pathlib import Path\n"
         "Path(sys.argv[1]).write_text('ready', encoding='utf-8')\n"
-        "time.sleep(3.5)\n"
-        "Path(sys.argv[2]).write_text('alive', encoding='utf-8')\n",
+        "while not Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
+        "Path(sys.argv[3]).write_text('alive', encoding='utf-8')\n",
         encoding="utf-8",
     )
     parent = tmp_path / "parent.py"
     parent.write_text(
         "import subprocess, sys, time\n"
-        "subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2], sys.argv[3]])\n"
+        "subprocess.Popen([sys.executable, *sys.argv[1:5]])\n"
         "time.sleep(30)\n",
         encoding="utf-8",
     )
@@ -131,13 +132,37 @@ def test_windows_timeout_kills_spawned_descendant_without_taskkill(
         output_format="text",
     )
 
+    real_popen = runner.subprocess.Popen
+
+    class TimeoutAfterDescendantStarts(real_popen):
+        def wait(self, timeout=None):
+            if not getattr(self, "_timeout_injected", False):
+                deadline = time.monotonic() + 10
+                while not ready.is_file():
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("descendant did not start within 10 seconds")
+                    time.sleep(0.01)
+                self._timeout_injected = True
+                raise runner.subprocess.TimeoutExpired(self.args, timeout)
+            return super().wait(timeout)
+
+    monkeypatch.setattr(runner.subprocess, "Popen", TimeoutAfterDescendantStarts)
+
     result = runner.run_tool(
         metadata,
-        [sys.executable, str(parent), str(child), str(ready), str(marker)],
+        [
+            sys.executable,
+            str(parent),
+            str(child),
+            str(ready),
+            str(release),
+            str(marker),
+        ],
         str(parent),
         tmp_path / "job",
         timeout_sec=2,
     )
+    release.write_text("go", encoding="utf-8")
     time.sleep(2)
 
     assert result.status == "timeout"

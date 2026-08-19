@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/generic-methodologies-and-resources/basic-forensic-methodology/specific-software-file-type-tricks/desofuscation-vbs-cscript.exe",
-    "title": "desofuscation-vbs-cscript.exe",
-    "category": "src/generic-methodologies-and-resources/basic-forensic-methodology/specific-software-file-type-tricks",
-    "source": "HackTricks",
-    "content": "# Desobfuscation Techniques for VBS Files\n\n{{#include ../../../banners/hacktricks-training.md}}\n\nSome things that could be useful to debug/deobfuscate a malicious VBS file:\n\n## echo\n\n```bash\nWscript.Echo \"Like this?\"\n```\n\n## Commnets\n\n```bash\n' this is a comment\n```\n\n## Test\n\n```bash\ncscript.exe file.vbs\n```\n\n## Write data to a file\n\n```js\nFunction writeBinary(strBinary, strPath)\n\n    Dim oFSO: Set oFSO = CreateObject(\"Scripting.FileSystemObject\")\n\n    ' below lines purpose: checks that write access is possible!\n    Dim oTxtStream\n\n    On Error Resume Next\n    Set oTxtStream = oFSO.createTextFile(strPath)\n\n    If Err.number <> 0 Then MsgBox(Err.message) : Exit Function\n    On Error GoTo 0\n\n    Set oTxtStream = Nothing\n    ' end check of write access\n\n    With oFSO.createTextFile(strPath)\n        .Write(strBinary)\n        .Close\n    End With\n\nEnd Function\n```\n\n{{#include ../../../banners/hacktricks-training.md}}"
-}

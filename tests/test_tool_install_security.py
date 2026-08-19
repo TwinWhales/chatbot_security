@@ -38,6 +38,16 @@ def _spec(payload: bytes, *, digest: str | None = None) -> tool_install.ToolSpec
     )
 
 
+def _write_distribution(root: Path, name: str, version: str) -> None:
+    metadata = (
+        tool_install._venv_site_packages(root)
+        / f"{name}-{version}.dist-info"
+        / "METADATA"
+    )
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text(f"Name: {name}\nVersion: {version}\n", encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     "member_name",
     ["../escape.txt", "..\\escape.txt", "/absolute.txt", "C:/drive.txt"],
@@ -171,7 +181,7 @@ def test_semgrep_uses_an_isolated_pinned_venv():
     spec = tool_install.TOOL_SPECS["semgrep"]
 
     assert spec.kind == "venv"
-    assert spec.pip_package == "semgrep==1.171.0"
+    assert spec.pip_package == "semgrep==1.173.0"
 
 
 def test_isolated_spec_does_not_accept_a_global_executable(tmp_path: Path, monkeypatch):
@@ -183,7 +193,23 @@ def test_isolated_spec_does_not_accept_a_global_executable(tmp_path: Path, monke
     executable = tool_install._venv_executable(tmp_path / "semgrep", "semgrep")
     executable.parent.mkdir(parents=True)
     executable.write_text("", encoding="utf-8")
+    _write_distribution(tmp_path / "semgrep", "semgrep", "1.173.0")
+    assert tool_install._spec_installed(spec) is False
+    _write_distribution(tmp_path / "semgrep", "pip", "26.2.1")
     assert tool_install._spec_installed(spec) is True
+
+
+def test_isolated_spec_rejects_wrong_pip_version(tmp_path: Path, monkeypatch):
+    spec = tool_install.TOOL_SPECS["semgrep"]
+    root = tmp_path / "semgrep"
+    monkeypatch.setattr(tool_install, "tools_bin_root", lambda: tmp_path)
+    executable = tool_install._venv_executable(root, "semgrep")
+    executable.parent.mkdir(parents=True)
+    executable.write_text("", encoding="utf-8")
+    _write_distribution(root, "semgrep", "1.173.0")
+    _write_distribution(root, "pip", "25.0")
+
+    assert tool_install._spec_installed(spec) is False
 
 
 def test_install_venv_places_cli_under_tools_bin(tmp_path: Path, monkeypatch):
@@ -193,18 +219,18 @@ def test_install_venv_places_cli_under_tools_bin(tmp_path: Path, monkeypatch):
         kind="venv",
         description="test",
         homepage="https://example.test",
-        pip_package="semgrep==1.171.0",
+        pip_package="semgrep==1.173.0",
     )
     calls: list[tuple[list[str], Path]] = []
 
     def fake_run(argv, *, check, cwd):
         calls.append(([str(value) for value in argv], Path(cwd)))
-        target = tools_root / "semgrep"
         if argv[1:3] == ["-m", "venv"]:
+            target = Path(argv[-1])
             tool_install._venv_python(target).parent.mkdir(parents=True)
             tool_install._venv_python(target).write_text("", encoding="utf-8")
         else:
-            tool_install._venv_executable(target, "semgrep").write_text(
+            tool_install._venv_executable(tools_root / "semgrep", "semgrep").write_text(
                 "", encoding="utf-8"
             )
 
@@ -218,7 +244,11 @@ def test_install_venv_places_cli_under_tools_bin(tmp_path: Path, monkeypatch):
         "venv",
         str(tools_root / "semgrep"),
     ]
-    assert calls[1][0][-2:] == ["install", "semgrep==1.171.0"]
+    assert calls[1][0][-3:] == [
+        "install",
+        "pip==26.2.1",
+        "semgrep==1.173.0",
+    ]
     assert {cwd for _, cwd in calls} == {tool_install.settings.PROJECT_ROOT}
     assert tool_install._venv_executable(tools_root / "semgrep", "semgrep").is_file()
 
@@ -232,21 +262,118 @@ def test_install_venv_removes_partial_target_when_cli_is_missing(
         kind="venv",
         description="test",
         homepage="https://example.test",
-        pip_package="semgrep==1.171.0",
+        pip_package="semgrep==1.173.0",
     )
+    target = tools_root / "semgrep"
+    target.mkdir(parents=True)
+    marker = target / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
 
     def fake_run(argv, *, check, cwd):
         assert Path(cwd) == tool_install.settings.PROJECT_ROOT
-        target = tools_root / "semgrep"
         if argv[1:3] == ["-m", "venv"]:
-            tool_install._venv_python(target).parent.mkdir(parents=True)
-            tool_install._venv_python(target).write_text("", encoding="utf-8")
+            created = Path(argv[-1])
+            tool_install._venv_python(created).parent.mkdir(parents=True)
+            tool_install._venv_python(created).write_text("", encoding="utf-8")
 
     monkeypatch.setattr(tool_install, "tools_bin_root", lambda: tools_root)
     monkeypatch.setattr(tool_install.subprocess, "run", fake_run)
 
     assert tool_install.install_venv(spec, Console(file=io.StringIO())) is False
-    assert not (tools_root / "semgrep").exists()
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_install_venv_preserves_previous_when_backup_move_fails(
+    tmp_path: Path, monkeypatch
+):
+    tools_root = tmp_path / "tools"
+    target = tools_root / "semgrep"
+    target.mkdir(parents=True)
+    marker = target / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    spec = tool_install.TOOL_SPECS["semgrep"]
+    path_type = type(target)
+    real_replace = path_type.replace
+
+    def fail_initial_move(self, destination):
+        if self == target:
+            raise PermissionError("backup move blocked")
+        return real_replace(self, destination)
+
+    monkeypatch.setattr(tool_install, "tools_bin_root", lambda: tools_root)
+    monkeypatch.setattr(path_type, "replace", fail_initial_move)
+    monkeypatch.setattr(
+        tool_install.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("subprocess must not run"),
+    )
+
+    assert tool_install.install_venv(spec, Console(file=io.StringIO())) is False
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert not list(tools_root.glob(".semgrep-*"))
+
+
+def test_install_venv_rolls_back_before_propagating_interrupt(
+    tmp_path: Path, monkeypatch
+):
+    tools_root = tmp_path / "tools"
+    target = tools_root / "semgrep"
+    target.mkdir(parents=True)
+    marker = target / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    spec = tool_install.TOOL_SPECS["semgrep"]
+
+    def interrupt_after_move(argv, *, check, cwd):
+        created = Path(argv[-1])
+        created.mkdir(parents=True, exist_ok=True)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(tool_install, "tools_bin_root", lambda: tools_root)
+    monkeypatch.setattr(tool_install.subprocess, "run", interrupt_after_move)
+
+    with pytest.raises(KeyboardInterrupt):
+        tool_install.install_venv(spec, Console(file=io.StringIO()))
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert not list(tools_root.glob(".semgrep-*"))
+
+
+def test_install_venv_rejects_link_to_sibling(tmp_path: Path, monkeypatch):
+    tools_root = tmp_path / "tools"
+    sibling = tools_root / "gitleaks"
+    sibling.mkdir(parents=True)
+    marker = sibling / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    target = tools_root / "semgrep"
+    try:
+        target.symlink_to(sibling, target_is_directory=True)
+    except OSError as e:
+        pytest.skip(f"directory symlinks unavailable: {e}")
+    spec = tool_install.TOOL_SPECS["semgrep"]
+    monkeypatch.setattr(tool_install, "tools_bin_root", lambda: tools_root)
+    monkeypatch.setattr(
+        tool_install.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("subprocess must not run"),
+    )
+
+    assert tool_install.install_venv(spec, Console(file=io.StringIO())) is False
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_install_venv_reports_unusable_tools_root(tmp_path: Path, monkeypatch):
+    tools_root = tmp_path / "not-a-directory"
+    tools_root.write_text("occupied", encoding="utf-8")
+    spec = tool_install.TOOL_SPECS["semgrep"]
+    output = io.StringIO()
+    monkeypatch.setattr(tool_install, "tools_bin_root", lambda: tools_root)
+    monkeypatch.setattr(
+        tool_install.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("subprocess must not run"),
+    )
+
+    assert tool_install.install_venv(spec, Console(file=output)) is False
+    assert "isolated venv setup failed" in output.getvalue()
 
 
 def test_gitleaks_release_is_versioned_and_digest_pinned():

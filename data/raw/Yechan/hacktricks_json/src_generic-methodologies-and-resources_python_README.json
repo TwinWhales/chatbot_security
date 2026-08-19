@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/generic-methodologies-and-resources/python/README",
-    "title": "README",
-    "category": "src/generic-methodologies-and-resources/python",
-    "source": "HackTricks",
-    "content": "# Python Sandbox Escape & Pyscript\n\n{{#include ../../banners/hacktricks-training.md}}\n\n**Interesting pages to check:**\n\n- [**Pyscript hacking tricks**](pyscript.md)\n- [**Python deserializations**](../../pentesting-web/deserialization/README.md)\n- [**Keras model deserialization RCE and gadget hunting**](keras-model-deserialization-rce-and-gadget-hunting.md)\n- [**Tricks to bypass python sandboxes**](bypass-python-sandboxes/README.md)\n- [**Basic python web requests syntax**](web-requests.md)\n- [**Basic python syntax and libraries**](basic-python.md)\n\n{{#include ../../banners/hacktricks-training.md}}"
-}

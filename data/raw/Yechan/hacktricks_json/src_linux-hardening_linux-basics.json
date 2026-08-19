@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/linux-hardening/linux-basics",
-    "title": "linux-basics",
-    "category": "src/linux-hardening",
-    "source": "HackTricks",
-    "content": "# Linux Basics\n\n{{#include ../banners/hacktricks-training.md}}"
-}

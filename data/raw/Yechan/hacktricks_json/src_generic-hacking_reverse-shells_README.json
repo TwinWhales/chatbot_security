@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/generic-hacking/reverse-shells/README",
-    "title": "README",
-    "category": "src/generic-hacking/reverse-shells",
-    "source": "HackTricks",
-    "content": "# Reverse Shells\n\n{{#include ../../banners/hacktricks-training.md}}\n\n## [Shells - Linux](linux.md)\n\n---\n\n## [Shells - Windows](windows.md)\n\n---\n\n## [MSFVenom - CheatSheet](msfvenom.md)\n\n---\n\n## [Full TTYs](full-ttys.md)\n\n---\n\n## Auto-generated shells\n\n- [**https://reverse-shell.sh/**](https://reverse-shell.sh/)\n- [**https://www.revshells.com/**](https://www.revshells.com/)\n- [**https://github.com/ShutdownRepo/shellerator**](https://github.com/ShutdownRepo/shellerator)\n- [**https://github.com/0x00-0x00/ShellPop**](https://github.com/0x00-0x00/ShellPop)\n- [**https://github.com/cybervaca/ShellReverse**](https://github.com/cybervaca/ShellReverse)\n- [**https://liftoff.github.io/pyminifier/**](https://liftoff.github.io/pyminifier/)\n- [**https://github.com/xct/xc/**](https://github.com/xct/xc/)\n- [**https://weibell.github.io/reverse-shell-generator/**](https://weibell.github.io/reverse-shell-generator/)\n- [**https://github.com/t0thkr1s/revshellgen**](https://github.com/t0thkr1s/revshellgen)\n- [**https://github.com/mthbernardes/rsg**](https://github.com/mthbernardes/rsg)\n\n{{#include ../../banners/hacktricks-training.md}}"
-}

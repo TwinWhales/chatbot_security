@@ -26,22 +26,21 @@ chatbot_security/
 │  ├─ executor/        adapter, 우선순위 스케줄러, subprocess, 산출물 manifest
 │  ├─ analyzer/        CSV/JSON/text 스트리밍, 명시적 규칙, LLM 보조 추출
 │  ├─ reporter/        통합 Report, 터미널·JSON·Markdown 출력
-│  ├─ rag/             tool metadata 및 seed corpus 인덱싱·Chroma 검색
+│  ├─ rag/             tool metadata 인덱싱·Chroma 검색
 │  ├─ llm/             Ollama 호출, JSON 재시도와 오류 변환
 │  ├─ observability/   단계별 시간 측정
 │  └─ config.py        경로·RAG·LLM·실행 설정의 단일 진입점
 ├─ tools_metadata/     현재 실행 가능한 도구 정의 YAML
 ├─ tests/              단위·통합·회귀 테스트
 ├─ bench/              합성 golden set과 deterministic/RAG/LLM 순위 평가
-├─ scripts/            수집 문서 가공, indicator 후보·golden set 생성 보조
-├─ data/raw/           크롤러 원본 데이터
-├─ seed_docs/          도메인별 정규화 RAG 문서 corpus
-├─ eval/goldenset/     외부 보고서 기반 평가 자료
-└─ forensicagent_output/
-                         과거 실행 산출물. 현재 기본 출력 위치와는 별개
+├─ scripts/            선택적 외부 자료 수집·가공 보조
+└─ sample.txt          사용자가 직접 재수집할 외부 출처 URL 목록
 ```
 
-`data/raw`, `seed_docs`, `bench/**/raw`, `forensicagent_output`에는 이미 추적되는 파일이 다수 있다. 이들은 실행 코드가 아니며, 저장소 루트를 증거 경로로 스캔하면 일부가 분석 대상으로 오인될 수 있다. 사건별 전용 디렉터리를 `--path`로 지정하는 것이 안전하다.
+`data/`, `seed_docs/`, `eval/goldenset/`, 생성 benchmark 디렉터리와
+`forensicagent_output/`은 공개용 export에서 제외하고 ignored 로컬 산출물로
+분리한다. 기존 private working tree에는 보존돼 있을 수 있으므로 저장소 루트 대신
+사건별 전용 디렉터리를 `--path`로 지정하는 것이 안전하다.
 
 ## 3. 실제 5단계 데이터 흐름
 
@@ -98,7 +97,7 @@ chatbot_security/
 | P0 | Executor가 `stdout`만 결과로 간주했다. EZTools처럼 `{output_dir}`에 CSV를 쓰는 도구는 성공으로 표시돼도 Analyzer가 실제 결과를 보지 못했다. | job별 `generated/` 격리, 재귀 artifact 수집, format·size·SHA-256 manifest, 생성 파일이 없을 때 `output_missing` 상태를 추가했다. Analyzer는 generated artifact를 우선 소비한다. | 실제 도구 버전별 출력 디렉터리·파일명은 실증 검증이 필요하다. |
 | P0 | `ToolSelection` 하나에 command 하나만 있어 첫 template가 모든 target에 적용됐다. Volatility·RegRipper의 중요한 plugin과 hive별 실행이 빠졌다. | target별 `RunSpec`을 추가했다. Volatility는 Windows 증거에서 scenario 문구와 무관하게 `pslist`·`cmdline`·`netscan`·`malfind`·`pstree`를 실행한다. RegRipper는 hive별 plugin/profile을 결정한다. 선택 template도 실행 결과에 기록한다. | Linux/macOS 메모리 plugin은 아직 지원하지 않는다. |
 | P0 | 구현되지 않은 suspicious indicator를 자연어 substring으로 추정해 finding을 생성할 수 있었다. 정상 문장도 오탐으로 승격될 위험이 있었다. | concrete matcher registry에 등록된 ID만 실행한다. 기본 metadata도 구현된 ID만 선언하며, custom·미지원 ID는 warning을 남기고 finding을 만들지 않는다. Bandit·Semgrep·Gitleaks는 구조화 row를 기준으로 처리한다. | 외부 TI·파일 존재 확인·교차 artifact가 필요한 주장은 해당 데이터와 matcher가 생기기 전까지 metadata에 노출하지 않는다. |
-| P0 | 출력이 증거 디렉터리 안에 생성되면 다음 scan이 자체 출력물을 다시 증거로 읽고 사건 디렉터리를 변경했다. | 기본 출력은 `<FORENSICAGENT_HOME>/output/<case>_<hash>` 아래로 이동했다. 현재 output 경로를 scan에서 prune하고 생성 디렉터리도 기본 ignore한다. 프로젝트 로컬 `.env`를 쓰면 이 경로도 저장소 내부 ignored state에 한정된다. | 저장소에는 과거 tracked 출력이 남아 있다. 사용자가 `--output-dir`을 사건 폴더 내부로 강제하면 운용상 주의가 필요하다. |
+| P0 | 출력이 증거 디렉터리 안에 생성되면 다음 scan이 자체 출력물을 다시 증거로 읽고 사건 디렉터리를 변경했다. | 기본 출력은 `<FORENSICAGENT_HOME>/output/<case>_<hash>` 아래로 이동했다. 현재 output 경로를 scan에서 prune하고 생성 디렉터리도 기본 ignore한다. 프로젝트 로컬 `.env`를 쓰면 이 경로도 저장소 내부 ignored state에 한정된다. | 과거 출력은 현재 tree에서 제외했지만 기존 Git 이력에는 남아 있다. 사용자가 `--output-dir`을 사건 폴더 내부로 강제하면 운용상 주의가 필요하다. |
 | P1 | `.raw`를 모두 메모리로, SQLite를 모두 브라우저로 보는 등 분류가 실제 포맷보다 과장됐고, 설정·script-only tree는 unknown이어서 Gitleaks가 선택되지 않았다. | `ntfs_metadata`, `sqlite_database`, `text_document`를 추가했다. 일반 `.raw` 자동 메모리 분류를 제거하고 명명 패턴이 있는 dump만 메모리로 본다. `.env`·YAML/JSON/TOML/INI, shell/PowerShell/batch, XML/Terraform, Dockerfile/Makefile/Jenkinsfile 등을 text evidence로 분류하며 SCCA offset 4, ns-PCAP 양 endian, Amcache·NTFS 이름도 보강했다. | raw disk image는 이름만으로 확정하지 않으므로 별도 탐지기나 사용자 힌트가 없으면 unknown일 수 있다. 구조화 설정·script의 의미 분석이 아니라 secret scan 라우팅이다. |
 | P1 | Selector가 타입 교집합만 확인해 NTUSER.DAT에 AmcacheParser, 일반 registry hive에 MFTECmd 같은 잘못된 후보를 만들었다. | 타입과 `input_format`을 AND 조건으로 강제했다. `any`, `name:`, `ext:` 문법과 레거시 표기를 지원하고 target을 중복 제거했다. `--tools`도 도구 선택만 강제할 뿐 동일한 입력 안전 gate를 사용한다. 모든 기본 YAML과 golden set을 이 계약에 맞췄다. | 강제 도구와 호환되는 증거가 없으면 실행 계획은 비며 CLI가 명시적으로 실패한다. |
 | P1 | source tree 전체를 외부 SAST/secret 도구에 넘기면 Scanner가 제외·깊이 제한한 unknown/binary 증거까지 재귀 처리할 수 있었다. | Bandit·Semgrep·Gitleaks는 Scanner inventory에서 host·타입·input format gate를 통과한 파일만 target으로 받는다. `--tools` 강제 경로도 동일하다. | 파일별 실행은 큰 source tree에서 느릴 수 있으므로 향후 Scanner inventory 기반 manifest/batch 입력을 검토할 수 있다. |
@@ -236,7 +235,9 @@ RAG 선택 평균은 220.7ms였다. 이는 이번 로컬 환경의 1회 결과�
 precision/recall이나 end-to-end 탐지율 증거가 아니다. 상세 재현 metadata와
 케이스별 결과는 `bench/bench_report.md`와 `bench/bench_result.json`에 있다.
 
-`seed_docs`의 도메인별 collection은 오프라인 corpus 자산이다. 현재 Selector와 Analyzer의 `retrieve_tools()` 경로는 tool metadata collection을 조회하므로, 저장소의 큰 seed corpus가 5단계 런타임에 자동으로 사용되는 것은 아니다.
+`seed_docs`는 사용자가 선택적으로 다시 수집하는 ignored 로컬 corpus다. 현재
+Selector와 Analyzer의 `retrieve_tools()` 경로는 tool metadata collection을
+조회하므로, 이 외부 corpus가 5단계 런타임에 자동으로 사용되는 것은 아니다.
 
 ### 6.5 LLM 동작과 폴백
 
@@ -258,6 +259,10 @@ precision/recall이나 end-to-end 탐지율 증거가 아니다. 상세 재현 m
 ### 7.1 외부 도구와 실제 증거
 
 - 포렌식 도구 대부분은 프로젝트에 포함되지 않는다. Volatility·Bandit·Semgrep은 고정 Python package, Chainsaw와 Gitleaks는 고정 ZIP+SHA-256으로 설치할 수 있지만 EZTools와 RegRipper 등은 플랫폼·라이선스·배포 방식에 따라 수동 설치가 필요하다. AmcacheParser·EvtxECmd·MFTECmd·PECmd·RECmd는 Windows host 전용이다.
+- Semgrep은 1.173.0과 pip 26.2.1을 project-local 격리 venv에 고정한다. clean
+  reinstall 뒤 `semgrep --version`, `pip check`, `pip-audit`와 로컬 rule scan을
+  통과했으며 알려진 의존성 취약점은 보고되지 않았다. 다만 기본
+  `--config=auto` ruleset은 Registry 네트워크와 upstream 변경에 의존한다.
 - metadata의 command template가 모든 버전과 OS에서 동일하게 동작한다고 검증되지 않았다.
 - 현재 Chainsaw adapter는 bundled Sigma hunt가 아니라 채널별 Event ID search만 실행한다. Sigma 지원에는 검증된 rules/mapping 경로를 받는 별도 실행 계약이 필요하다.
 - 현재 Volatility 실행 계획은 Windows plugin만 생성한다. Linux/macOS에서 바이너리를 실행할 수 있다는 host `platform` 표기를 Linux/macOS 메모리 증거 지원으로 해석하면 안 된다. Volatility symbol/plugin이나 RegRipper profile 같은 부속 자산이 없으면 executable만 있어도 분석이 실패하거나 축소된다.
@@ -282,29 +287,42 @@ precision/recall이나 end-to-end 탐지율 증거가 아니다. 상세 재현 m
 - 기본 sentence-transformer와 현재 golden set은 한국어 질의에 대한 별도 benchmark가 없다. 한국어 시나리오, 파일명, 약어가 섞인 평가셋을 따로 만들어야 한다.
 - similarity threshold와 score margin은 안전장치이지 relevance 품질 보증이 아니다.
 - 로컬 MiniLM의 process cold-start가 길다. 후보가 하나인 경우는 건너뛰지만 다중 후보의 첫 query는 CLI가 멈춘 것처럼 보일 수 있다.
-- seed corpus의 출처·중복·라이선스·최신성 검증과 runtime 연결 정책이 정리돼야 한다.
+- 외부 corpus를 로컬에서 재수집하거나 다시 배포하려면 출처·중복·라이선스·최신성
+  검증과 runtime 연결 정책을 먼저 정해야 한다.
 - LLM 결과는 모델·버전·temperature·prompt에 따라 변한다. 근거 excerpt 검사는 hallucination을 줄이지만 의미적 오판까지 제거하지는 않는다.
 - OpenAI embedding backend를 선택하면 설정과 구현에 따라 query가 외부 서비스로 전송될 수 있으므로 사건명·파일명 노출 정책을 별도로 검토해야 한다.
 
 ### 7.4 저장소 위생
 
-- `forensicagent_output`, `bench/**/raw`, `data/raw`, `seed_docs`의 기존 산출물·corpus가 tracked 상태다. 코드 diff 검토가 어렵고 저장소 크기와 provenance 관리 부담이 커진다.
-- Gitleaks 8.30.0으로 34개 commit 전체를 검사한 결과 86건이 보고됐다. 85건은 외부 `data`/`seed_docs` corpus의 tutorial token·JWT·private-key 패턴이고 1건은 합성 analyzer 테스트 키다. corpus 후보를 개별 재배포 가능성·실제 자격증명 여부까지 adjudicate하지 않았으므로 공개 전 정리해야 하며 suppressing baseline은 만들지 않았다.
-- 현재 소스·테스트·설정은 detect-secrets 1.5.0 `--no-verify`로 별도 검사했다. 초기 전체 검사 후보 6건은 공개 malware SHA-256 IOC 2건과 합성 secret 회귀 fixture 4건이었다. 최종 변경 파일 69개 재검사 후보 7건도 benchmark 재현 hash 2건, 고정 release SHA-256 1건, 합성 secret/keyword 회귀 fixture 4건으로 수동 확인했으며 실제 자격증명은 발견되지 않았다.
+- 공개용 export에서는 `forensicagent_output`, 생성 benchmark 디렉터리, `data/`,
+  `seed_docs/`, `eval/goldenset/`, `tools_metadata/_failures/`를 제외한다.
+  기존 private working tree의 로컬 파일은 보존하며 `.gitignore`로 재유입을 막는다.
+- Gitleaks 8.30.0으로 34개 commit 전체를 검사한 결과 89건이 보고됐다. 85건은
+  과거 외부 `data`/`seed_docs` corpus의 tutorial token·JWT·private-key 패턴이고
+  4건은 합성 analyzer 테스트 키다. 공개 export 대상의 자격증명 형태 후보는
+  합성 회귀 fixture뿐이며 실제 자격증명은 발견되지 않았다. 사용자 확인상 실제
+  고객·사건 기밀 데이터도 사용하지 않았다. 다만 이 확인은 과거 외부 본문의
+  재배포 권리나 Git 이력에서의 접근 가능성을 해결하지 않는다.
+- 현재 소스·테스트·설정은 detect-secrets 1.5.0 `--no-verify`로도 별도 검사했다.
+  후보는 공개 malware/release SHA-256과 합성 secret 회귀 fixture로 수동 확인했으며
+  실제 자격증명은 발견되지 않았다. suppressing baseline은 만들지 않았다.
 - 신뢰된 `PROJECT_ROOT` scan에서는 프로젝트 상태·생성 디렉터리를 제외하지만
   `bench`, `data`, `seed_docs` 전체는 자동 제외하지 않는다. 외부 증거 root에는
   프로젝트 전용 이름 제외를 적용하지 않는다.
-- 기존 tracked 결과를 삭제할지는 보존·재현 정책 결정이 필요한 별도 작업이다. 이 감사에서는 삭제하지 않았다.
+- ignored corpus·산출물이 로컬에 남아 있을 수 있으므로 저장소 루트를 증거로
+  지정할 때는 여전히 주의해야 한다.
 
 ### 7.5 공개 전 차단 조건
 
-- `data/`·`seed_docs/` corpus의 파일별 재배포 라이선스, 원 출처, 수집 시각을
-  확인하지 않았으므로 현재 상태로 public release를 승인할 수 없다.
-- Git 전체 이력에서 나온 corpus secret 후보는 개별 판정이 끝나지 않았다.
-  suppressing baseline으로 숨기지 말고 실제 자격증명·재배포 가능성을 확인해야 한다.
-- tracked 생성 보고서와 benchmark 산출물에는 로컬 Windows 경로가 남을 수 있어
-  공개 범위와 재생성 정책을 정해야 한다.
-- 선택 의존성 ChromaDB의 미패치 취약점, 라벨된 실제 증거 E2E 정확도 부재도
+- 공개용 export는 외부 corpus 본문과 생성 산출물을 포함하지 않지만, 기존 Git 이력에는
+  과거 corpus 본문과 자격증명 형태 후보 85건이 그대로 접근 가능하다. 따라서 이
+  저장소를 이력째 public으로 전환하지 말고, 정리된 현재 tree만 새 초기 커밋으로
+  가져간 sanitized fresh repository를 공개해야 한다. 기존 이력은 private로
+  보존하는 방식을 권장한다.
+- `sample.txt`로 외부 corpus를 다시 수집하거나 본문을 배포하려면 각 출처의 최신
+  라이선스·이용약관·robots 정책을 별도로 확인해야 한다.
+- 선택 의존성 ChromaDB의 미패치 취약점, Semgrep 격리 환경 재검증, 라벨된 실제
+  증거 E2E 정확도 부재도
   공개 문구에서 명시해야 한다.
 - private vulnerability reporting, push protection, branch protection 같은 GitHub
   저장소 설정은 코드로 보장할 수 없으므로 관리자가 공개 직전에 확인해야 한다.
@@ -436,11 +454,11 @@ Linux job은 `libmagic1`을 설치한다. 배포, release publish, cloud credent
 3. 입력 증거 SHA-256, 획득 시각·원본 경로·case ID를 포함하는 읽기 전용 evidence manifest를 도입한다.
 4. 제거한 TI·파일 존재·교차 artifact 의존 indicator는 필요한 데이터 소스와 matcher를 함께 구현할 때만 기본 metadata에 다시 노출한다.
 5. 한국어 시나리오와 혼합 언어 파일명을 포함한 RAG golden set을 별도로 만들고 threshold를 재보정한다.
-6. tracked 출력과 대형 corpus의 보존 정책을 정해 Git LFS·외부 artifact 저장소·manifest 방식 중 하나로 분리한다.
+6. 정리된 현재 tree로 fresh public repository를 만들고 기존 corpus 포함 이력은 private로 보존한다.
 
 현재 상태의 적절한 표현은 **“실패 시 결정론 경로를 보존하는 자동 트리아지 파이프라인”**이다. 등록 도구와 명시적 규칙이 다루는 범위에서는 재현성과 관찰 가능성이 개선됐지만, 지원하지 않는 증거·indicator까지 탐지한다고 해석해서는 안 된다.
 
 라이선스는 [LICENSE](LICENSE), 취약점 제보 절차는 [SECURITY.md](SECURITY.md),
 외부 도구·데이터 고지는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를
-참조한다. 위 공개 전 차단 조건이 해결되기 전에는 “오픈소스 공개 준비 완료”로
-표현하지 않는다.
+참조한다. 공개용 export의 파일 표면은 정리됐지만 sanitized fresh history와
+저장소 보안 설정을 준비하기 전에는 “오픈소스 공개 준비 완료”로 표현하지 않는다.

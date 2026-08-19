@@ -288,21 +288,23 @@ MRR을 **개선하지 못하고 낮췄다**. 첫 index rebuild는 48.26초(embed
 | `5d8595b` | fix+test: Stage 2 JSON Schema 강제 + 89 단위 테스트 + Stage 4a 분석기 + HackTricks URL 매핑 |
 | `cb87549` | feat: hand-written 5 EZTools YAMLs (mftecmd / evtxecmd / recmd / pecmd / amcacheparser) — 도구 풀 3 → 8 |
 
-## 1차 인제스션 실행 결과 (2026-05-19)
+## 선택적 외부 corpus 수집
 
-`sample.txt` 1085 URL 을 처음으로 돌린 결과:
+공개용 export와 fresh repository에는 외부 사이트에서 수집한 corpus 본문을
+포함하지 않는다.
+`sample.txt`의 URL 목록과 `scripts/ingest_sample.py`를 이용해 필요한 자료만 로컬에서
+직접 수집할 수 있다.
 
-| Stage | 상태 | 산출물 |
-|---|---|---|
-| 1 (crawl) | ✅ 성공 | seed_docs/{cd:69, dfir:14, eztools:32, hacktricks:828} = **943 docs** |
-| 3 (RAG) | ✅ 성공 | ChromaDB collections seed_*: cd=1379, dfir=598, eztools=522, hacktricks=828 = **3327 chunks** |
-| 2/4a/4b (LLM) | ⏳ pending | qwen2.5:7b 가 CPU 추론 + `num_ctx=4096` 기본값 → 출력 잘림 + 호출당 1시간. 코드 수정 (`num_ctx=16384`, `num_predict=2048` 옵션 주입) 후 GPU 있는 환경에서 재시도 필요 |
+```powershell
+# 먼저 소량으로 소스별 응답과 파서를 확인
+.\.venv\Scripts\python.exe -m pip install -e ".[crawlers]"
+.\.venv\Scripts\python.exe scripts\ingest_sample.py sample.txt --limit 20
+```
 
-발견된 한계와 처리:
-- **HackTricks 도메인 이전**: `book.hacktricks.xyz` → `book.hacktricks.wiki`. URL_REWRITES 로 도메인은 맞췄지만 wiki 의 URL 구조가 달라 828개 모두 404 placeholder (105 chars). 페이지 수는 많지만 본문이 비어 RAG 컨텐츠로서의 가치는 없음. 향후 wiki 구조 매핑 필요.
-- **DFIR Report WordPress selector**: 1차 시도 시 `<article>` / `<main>` 으로는 본문이 안 잡혀 424 chars placeholder 만 추출. `div.entry-content-wrapper` 선택자 추가 후 재크롤 → 평균 30K chars 정상 추출.
-- **Ollama python lib 0.6.2 의 Pydantic 응답**: `client.list()` 가 dict 가 아닌 `ListResponse` 객체를 반환. `is_available()` 가 잘못 빈 모델 리스트를 만들어 경고가 났음. 양쪽 모두 지원하도록 수정.
-- **subprocess PYTHONPATH**: scripts/*.py 는 패키지가 아니라 `python scripts/foo.py` 호출 시 repo root 가 sys.path 에 없음. run_all.py 가 env 에 PYTHONPATH 명시 주입하도록 수정.
+산출물은 ignored `seed_docs/`에 저장된다. URL 목록은 본문의 재배포 허가를
+의미하지 않으므로, 수집·사용 전에 각 사이트의 최신 라이선스와 이용약관, robots
+정책을 직접 확인해야 한다. 이 corpus는 현재 5단계 런타임의 필수 입력이 아니며,
+도구 선택 RAG는 `tools_metadata/*.yaml`을 별도로 인덱싱한다.
 
 ---
 
@@ -523,10 +525,8 @@ forensicagent/
 └── __main__.py           # `python -m forensicagent`
 
 tools_metadata/           # 실행 metadata YAML 11개 (정확한 목록은 감사 보고서 참조)
-
-scripts/crawlers/         # 도구 카탈로그 보강용 (TryHackMe, CyberDefenders,
-                          # DFIR Report, EZTools, HackTricks)
-seed_docs/                # 크롤러 산출물 (도메인 자료)
+scripts/                  # 선택적 외부 자료 수집·가공 보조
+sample.txt                # 사용자가 직접 재수집할 외부 출처 URL 목록
 ```
 
 ---
@@ -575,12 +575,20 @@ seed_docs/                # 크롤러 산출물 (도메인 자료)
 lint, 테스트, wheel build/install, source tree 밖 CLI smoke test를 수행한다.
 배포·릴리스·클라우드 자격증명을 사용하는 단계는 없으며 **CI만 있고 CD는 없다**.
 
-저장소를 공개하기 전에는 다음 항목이 차단 조건이다.
+공개용 export에는 외부 corpus 본문과 생성 분석 산출물을 포함하지 않는다.
+export 대상 코드의 자격증명 형태 후보는 합성 회귀 fixture로 확인됐다. 다만 기존 Git
+이력에는 과거 corpus에서 나온 자격증명 형태 후보 85건과 재배포 권리가 확인되지
+않은 본문이 남아 있으므로, **기존 저장소를 이력째 그대로 public으로 전환하면 안
+된다.** 공개할 때는 정리된 현재 tree만 새 초기 커밋으로 가져간 sanitized fresh
+repository를 만들고 기존 이력은 private로 보존하는 방식을 권장한다.
 
-- `data/`·`seed_docs/` corpus의 재배포 라이선스와 provenance를 파일별로 확인한다.
-- Git 전체 이력의 corpus secret 후보를 개별 판정하고 실제 자격증명이 없음을 확인한다.
-- tracked 생성 산출물과 로컬 절대경로가 포함된 보고서의 공개 범위를 정한다.
+그 밖의 공개 전 확인 항목은 다음과 같다.
+
+- 로컬에서 corpus를 재수집할 때 각 출처의 최신 라이선스·이용약관을 확인한다.
 - 선택 의존성 ChromaDB의 미패치 취약점은 core-only/`--no-rag` 운용으로 격리한다.
+- 선택 도구 Semgrep 1.173.0은 project-local 격리 venv에서 `pip check`,
+  `pip-audit`와 로컬 rule scan을 통과했다. 다만 기본 `--config=auto` ruleset은
+  Semgrep Registry 네트워크와 upstream 변경에 의존한다.
 - GitHub private vulnerability reporting, push protection, branch protection은 저장소
   관리자 설정에서 켠다.
 - 합성 선택 benchmark를 실제 사건 finding precision/recall 또는 수상 가능성의
@@ -590,10 +598,6 @@ lint, 테스트, wheel build/install, source tree 밖 CLI smoke test를 수행�
 
 ## 다음 세션에서 시작할 만한 것
 
-자세한 다음-액션 메모는 [`CLAUDE.md`](CLAUDE.md) 의 "다음 세션 재개 노트"
-섹션 참조.
-
-짧게:
 1. 공개 CTF/포렌식 증거셋으로 외부 도구와 matcher를 end-to-end 고정
 2. PCAP·disk image·SQLite/browser artifact의 실행 metadata와 parser 추가
 3. Chainsaw Sigma 지원이 필요하면 rules/mapping 경로를 명시하는 별도 실행 경로 추가

@@ -1,6 +1,0 @@
-{
-    "url": "https://github.com/EZToolsManuals/EZToolsManuals/blob/main/manuscript/mftexplorer.txt",
-    "title": "EZ Tools - mftexplorer",
-    "source": "EZToolsManuals",
-    "content": "# MFT Explorer\n\n## MFT Explorer Introduction\n\nMFT Explorer is a tool created by Eric Zimmerman that can be used by forensic examiners to ingest $MFT files and visually explore the contents. Please note, this tool is not meant to ingest large $MFT files and therefore should be used on smaller $MFTs and purely for educational purposes. Everyday forensic examiners should use MFTECmd to parse $MFT files and export the output to CSV.\n\n## MFT Explorer Features\n\n### Find Panel\n\nEnabling the Find panel is done by simply right-clicking on a column header and clicking `Show Find Panel`, as seen below.\n\nOnce enabled, the Find panel will be visible in the top right corner, as seen below.\n\n## MFT Explorer References\n\n### Download MFT Explorer\n\nMFT Explorer can be downloaded from <https://ericzimmerman.github.io/#!index.md>"
-}

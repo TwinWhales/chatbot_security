@@ -1,7 +1,0 @@
-{
-    "url": "https://book.hacktricks.xyz/src/crypto/README",
-    "title": "README",
-    "category": "src/crypto",
-    "source": "HackTricks",
-    "content": "# Crypto\n\n{{#include ../banners/hacktricks-training.md}}\n\nThis section focuses on **practical cryptography for hacking/CTFs**: how to quickly recognize common patterns, pick the right tools, and apply known attacks.\n\nIf you're here for hiding data inside files, go to the **Stego** section.\n\n## How to use this section\n\nCrypto challenges reward speed: classify the primitive, identify what you control (oracle/leak/nonce reuse), then apply a known attack template.\n\n### CTF workflow\n{{#ref}}\nctf-workflow/README.md\n{{#endref}}\n\n### Symmetric crypto\n{{#ref}}\nsymmetric/README.md\n{{#endref}}\n\n### Hashes, MACs, and KDFs\n{{#ref}}\nhashes/README.md\n{{#endref}}\n\n### Public-key crypto\n{{#ref}}\npublic-key/README.md\n{{#endref}}\n\n### TLS and certificates\n{{#ref}}\ntls-and-certificates/README.md\n{{#endref}}\n\n### Crypto in malware\n{{#ref}}\ncrypto-in-malware/README.md\n{{#endref}}\n\n### Misc\n{{#ref}}\nctf-misc/README.md\n{{#endref}}\n\n## Quick setup\n\n- Python: `python3 -m venv .venv && source .venv/bin/activate`\n- Libraries: `pip install pycryptodome gmpy2 sympy pwntools`\n- SageMath (often essential for lattice/RSA/ECC): https://www.sagemath.org/\n\n{{#include ../banners/hacktricks-training.md}}"
-}
