@@ -1,0 +1,23 @@
+project_name: "chatbot_security"
+language_servers: ["python"]
+language_backend: "LSP"
+encoding: "utf-8"
+ignore_all_files_in_gitignore: true
+ls_workspace_folders: ["."]
+ignored_paths:
+  - "data/**"
+  - "seed_docs/**"
+  - "forensicagent_output/**"
+  - "dist/**"
+  - ".agents/**"
+  - ".serena/**"
+read_only: true
+default_modes: ["no-onboarding", "no-memories"]
+fixed_tools:
+  - "initial_instructions"
+  - "find_declaration"
+  - "find_implementations"
+  - "find_referencing_symbols"
+  - "find_symbol"
+  - "get_diagnostics_for_file"
+  - "get_symbols_overview"

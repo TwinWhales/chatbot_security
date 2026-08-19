@@ -237,7 +237,8 @@ class TestInputFormatRouting:
 
 class TestRealMetadataRouting:
     @pytest.fixture(scope="class")
-    def real_tools(self):
+    @staticmethod
+    def real_tools():
         return load_all_tools(Path(__file__).resolve().parents[1] / "tools_metadata")
 
     @pytest.mark.parametrize(

@@ -29,7 +29,13 @@ dependencies = [
 [project.optional-dependencies]
 openai = ["openai>=1.0.0"]
 crawlers = ["requests>=2.31.0", "beautifulsoup4>=4.12.0"]
-dev = ["pytest>=8.0", "pytest-mock>=3.12"]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "ruff==0.16.0",
+    "pip-audit==2.10.1",
+    "detect-secrets==1.5.0",
+]
 # pip-installable forensic tools. `pip install -e .[forensic-tools]` 또는
 # `forensicagent install --all` 로 채울 수 있음. plaso 는 Windows 에서 MSVC
 # Build Tools 가 필요해서 별도 (`pip install plaso` 수동).
@@ -59,6 +65,10 @@ exclude = [
 # Windows extraction path limit used by `python -m build`.
 [tool.hatch.build.targets.sdist]
 exclude = [
+    "/.agents/**",
+    "/.codex/**",
+    "/.serena/**",
+    "/AGENTS.md",
     "/data/**",
     "/seed_docs/**",
     "/forensicagent_output/**",
@@ -72,3 +82,18 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q"
+
+[tool.ruff]
+target-version = "py310"
+extend-exclude = [
+    ".agents",
+    ".serena",
+    "data",
+    "seed_docs",
+    "forensicagent_output",
+]
+
+[tool.ruff.lint]
+# Start with correctness gates that pass the existing codebase. Tighten the
+# baseline separately instead of mixing a broad style rewrite into other work.
+select = ["E9", "F63", "F7", "F82"]

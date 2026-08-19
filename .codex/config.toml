@@ -1,0 +1,31 @@
+[mcp_servers.serena]
+command = "uvx"
+args = [
+    "--from",
+    "serena-agent==1.7.0",
+    "serena",
+    "start-mcp-server",
+    "--context=codex",
+    "--project-from-cwd",
+    "--enable-web-dashboard=false",
+]
+# Cached starts are quick; the first Windows download can take several minutes.
+startup_timeout_sec = 300
+required = false
+enabled_tools = [
+    "initial_instructions",
+    "find_declaration",
+    "find_implementations",
+    "find_referencing_symbols",
+    "find_symbol",
+    "get_diagnostics_for_file",
+    "get_symbols_overview",
+]
+
+[mcp_servers.serena.env]
+SERENA_HOME = ".serena/home"
+SERENA_USAGE_REPORTING = "false"
+UV_CACHE_DIR = ".serena/uv-cache"
+UV_PYTHON_INSTALL_DIR = ".serena/uv-python"
+UV_TOOL_BIN_DIR = ".serena/uv-bin"
+UV_TOOL_DIR = ".serena/uv-tools"

@@ -77,3 +77,7 @@ forensicagent_output/
 tools_metadata/_draft/
 # Phase 6 evaluation golden set (LLM extracted)
 eval/goldenset/
+
+# Project-local Serena runtime state; keep only the reviewed project config.
+.serena/*
+!.serena/project.yml
