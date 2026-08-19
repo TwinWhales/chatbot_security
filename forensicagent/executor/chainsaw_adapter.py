@@ -34,7 +34,17 @@ CHANNEL_EVENT_IDS: dict[str, list[str]] = {
 }
 
 # 채널을 특정하지 못한 경우 여러 로그에 공통적으로 조사 가치가 높은 ID만 본다.
-DEFAULT_EVENT_IDS: list[str] = ["104", "1102", "4104", "4624", "4625", "7045"]
+DEFAULT_EVENT_IDS: list[str] = [
+    "104",
+    "1102",
+    "4104",
+    "4624",
+    "4625",
+    "4697",
+    "4720",
+    "4732",
+    "7045",
+]
 
 
 def event_ids_for_file(filename: str) -> list[str]:
@@ -54,17 +64,38 @@ def event_ids_for_file(filename: str) -> list[str]:
 class ChainsawAdapter(GenericAdapter):
     """파일별 Event ID를 Tau 식으로 만들어 Chainsaw 검색 명령을 만든다."""
 
-    def build_command(self, evidence_path: str, **vars: str) -> list[str]:
+    def build_command(
+        self,
+        evidence_path: str,
+        *,
+        preferred_template: str | None = None,
+        **vars: str,
+    ) -> list[str]:
+        output_dir = vars.get("output_dir")
+        if not output_dir:
+            raise ValueError("ChainsawAdapter requires an isolated output_dir")
+        template = preferred_template or next(
+            (
+                command.template
+                for command in self._meta.command_templates
+                if "chainsaw search" in command.template.casefold()
+            ),
+            "",
+        )
+        if "chainsaw search" not in template.casefold():
+            raise ValueError(
+                "ChainsawAdapter supports deterministic Event-ID search only; "
+                "Sigma hunt requires caller-supplied rules and mapping paths"
+            )
+
         ids = event_ids_for_file(Path(evidence_path).name)
         argv = ["chainsaw", "search"]
         for event_id in ids:
             argv.extend(["-t", f"Event.System.EventID: ={event_id}"])
         if len(ids) > 1:
             argv.append("--match-any")
-        argv.extend(["--json", evidence_path])
-        self.selected_template = (
-            "chainsaw search -t {channel_event_ids} --match-any --json "
-            "{evidence_path}"
-        )
+        output_path = Path(output_dir) / "chainsaw.jsonl"
+        argv.extend(["--jsonl", "--output", str(output_path), evidence_path])
+        self.selected_template = template
         logger.info("chainsaw: %s -> Tau IDs %s", Path(evidence_path).name, ids)
         return argv

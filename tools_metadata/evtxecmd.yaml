@@ -10,7 +10,6 @@ applicable_evidence_types:
 
 platform:
   - windows
-  - linux
 
 input_format:
   - ext:.evtx
@@ -38,7 +37,7 @@ command_templates:
 usage_description: |
   EvtxECmd 는 Windows .evtx 이벤트 로그 파서. Eric Zimmerman 의 Maps 시스템
   으로 알려진 이벤트 유형의 XML payload 를 사람이 읽기 좋은 CSV 컬럼으로
-  정규화한다. chainsaw 가 Sigma 룰 기반 위협 헌팅이라면 EvtxECmd 는 raw
+  정규화한다. chainsaw 가 채널별 Event ID를 빠르게 추출한다면 EvtxECmd 는 raw
   데이터 추출 + 사람 분석가가 보기 좋은 정규화에 중점. 두 도구는 보완적 -
   chainsaw 로 알려진 패턴 매칭하고 EvtxECmd 로 모든 로그를 timeline 에
   넣어 검토. 출력 형식이 CSV 라 Timeline Explorer 와 직접 연계.
@@ -51,19 +50,15 @@ suspicious_indicators:
   - id: failed_logon_burst
     pattern: "EventID 4625 (실패) 가 동일 source_ip 또는 동일 target_username 으로 10건 이상"
     severity_baseline: medium
-    description: "Brute force 시도. 후속 4624 (성공) 매칭 필수."
+    description: "5분 내 반복 실패 후보. 후속 4624 성공 여부를 별도로 확인한다."
   - id: service_install_4697
-    pattern: "EventID 4697 (서비스 설치) + ServicePath 가 %TEMP% / %APPDATA% / Public"
+    pattern: "EventID 4697 또는 7045 (서비스 설치) + ServicePath/ImagePath 가 %TEMP% / %APPDATA% / Public"
     severity_baseline: high
     description: "비표준 경로의 서비스 설치는 흔한 persistence"
   - id: account_creation_4720
     pattern: "EventID 4720 (계정 생성) + 곧이어 4732 (privileged group 추가)"
     severity_baseline: high
     description: "공격자가 backdoor 계정 생성 후 권한 부여하는 전형 패턴"
-  - id: ntds_dump_attempt
-    pattern: "EventID 4799 (security-enabled group enumeration) 또는 ntds.dit 접근 흔적"
-    severity_baseline: critical
-    description: "도메인 자격증명 덤프 시도 (DCSync, mimikatz)"
   - id: clear_log_event
     pattern: "EventID 1102 (Security log cleared) 또는 104 (System log cleared)"
     severity_baseline: critical

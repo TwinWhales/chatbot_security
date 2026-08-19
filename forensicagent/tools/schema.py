@@ -30,7 +30,7 @@ EvidenceTypeStr = Literal[
     "unknown",
 ]
 
-OutputFormat = Literal["json", "csv", "text", "binary"]
+OutputFormat = Literal["json", "jsonl", "csv", "text", "binary"]
 OutputSize = Literal["small", "medium", "large"]
 Runtime = Literal["short", "medium", "long"]
 PlatformStr = Literal["windows", "linux", "macos", "any"]
@@ -113,7 +113,18 @@ class ToolMetadata(BaseModel):
         min_length=1,
         description="Selector 결정론 필터의 핵심.",
     )
-    platform: list[PlatformStr] = Field(default_factory=lambda: ["any"])
+    platform: list[PlatformStr] = Field(
+        default_factory=lambda: ["any"],
+        description="Host operating systems on which the tool can run.",
+    )
+    applicable_evidence_platforms: list[PlatformStr] = Field(
+        default_factory=lambda: ["any"],
+        min_length=1,
+        description=(
+            "Target operating systems supported by the declared commands. "
+            "Evidence with an unknown platform remains eligible."
+        ),
+    )
     input_format: list[str] = Field(
         default_factory=list,
         description=(
@@ -124,8 +135,8 @@ class ToolMetadata(BaseModel):
     target_mode: TargetMode = Field(
         "per_file",
         description=(
-            "per_file runs one isolated job per matching artifact; scan_root "
-            "runs one job for a code/text-only scan tree."
+            "Legacy scheduling hint. External invocations remain scoped to "
+            "scanner-inventoried matching files, including scan_root tools."
         ),
     )
 

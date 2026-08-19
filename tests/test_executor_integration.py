@@ -5,13 +5,15 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from forensicagent import config as settings
 from forensicagent.executor.adapter import GenericAdapter
 from forensicagent.executor.executor import _build_jobs, execute
-from forensicagent.executor.runner import run_tool
-from forensicagent.executor.types import ExecutionResult
+from forensicagent.executor.runner import collect_generated_artifacts, run_tool
+from forensicagent.executor.types import MAX_INLINE_JSON_BYTES, ExecutionResult
 from forensicagent.selector.types import Plan, RunSpec, ToolSelection
 from forensicagent.tools.schema import CommandTemplate, InstallCheck, ToolMetadata
 
@@ -99,6 +101,61 @@ def test_generated_output_manifest_and_stdout_compatibility(tmp_path):
     payload = result.to_dict()
     assert payload["artifacts"][0]["sha256"]
     assert payload["warnings"] == []
+
+
+def test_generated_reparse_point_is_not_followed(tmp_path, monkeypatch):
+    generated = tmp_path / "generated"
+    generated.mkdir()
+
+    class ReparseEntry:
+        path = str(generated / "junction")
+
+        def stat(self, *, follow_symlinks):
+            assert follow_symlinks is False
+            return SimpleNamespace(st_file_attributes=0x400)
+
+        def is_symlink(self):
+            return False
+
+    monkeypatch.setattr(
+        "forensicagent.executor.runner.os.scandir",
+        lambda directory: [ReparseEntry()],
+    )
+
+    artifacts, warnings = collect_generated_artifacts(
+        generated,
+        default_format="text",
+    )
+
+    assert artifacts == []
+    assert any("link/reparse point" in warning for warning in warnings)
+
+
+def test_large_json_stdout_stays_artifact_and_is_not_embedded(tmp_path):
+    script = tmp_path / "large_json.py"
+    script.write_text(
+        "import json\n"
+        "print(json.dumps({'items': [{'EventID': 4624, "
+        f"'padding': 'x' * {MAX_INLINE_JSON_BYTES}}}]}}))\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {{evidence_path}}"
+    metadata = _metadata("largejson", template, output_format="json")
+
+    result = execute(
+        Plan(selected_tools=[_selection("largejson", template, [str(script)])]),
+        {"largejson": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+
+    assert result.status == "success"
+    assert result.output_size_bytes > MAX_INLINE_JSON_BYTES
+    assert result.parsed_output is None
+    assert any("eager parse/report embedding skipped" in item for item in result.warnings)
+    stdout = next(item for item in result.artifacts if item.role == "stdout")
+    assert Path(stdout.path).is_file()
+    assert stdout.size_bytes == result.output_size_bytes
+    assert result.to_dict()["parsed_output"] is None
 
 
 def test_same_evidence_filename_jobs_are_isolated(tmp_path):
@@ -218,6 +275,27 @@ def test_prerequisite_validation_runs_once_per_tool(tmp_path, monkeypatch):
     assert calls == 1
 
 
+def test_prerequisite_check_uses_trusted_project_cwd(tmp_path, monkeypatch):
+    trusted = tmp_path / "trusted-project"
+    hostile = tmp_path / "attacker-evidence"
+    trusted.mkdir()
+    hostile.mkdir()
+    (hostile / "rogue-config").write_text("attacker-controlled", encoding="utf-8")
+    probe = trusted / "show_cwd.py"
+    probe.write_text("from pathlib import Path\nprint(Path.cwd())\n", encoding="utf-8")
+    metadata = _metadata("cwd-preflight", f"{sys.executable} {{evidence_path}}")
+    metadata.install_check = InstallCheck(
+        command=f"{sys.executable} {probe}",
+        expected_pattern=str(trusted.resolve()),
+    )
+    monkeypatch.setattr(settings, "PROJECT_ROOT", trusted)
+    monkeypatch.chdir(hostile)
+
+    ok, detail = GenericAdapter(metadata).validate_prerequisites()
+
+    assert ok, detail
+
+
 def test_jobs_and_single_worker_execution_are_priority_ordered(tmp_path, monkeypatch):
     template = f"{sys.executable} {{evidence_path}}"
     low_meta = _metadata("low", template, output_format="text")
@@ -318,7 +396,7 @@ def test_runner_timeout_returns_manifested_streams(tmp_path):
         [sys.executable, str(sleeper)],
         str(sleeper),
         tmp_path / "job",
-        timeout_sec=0.1,  # type: ignore[arg-type]
+        timeout_sec=1,
     )
 
     assert result.status == "timeout"

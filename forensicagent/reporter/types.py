@@ -56,6 +56,11 @@ class Summary:
     tools_failed: int = 0
     tools_skipped: int = 0
     total_ms: int = 0
+    finding_limit_reached: bool = False
+    coverage_truncated: bool = False
+    depth_limit_hit: bool = False
+    unreadable_paths: int = 0
+    reparse_paths: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +71,11 @@ class Summary:
             "tools_failed": self.tools_failed,
             "tools_skipped": self.tools_skipped,
             "total_ms": self.total_ms,
+            "finding_limit_reached": self.finding_limit_reached,
+            "coverage_truncated": self.coverage_truncated,
+            "depth_limit_hit": self.depth_limit_hit,
+            "unreadable_paths": self.unreadable_paths,
+            "reparse_paths": self.reparse_paths,
         }
 
 

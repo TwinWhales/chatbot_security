@@ -7,6 +7,8 @@ CLI 플래그 매핑:
   --auto       Stage 2 까지 실행 후 사용자 승인 없이 다음으로 (CLI 영역).
   --quick      Stage 1 이후 estimated_runtime == "short" 만 통과.
   --tools t1,t2  Stage 1/2 모두 건너뛰고 명시 도구만 (force_tools).
+Forced choices still pass the deterministic host/evidence/input gate. RAG and
+LLM may reorder eligible tools but cannot expand the eligible set.
 """
 
 from __future__ import annotations

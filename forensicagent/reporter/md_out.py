@@ -87,6 +87,26 @@ def write_md(report: Report, path: str | Path) -> Path:
         cat_line = ", ".join(f"{_md_text(c)}={n}" for c, n in s.by_category.items())
         lines.append(f"- by category: {cat_line}")
     lines.append(f"- total ms: {s.total_ms}")
+    scan_status = (
+        "**incomplete**"
+        if s.depth_limit_hit or s.unreadable_paths or s.reparse_paths
+        else "complete"
+    )
+    lines.append(
+        f"- scan coverage: {scan_status} "
+        f"(depth_limit_hit={str(s.depth_limit_hit).lower()}, "
+        f"unreadable_paths={s.unreadable_paths}, reparse_paths={s.reparse_paths})"
+    )
+    if s.finding_limit_reached:
+        lines.append(
+            "- finding limit reached: **yes**; retained findings are "
+            "severity-prioritized and the result set may be incomplete"
+        )
+    if s.coverage_truncated:
+        lines.append(
+            "- analysis coverage truncated: **yes**; review the per-tool "
+            "warnings and retained raw artifacts"
+        )
     lines.append("")
 
     # ---- Evidence inventory ----
@@ -130,6 +150,10 @@ def write_md(report: Report, path: str | Path) -> Path:
             lines.append("")
             for tid, f in sev_items:
                 lines.append(f"- **[{_md_text(tid)}]** {_md_text(f.title)}")
+                lines.append(
+                    f"    - rule/source/confidence: {_inline_code(f.rule_id or 'n/a')} / "
+                    f"{_md_text(f.source)} / {f.confidence:.2f}"
+                )
                 if f.description:
                     lines.append(f"    - {_md_text(f.description)}")
                 if f.evidence_ref.source_file:
@@ -176,14 +200,21 @@ def write_md(report: Report, path: str | Path) -> Path:
             lines.append(
                 f"- analyzer: case={b.analysis.case_used} "
                 f"llm_invoked={b.analysis.llm_invoked} "
-                f"llm_failed={b.analysis.llm_failed}"
+                f"llm_failed={b.analysis.llm_failed} "
+                f"finding_limit_reached={b.analysis.finding_limit_reached} "
+                f"coverage_truncated={bool(b.analysis.coverage_warnings)}"
             )
             lines.append(f"- summary: {_md_text(b.analysis.summary)}")
+            for warning in b.analysis.coverage_warnings:
+                lines.append(f"    - coverage warning: {_md_text(warning)}")
         lines.append("")
 
     # ---- Appendix: skipped plan items ----
     if report.execution_plan and report.execution_plan.skipped_no_evidence:
         lines.append("## Appendix: tools skipped (no matching evidence)")
+        lines.append("")
+        for tid in report.execution_plan.skipped_no_evidence:
+            lines.append(f"- {_md_text(tid)}")
         lines.append("")
 
     if report.execution_plan and report.execution_plan.unhandled_evidence:
@@ -191,9 +222,6 @@ def write_md(report: Report, path: str | Path) -> Path:
         lines.append("")
         for path_value in report.execution_plan.unhandled_evidence:
             lines.append(f"- {_inline_code(path_value)}")
-        lines.append("")
-        for tid in report.execution_plan.skipped_no_evidence:
-            lines.append(f"- {tid}")
         lines.append("")
 
     p.write_text("\n".join(lines), encoding="utf-8")

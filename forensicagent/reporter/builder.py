@@ -6,7 +6,12 @@ import platform
 from collections import defaultdict
 
 from forensicagent import __version__
-from forensicagent.analyzer.types import ToolAnalysis
+from forensicagent.analyzer.types import (
+    MAX_RETAINED_FINDINGS,
+    SEVERITY_RANK,
+    Finding,
+    ToolAnalysis,
+)
 from forensicagent.executor.types import ExecutionBundle
 from forensicagent.reporter.types import (
     Report,
@@ -26,6 +31,28 @@ def _host_info() -> dict[str, str]:
         "machine": platform.machine(),
         "python": platform.python_version(),
     }
+
+
+def _dedupe_and_cap(analysis: ToolAnalysis) -> None:
+    unique: dict[str, Finding] = {}
+    for finding in analysis.findings:
+        key = finding.fingerprint or finding.refresh_fingerprint()
+        previous = unique.get(key)
+        if previous is None or (
+            SEVERITY_RANK[finding.severity], finding.confidence
+        ) > (SEVERITY_RANK[previous.severity], previous.confidence):
+            unique[key] = finding
+    retained = sorted(
+        unique.values(),
+        key=lambda finding: (
+            SEVERITY_RANK[finding.severity],
+            finding.confidence,
+        ),
+        reverse=True,
+    )
+    if len(retained) > MAX_RETAINED_FINDINGS:
+        analysis.finding_limit_reached = True
+    analysis.findings = retained[:MAX_RETAINED_FINDINGS]
 
 
 def build(
@@ -68,28 +95,27 @@ def build(
                 case_used=a.case_used,
                 llm_invoked=a.llm_invoked,
                 llm_failed=a.llm_failed,
+                finding_limit_reached=a.finding_limit_reached,
+                coverage_warnings=list(a.coverage_warnings),
             )
         else:
             existing.findings.extend(a.findings)
             existing.llm_invoked = existing.llm_invoked or a.llm_invoked
             existing.llm_failed = existing.llm_failed or a.llm_failed
+            existing.finding_limit_reached = (
+                existing.finding_limit_reached or a.finding_limit_reached
+            )
+            existing.coverage_warnings = list(
+                dict.fromkeys(existing.coverage_warnings + a.coverage_warnings)
+            )
             # case 는 더 보수적인 쪽 (A < B < C) 유지.
             order = {"A": 0, "B": 1, "C": 2}
             if order.get(a.case_used, 0) > order.get(existing.case_used, 0):
                 existing.case_used = a.case_used
+        _dedupe_and_cap(merged_analyses[a.tool_id])
 
     # 동일 규칙/증거가 여러 exporter 또는 LLM+rule 경로에서 반복되면 안정적인
     # fingerprint로 한 번만 보고한다. 더 높은 severity 결과를 유지한다.
-    from forensicagent.analyzer.types import SEVERITY_RANK
-    for analysis in merged_analyses.values():
-        unique: dict[str, object] = {}
-        for finding in analysis.findings:
-            key = finding.fingerprint or finding.refresh_fingerprint()
-            previous = unique.get(key)
-            if previous is None or SEVERITY_RANK[finding.severity] > SEVERITY_RANK[getattr(previous, "severity")]:
-                unique[key] = finding
-        analysis.findings = list(unique.values())  # type: ignore[assignment]
-
     # summary 재생성 (머지 후 정확한 카운트). 실행 실패/skip은 무탐지와
     # 구분한다. 이것을 덮어쓰면 "도구가 안 돌았는데 0 findings"로 오해한다.
     for a in merged_analyses.values():
@@ -120,6 +146,13 @@ def build(
             cat[f.category] = cat.get(f.category, 0) + 1
         top = ", ".join(f"{k}({v})" for k, v in sorted(cat.items(), key=lambda x: -x[1])[:3]) or "n/a"
         a.summary = f"{len(a.findings)} findings ({sev}); top: {top}"
+        if a.finding_limit_reached:
+            a.summary += "; finding_limit_reached=true"
+        if a.coverage_warnings:
+            a.summary += (
+                f"; coverage_truncated=true; coverage_warnings="
+                f"{len(a.coverage_warnings)}"
+            )
 
     for a in merged_analyses.values():
         b = bundle_map.setdefault(a.tool_id, ToolBundle(tool_id=a.tool_id))
@@ -168,6 +201,16 @@ def build(
         tools_failed=tools_failed,
         tools_skipped=tools_skipped,
         total_ms=total_ms,
+        finding_limit_reached=any(
+            analysis.finding_limit_reached
+            for analysis in merged_analyses.values()
+        ),
+        coverage_truncated=any(
+            analysis.coverage_warnings for analysis in merged_analyses.values()
+        ),
+        depth_limit_hit=inventory.depth_limit_hit,
+        unreadable_paths=inventory.unreadable_paths,
+        reparse_paths=inventory.reparse_paths,
     )
 
     return Report(

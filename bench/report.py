@@ -19,6 +19,8 @@ _METHODOLOGY = """\
 
 - **Goal**: quantify how much RAG reranking improves the Selector's tool
   *ordering* over a deterministic-only baseline.
+- **Host contract**: official results are generated on Windows; the harness
+  rejects other operating systems before loading tools or rebuilding an index.
 - **Golden set**: {n_cases} SYNTHETIC, hand-labeled English cases (one labeler).
   Each case = an evidence inventory (evidence_type + filenames) + optional
   English scenario + per-tool relevance grades (2=core, 1=secondary,
@@ -30,9 +32,13 @@ _METHODOLOGY = """\
   filter order (tool_metadata load order), which carries no semantic signal.
 - **RAG**: `use_rag=True, use_llm=False` -> candidates reranked by cosine
   similarity of the tool-metadata corpus to an (evidence + scenario) query,
-  embedded with all-MiniLM-L6-v2.
+  embedded with `{embedding_model}`. Retrieval uses a minimum similarity of
+  {rag_min_similarity}; reranking also requires a full eligible-set score
+  spread of at least {rag_min_score_margin}.
 - **Metrics**: NDCG@k uses exponential gain (2^rel - 1)/log2(rank+1); MRR,
   Precision@k, Recall@k use relevance >= 1 as the "relevant" threshold.
+  NDCG's ideal ranking and Recall's denominator use every gold-labeled tool,
+  including relevant tools omitted by the Selector.
   k in {ks}. Reported values are means across cases.
 
 ## Limitations (read before trusting the numbers)
@@ -43,8 +49,8 @@ _METHODOLOGY = """\
   where ordering is trivial (metric == 1.0 regardless of mode) and dilutes the
   measured delta. The signal lives in multi-tool cases (registry_hive,
   evtx_log, source_code_*).
-- all-MiniLM-L6-v2 is English-centric; this bench is English on purpose. Korean
-  scenarios would score worse (swap FORENSICAGENT_EMBEDDING_MODEL for bge-m3).
+- The golden scenarios are English only. Korean and other multilingual
+  performance is not measured by this benchmark.
 - Ordering quality only. This does NOT measure end-to-end triage correctness,
   tool execution, or finding quality.
 - RAG safety property (never promotes a tool outside Stage 1) and graceful
@@ -60,7 +66,10 @@ def render_terminal(result: dict[str, Any], console) -> None:
     from rich.table import Table
 
     cfg = result["config"]
-    console.print(f"[bold]RAG benchmark[/] - {cfg['n_cases']} cases, {cfg['n_tools']} tools")
+    console.print(
+        f"[bold]RAG tool-selection ranking benchmark[/] - "
+        f"{cfg['n_cases']} cases, {cfg['n_tools']} tools"
+    )
     console.print(f"[dim]{cfg['llm_note']}[/]")
     idx = result.get("index", {})
     if idx.get("rebuilt"):
@@ -68,6 +77,22 @@ def render_terminal(result: dict[str, Any], console) -> None:
             f"[dim]index build: {idx.get('tools_indexed')} tools, "
             f"embed {idx.get('embedding_ms')}ms, chroma {idx.get('chroma_ms')}ms, "
             f"total {idx.get('elapsed_s')}s[/]"
+        )
+    if "freshness_verified" in idx:
+        state = "verified" if idx["freshness_verified"] else "unverified"
+        console.print(
+            f"[dim]index freshness: {state} "
+            f"({idx.get('freshness_contract')}, "
+            f"tool docs {idx.get('tool_documents_sha256')})[/]"
+        )
+    repro = result.get("reproducibility", {})
+    if repro:
+        host = repro.get("host", {})
+        python = repro.get("python", {})
+        console.print(
+            f"[dim]repro: {repro.get('generated_at_utc')} | "
+            f"{host.get('os')} {host.get('release')} {host.get('machine')} | "
+            f"{python.get('implementation')} {python.get('version')}[/]"
         )
     console.print(f"[dim]RAG actually reranked {cfg['rag_used_cases']}/{cfg['n_cases']} cases[/]\n")
 
@@ -117,11 +142,13 @@ def to_markdown(result: dict[str, Any]) -> str:
     agg = result["aggregate"]
     modes = list(agg.keys())
 
-    parts = ["# forensicagent RAG benchmark\n"]
+    parts = ["# forensicagent RAG tool-selection ranking benchmark\n"]
     parts.append(
         f"- cases: **{cfg['n_cases']}** | tools: **{cfg['n_tools']}** | "
         f"k: {cfg['ks']} | RAG reranked {cfg['rag_used_cases']}/{cfg['n_cases']} cases"
     )
+    parts.append(f"- scope: **{cfg.get('scope', 'tool-selection ranking only')}**")
+    parts.append(f"- host contract: **{cfg.get('host_contract', 'not recorded')}**")
     parts.append(f"- {cfg['llm_note']}")
     idx = result.get("index", {})
     if idx.get("rebuilt"):
@@ -130,7 +157,45 @@ def to_markdown(result: dict[str, Any]) -> str:
             f"embed {idx.get('embedding_ms')}ms, chroma {idx.get('chroma_ms')}ms, "
             f"total {idx.get('elapsed_s')}s"
         )
+    if "freshness_verified" in idx:
+        state = "verified" if idx["freshness_verified"] else "unverified"
+        parts.append(
+            f"- index freshness: **{state}** "
+            f"({idx.get('freshness_contract')}); tool-documents SHA-256: "
+            f"`{idx.get('tool_documents_sha256')}`"
+        )
     parts.append("")
+
+    # reproducibility
+    repro = result.get("reproducibility", {})
+    if repro:
+        host = repro.get("host", {})
+        python = repro.get("python", {})
+        packages = repro.get("package_versions", {})
+        package_text = ", ".join(
+            f"{name}={version if version is not None else 'not installed'}"
+            for name, version in packages.items()
+        )
+        parts.append("## Reproducibility metadata\n")
+        parts.append(f"- generated (UTC): `{repro.get('generated_at_utc')}`")
+        parts.append(
+            f"- host: `{host.get('os')} {host.get('release')} "
+            f"{host.get('machine')}`; Python: "
+            f"`{python.get('implementation')} {python.get('version')}`"
+        )
+        parts.append(
+            f"- embedding: `{repro.get('embedding_model')}`; "
+            f"top-k: `{repro.get('rag_top_k')}`; minimum similarity: "
+            f"`{repro.get('rag_min_similarity')}`; minimum score spread: "
+            f"`{repro.get('rag_min_score_margin')}`"
+        )
+        parts.append(f"- golden-set SHA-256: `{repro.get('golden_sha256')}`")
+        parts.append(
+            "- tool-documents SHA-256: "
+            f"`{repro.get('tool_documents_sha256')}`"
+        )
+        parts.append(f"- packages: {package_text}")
+        parts.append("")
 
     # aggregate
     parts.append("## Aggregate (mean over cases)\n")
@@ -168,9 +233,9 @@ def to_markdown(result: dict[str, Any]) -> str:
             row["id"],
             str(row["n_eligible"]),
             "Y" if row["scenario"] else "-",
-            f"{det.get('ndcg@3', 0):.3f}",
-            f"{rag.get('ndcg@3', 0):.3f}",
-            f"{rag.get('ndcg@3', 0) - det.get('ndcg@3', 0):+.3f}",
+            f"{det.get('ndcg@3', 0):.4f}",
+            f"{rag.get('ndcg@3', 0):.4f}",
+            f"{rag.get('ndcg@3', 0) - det.get('ndcg@3', 0):+.4f}",
             " > ".join(rag.get("order", [])[:4]),
         ])
     parts.append(_md_table(
@@ -179,7 +244,14 @@ def to_markdown(result: dict[str, Any]) -> str:
     ))
     parts.append("")
 
-    parts.append(_METHODOLOGY.format(n_cases=cfg["n_cases"], n_tools=cfg["n_tools"], ks=cfg["ks"]))
+    parts.append(_METHODOLOGY.format(
+        n_cases=cfg["n_cases"],
+        n_tools=cfg["n_tools"],
+        ks=cfg["ks"],
+        embedding_model=repro.get("embedding_model", "not recorded"),
+        rag_min_similarity=repro.get("rag_min_similarity", "not recorded"),
+        rag_min_score_margin=repro.get("rag_min_score_margin", "not recorded"),
+    ))
     return "\n".join(parts)
 
 

@@ -8,21 +8,29 @@ is deliberately no natural-language/substring fallback: prose in a YAML
 from __future__ import annotations
 
 import ipaddress
+import heapq
 import json
 import logging
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from itertools import chain
 from typing import Any, Callable, Iterable
 
-from forensicagent.analyzer.types import EvidenceRef, Finding, Severity
+from forensicagent import config as settings
+from forensicagent.analyzer.types import (
+    MAX_RETAINED_FINDINGS,
+    SEVERITY_RANK,
+    EvidenceRef,
+    Finding,
+    Severity,
+)
 from forensicagent.tools.schema import SuspiciousIndicator, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
 Matcher = Callable[[Any, str, ToolMetadata, SuspiciousIndicator], list[Finding]]
-MAX_RULE_FINDINGS = 500
+MAX_RULE_FINDINGS = MAX_RETAINED_FINDINGS
 
 
 # ---------------------------------------------------------------------------
@@ -45,15 +53,38 @@ _TEMP_MARKERS = (
 _CREDENTIAL_TOOLS = (
     "mimikatz",
     "lazagne",
-    "procdump",
     "nanodump",
     "sekurlsa",
     "lsassy",
-    "comsvcs",
-    "nltest",
-    "dsquery",
-    "wmic",
 )
+_CREDENTIAL_TOOL_RE = re.compile(
+    rf"(?i)(?<![a-z0-9])(?:{'|'.join(_CREDENTIAL_TOOLS)})(?:\.exe)?(?![a-z0-9])"
+)
+_PRIVILEGED_LOCAL_GROUP_SIDS = {
+    "s-1-5-32-544",  # Administrators
+    "s-1-5-32-548",  # Account Operators
+    "s-1-5-32-549",  # Server Operators
+    "s-1-5-32-550",  # Print Operators
+    "s-1-5-32-551",  # Backup Operators
+    "s-1-5-32-555",  # Remote Desktop Users
+    "s-1-5-32-556",  # Network Configuration Operators
+    "s-1-5-32-569",  # Cryptographic Operators
+    "s-1-5-32-578",  # Hyper-V Administrators
+    "s-1-5-32-580",  # Remote Management Users
+}
+_PRIVILEGED_LOCAL_GROUP_NAMES = {
+    "administrators",
+    "account operators",
+    "server operators",
+    "print operators",
+    "backup operators",
+    "remote desktop users",
+    "network configuration operators",
+    "cryptographic operators",
+    "hyper-v administrators",
+    "remote management users",
+}
+_ACCOUNT_PRIVILEGE_WINDOW_SECONDS = 60 * 60
 _RUN_KEY_RE = re.compile(
     r"(?i)(?:^|[\\/\s])run(?:once|services)?(?:$|[\\/\s:=])"
 )
@@ -172,6 +203,16 @@ def _event_id(row: dict[str, Any]) -> int | None:
     return _int_value(_value(row, "event_id", "eventid", "id"))
 
 
+def cross_batch_correlation_family(row: dict[str, Any]) -> str | None:
+    """Return the bounded carry family for cross-row event correlations."""
+    event_id = _event_id(row)
+    if event_id in {4624, 4625}:
+        return "logon"
+    if event_id in {4720, 4732}:
+        return "account"
+    return None
+
+
 def _timestamp_text(row: dict[str, Any]) -> str:
     return _text(
         _value(
@@ -269,8 +310,7 @@ def _path_is_suspicious(path: str) -> bool:
 
 
 def _contains_credential_tool(text: str) -> bool:
-    lowered = text.casefold()
-    return any(name in lowered for name in _CREDENTIAL_TOOLS)
+    return _CREDENTIAL_TOOL_RE.search(text) is not None
 
 
 def _global_ip(value: str) -> bool:
@@ -562,7 +602,7 @@ def _match_userassist_temp(
                 row=row,
                 raw_excerpt=blob,
                 followup="Recover and hash the executable and correlate its last-run timestamp.",
-                confidence=0.82 if ind.id == "userassist_recent_exec_temp" else 0.9,
+                confidence=0.9 if ind.id == "userassist_unsigned_in_temp" else 0.82,
             )
         )
     return out
@@ -902,7 +942,6 @@ def _match_bandit_issue(
         )
         filename = _text(_value(row, "filename", "path"))
         line = _int_value(_value(row, "line_number", "line"))
-        code = _text(_value(row, "code", "lines"))
         confidence = {
             "high": 0.95,
             "medium": 0.8,
@@ -913,10 +952,12 @@ def _match_bandit_issue(
                 rule_id=f"bandit:{test_id}",
                 severity=severity,
                 category="code_security",
-                title=f"[bandit:{test_id}] {issue[:160]}",
-                description=f"{filename}:{line or '?'} - {issue}",
+                title=f"[bandit:{test_id}] finding",
+                description=(
+                    f"{filename}:{line or '?'} - Bandit reported rule {test_id}."
+                ),
                 row=row,
-                raw_excerpt=code or _excerpt(row),
+                raw_excerpt=f"{filename}:{line or '?'}; test_id={test_id}",
                 source_file=filename,
                 followup="Review the Bandit rule and the complete data flow at this location.",
                 confidence=confidence,
@@ -946,7 +987,6 @@ def _match_semgrep_issue(
         message = _text(_value(row, "message"))
         if check_id == "unknown" and not message:
             continue
-        lines = _text(_value(row, "lines", "code"))
         fix = _text(_value(row, "fix"))
         out.append(
             _make_finding(
@@ -954,11 +994,11 @@ def _match_semgrep_issue(
                 severity=severity,
                 category="code_security",
                 title=f"[semgrep:{check_id}]",
-                description=f"{path}:{line or '?'} - {message}",
+                description=f"{path}:{line or '?'} - Semgrep reported rule {check_id}.",
                 row=row,
-                raw_excerpt=lines or _excerpt(row),
+                raw_excerpt=f"{path}:{line or '?'}; check_id={check_id}",
                 source_file=path,
-                followup=fix or "Review the Semgrep rule and validate exploitability.",
+                followup="Review the Semgrep rule and validate exploitability.",
                 confidence=0.85,
             )
         )
@@ -976,9 +1016,7 @@ _SENSITIVE_KEYS = {
 
 
 def _placeholder_secret(path: str, secret: str) -> bool:
-    name = Path(path).name.casefold()
-    if name in {".env.example", ".env.sample", ".env.template"}:
-        return True
+    del path  # Placeholder status is value-based; example files can leak real keys.
     compact = re.sub(r"[\s_\-]+", "", secret).casefold()
     if not compact:
         return True
@@ -1199,7 +1237,7 @@ def _match_rdp_external(
 def _match_rdp_offhours(
     parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
 ) -> list[Finding]:
-    """Detect RemoteInteractive logons outside a conservative 07:00-20:00 window."""
+    """Detect RemoteInteractive logons outside the configured local work window."""
     out: list[Finding] = []
     for row in _rows(parsed):
         if _event_id(row) != 4624:
@@ -1207,7 +1245,21 @@ def _match_rdp_offhours(
         if _int_value(_value(row, "logon_type", "logontype")) != 10:
             continue
         timestamp = _parse_timestamp(_timestamp_text(row))
-        if timestamp is None or 7 <= timestamp.hour < 20:
+        if timestamp is None:
+            continue
+        local_time = timestamp.astimezone(
+            timezone(timedelta(minutes=settings.RDP_UTC_OFFSET_MINUTES))
+        )
+        start = settings.RDP_BUSINESS_START_HOUR
+        end = settings.RDP_BUSINESS_END_HOUR
+        in_business_hours = (
+            True
+            if start == end
+            else start <= local_time.hour < end
+            if start < end
+            else local_time.hour >= start or local_time.hour < end
+        )
+        if in_business_hours:
             continue
         out.append(
             _make_finding(
@@ -1215,12 +1267,16 @@ def _match_rdp_offhours(
                 severity=ind.severity_baseline,
                 category="initial_access",
                 title="RDP logon outside business hours",
-                description=f"Event ID 4624 LogonType 10 occurred at {timestamp.isoformat()}.",
+                description=(
+                    "Event ID 4624 LogonType 10 occurred at "
+                    f"{local_time.isoformat()}, outside the configured "
+                    f"{start:02d}:00-{end:02d}:00 business window."
+                ),
                 row=row,
                 event_id=4624,
                 timestamp=timestamp.isoformat(),
                 followup="Validate the account, source host, and approved remote-access schedule.",
-                confidence=0.86,
+                confidence=0.78,
             )
         )
     return out
@@ -1231,7 +1287,8 @@ def _match_service_install_temp(
 ) -> list[Finding]:
     out: list[Finding] = []
     for row in _rows(parsed):
-        if _event_id(row) != 4697:
+        event = _event_id(row)
+        if event not in {4697, 7045}:
             continue
         image_path = _text(
             _value(
@@ -1256,7 +1313,7 @@ def _match_service_install_temp(
                 description=image_path,
                 row=row,
                 raw_excerpt=image_path,
-                event_id=4697,
+                event_id=event,
                 followup="Inspect the service binary, creator account, signature, and process tree.",
                 confidence=0.97,
             )
@@ -1311,13 +1368,18 @@ def _match_failed_logon_burst(
         if not matched:
             continue
         first_ts, first_row = matched[0]
+        window_text = (
+            " within five minutes" if first_ts else " (time window unavailable)"
+        )
         out.append(
             _make_finding(
                 rule_id=ind.id,
                 severity=ind.severity_baseline,
                 category="credential_access",
                 title="Failed-logon burst",
-                description=f"{len(matched)} Event ID 4625 records for {key} within five minutes.",
+                description=(
+                    f"{len(matched)} Event ID 4625 records for {key}{window_text}."
+                ),
                 row=first_row,
                 raw_excerpt=f"failed-logon-burst key={key} count={len(matched)}",
                 event_id=4625,
@@ -1400,10 +1462,23 @@ def _event_account(row: dict[str, Any], event_id: int) -> str:
     )
 
 
+def _is_privileged_local_group(row: dict[str, Any]) -> bool:
+    group_sid = _text(
+        _value(row, "target_sid", "targetsid", "group_sid", "groupsid")
+    ).strip().casefold()
+    group_name = _account(
+        _value(row, "target_user_name", "targetusername", "group_name", "groupname")
+    )
+    return (
+        group_sid in _PRIVILEGED_LOCAL_GROUP_SIDS
+        or group_name in _PRIVILEGED_LOCAL_GROUP_NAMES
+    )
+
+
 def _match_account_created_then_grouped(
     parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
 ) -> list[Finding]:
-    created: dict[str, tuple[int, dict[str, Any]]] = {}
+    created: dict[str, tuple[int, datetime | None, dict[str, Any]]] = {}
     emitted: set[str] = set()
     out: list[Finding] = []
     for index, row in enumerate(_rows(parsed)):
@@ -1414,23 +1489,41 @@ def _match_account_created_then_grouped(
         if not account:
             continue
         if event == 4720:
-            created.setdefault(account, (index, row))
+            created[account] = (index, _parse_timestamp(_timestamp_text(row)), row)
             continue
-        if account not in created or account in emitted or created[account][0] >= index:
+        if (
+            account not in created
+            or account in emitted
+            or created[account][0] >= index
+            or not _is_privileged_local_group(row)
+        ):
             continue
+        created_timestamp = created[account][1]
+        grouped_timestamp = _parse_timestamp(_timestamp_text(row))
+        if created_timestamp is not None and grouped_timestamp is not None:
+            elapsed = (grouped_timestamp - created_timestamp).total_seconds()
+            if not 0 <= elapsed <= _ACCOUNT_PRIVILEGE_WINDOW_SECONDS:
+                continue
         emitted.add(account)
         out.append(
             _make_finding(
                 rule_id=ind.id,
                 severity=ind.severity_baseline,
                 category="persistence",
-                title="New account added to a local group",
-                description=f"Account {account} was created (4720) and then added to a group (4732).",
+                title="New account added to a privileged local group",
+                description=(
+                    f"Account {account} was created (4720) and then added to a "
+                    "privileged local group (4732)."
+                ),
                 row=row,
                 raw_excerpt=f"account={account}; events=4720->4732",
                 event_id=4732,
                 followup="Validate the account owner and inspect all activity by the new account.",
-                confidence=0.97,
+                confidence=(
+                    0.97
+                    if created_timestamp is not None and grouped_timestamp is not None
+                    else 0.72
+                ),
             )
         )
     return out
@@ -1622,12 +1715,11 @@ def _match_mft_ads(
     return out
 
 
-def _prefetch_blob(row: dict[str, Any]) -> str:
+def _prefetch_executable(row: dict[str, Any]) -> str:
     return " ".join(
         (
             _text(_value(row, "executable_name", "executablename", "file_name", "filename")),
             _text(_value(row, "executable_path", "executablepath", "full_path", "path")),
-            _text(_value(row, "files_loaded", "filesloaded", "referenced_files")),
         )
     )
 
@@ -1637,15 +1729,15 @@ def _match_prefetch_unusual_path(
 ) -> list[Finding]:
     out: list[Finding] = []
     for row in _rows(parsed):
-        blob = _prefetch_blob(row)
-        if _path_is_suspicious(blob) and not _contains_credential_tool(blob) and "lsass" not in blob.casefold():
+        executable = _prefetch_executable(row)
+        if _path_is_suspicious(executable) and not _contains_credential_tool(executable):
             out.append(
                 _make_finding(
                     rule_id=ind.id,
                     severity=ind.severity_baseline,
                     category="execution",
                     title="Prefetch executable in a user-writable path",
-                    description=blob[:300],
+                    description=executable[:300],
                     row=row,
                     followup="Recover and hash the executable and inspect its launch context.",
                     confidence=0.9,
@@ -1659,15 +1751,15 @@ def _match_prefetch_credential_tool(
 ) -> list[Finding]:
     out: list[Finding] = []
     for row in _rows(parsed):
-        blob = _prefetch_blob(row)
-        if _contains_credential_tool(blob):
+        executable = _prefetch_executable(row)
+        if _contains_credential_tool(executable):
             out.append(
                 _make_finding(
                     rule_id=ind.id,
                     severity=ind.severity_baseline,
                     category="credential_access",
                     title="Credential-access utility in Prefetch",
-                    description=blob[:300],
+                    description=executable[:300],
                     row=row,
                     followup="Inspect the process tree and credential-access telemetry at this run time.",
                     confidence=0.98,
@@ -1700,43 +1792,6 @@ def _match_prefetch_lsass_reference(
     return out
 
 
-def _match_prefetch_single_recent_temp(
-    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
-) -> list[Finding]:
-    rows = _rows(parsed)
-    dated: list[tuple[datetime, dict[str, Any]]] = []
-    for row in rows:
-        timestamp = _parse_timestamp(_timestamp_text(row))
-        if timestamp is not None:
-            dated.append((timestamp, row))
-    if not dated:
-        return []
-    newest = max(item[0] for item in dated)
-    out: list[Finding] = []
-    for timestamp, row in dated:
-        run_count = _int_value(_value(row, "run_count", "runcount"))
-        age_seconds = (newest - timestamp).total_seconds()
-        if run_count != 1 or not 0 <= age_seconds <= 30 * 24 * 60 * 60:
-            continue
-        blob = _prefetch_blob(row)
-        if not _path_is_suspicious(blob):
-            continue
-        out.append(
-            _make_finding(
-                rule_id=ind.id,
-                severity=ind.severity_baseline,
-                category="execution",
-                title="Single recent execution from a user-writable path",
-                description=blob[:300],
-                row=row,
-                timestamp=timestamp.isoformat(),
-                followup="Recover and hash the executable and inspect activity around its only recorded run.",
-                confidence=0.82,
-            )
-        )
-    return out
-
-
 _SPECIFIC_MATCHERS: dict[str, Matcher] = {
     "sigma_rule_hit": _match_sigma_rule_hit,
     "run_key_unusual_binary": _match_registry_temp_persistence,
@@ -1746,7 +1801,7 @@ _SPECIFIC_MATCHERS: dict[str, Matcher] = {
     "image_file_execution_debugger": _match_registry_ifeo_debugger,
     "applnit_dlls": _match_registry_appinit,
     "winlogon_shell_modified": _match_registry_winlogon_shell,
-    "userassist_recent_exec_temp": _match_userassist_temp,
+    "userassist_temp_execution": _match_userassist_temp,
     "userassist_unsigned_in_temp": _match_userassist_temp,
     "abnormal_parent_child": _match_volatility_parent_child,
     "process_in_unusual_path": _match_volatility_unusual_path,
@@ -1774,7 +1829,6 @@ _SPECIFIC_MATCHERS: dict[str, Matcher] = {
     "ads_alternate_data_stream": _match_mft_ads,
     "prefetch_unusual_path": _match_prefetch_unusual_path,
     "prefetch_with_credential_tools": _match_prefetch_credential_tool,
-    "prefetch_run_count_one_recent": _match_prefetch_single_recent_temp,
     "prefetch_referenced_lsass_dump": _match_prefetch_lsass_reference,
 }
 
@@ -1784,15 +1838,16 @@ def supported_indicator_ids() -> frozenset[str]:
     return frozenset(_SPECIFIC_MATCHERS)
 
 
-def apply_rules(
+def apply_rules_with_status(
     parsed: Any,
     raw: str,
     metadata: ToolMetadata,
     *,
     evidence_path: str = "",
-) -> list[Finding]:
-    """Apply only explicitly implemented indicators from ``metadata``."""
+) -> tuple[list[Finding], bool]:
+    """Return retained findings and whether any candidate was dropped."""
     out: list[Finding] = []
+    limit_reached = False
     for indicator in metadata.suspicious_indicators:
         matcher = _SPECIFIC_MATCHERS.get(indicator.id)
         if matcher is None:
@@ -1816,15 +1871,43 @@ def apply_rules(
             if not finding.evidence_ref.source_file and evidence_path:
                 finding.evidence_ref.source_file = evidence_path
             finding.refresh_fingerprint()
-            out.append(finding)
-            if len(out) >= MAX_RULE_FINDINGS:
-                logger.warning(
-                    "finding cap reached for tool=%s (%d)",
-                    metadata.tool_id,
-                    MAX_RULE_FINDINGS,
-                )
-                return out
-    return out
+        candidate_count = len(out) + len(findings)
+        if candidate_count <= MAX_RULE_FINDINGS:
+            out.extend(findings)
+            continue
+        limit_reached = True
+        out = heapq.nlargest(
+            MAX_RULE_FINDINGS,
+            chain(out, findings),
+            key=lambda finding: (
+                SEVERITY_RANK[finding.severity],
+                finding.confidence,
+            ),
+        )
+    if limit_reached:
+        logger.warning(
+            "finding cap reached for tool=%s (%d); retained by severity",
+            metadata.tool_id,
+            MAX_RULE_FINDINGS,
+        )
+    return out, limit_reached
+
+
+def apply_rules(
+    parsed: Any,
+    raw: str,
+    metadata: ToolMetadata,
+    *,
+    evidence_path: str = "",
+) -> list[Finding]:
+    """Apply only explicitly implemented indicators from ``metadata``."""
+    findings, _ = apply_rules_with_status(
+        parsed,
+        raw,
+        metadata,
+        evidence_path=evidence_path,
+    )
+    return findings
 
 
 def severity_at_least(severity: Severity, threshold: Severity) -> bool:

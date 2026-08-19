@@ -9,7 +9,9 @@ from pathlib import Path
 
 import pytest
 
+import forensicagent.selector.filter as selector_filter
 from forensicagent.scanner.types import Evidence, Inventory
+from forensicagent.scanner.scanner import scan
 from forensicagent.selector.filter import (
     filter_by_evidence,
     input_format_matches,
@@ -29,6 +31,7 @@ def _meta(
     runtime: str = "short",
     parallelizable: bool = True,
     input_format: list[str] | None = None,
+    platform: list[str] | None = None,
 ) -> ToolMetadata:
     return ToolMetadata(
         tool_id=tool_id,
@@ -46,6 +49,7 @@ def _meta(
         estimated_runtime=runtime,  # type: ignore[arg-type]
         parallelizable=parallelizable,
         input_format=input_format or [],
+        platform=platform or ["any"],  # type: ignore[arg-type]
     )
 
 
@@ -235,7 +239,44 @@ class TestInputFormatRouting:
         assert selections[0].target_evidence == ["/case/app.py"]
 
 
+class TestHostPlatformRouting:
+    @pytest.mark.parametrize(
+        "host,allowed",
+        [
+            ("win32", True),
+            ("linux", False),
+            ("darwin", False),
+            ("freebsd14", False),
+        ],
+    )
+    def test_windows_only_tool_is_gated_by_current_host(
+        self, monkeypatch, host, allowed
+    ):
+        monkeypatch.setattr(selector_filter.sys, "platform", host)
+        tool = _meta(
+            "windows_tool",
+            applicable=["evtx_log"],
+            platform=["windows"],
+        )
+        inv = Inventory(evidence_list=[_evidence("/case/Security.evtx", "evtx_log")])
+
+        selections = filter_by_evidence(inv, {tool.tool_id: tool})
+
+        assert bool(selections) is allowed
+
+    def test_any_host_tool_remains_eligible_on_unknown_host(self, monkeypatch):
+        monkeypatch.setattr(selector_filter.sys, "platform", "freebsd14")
+        tool = _meta("portable", applicable=["text_document"], platform=["any"])
+        inv = Inventory(evidence_list=[_evidence("/case/.env", "text_document")])
+
+        assert filter_by_evidence(inv, {tool.tool_id: tool})
+
+
 class TestRealMetadataRouting:
+    @pytest.fixture(autouse=True)
+    def _windows_host(self, monkeypatch):
+        monkeypatch.setattr(selector_filter.sys, "platform", "win32")
+
     @pytest.fixture(scope="class")
     @staticmethod
     def real_tools():
@@ -279,11 +320,56 @@ class TestRealMetadataRouting:
         inv = Inventory(evidence_list=[_evidence("/case/notes.txt", "text_document")])
         assert {s.tool_id for s in filter_by_evidence(inv, real_tools)} == {"gitleaks"}
 
+    def test_config_only_tree_routes_to_gitleaks(self, real_tools, tmp_path):
+        env_file = tmp_path / ".env"
+        settings_file = tmp_path / "settings.yaml"
+        env_file.write_text("TOKEN=example\n", encoding="utf-8")
+        settings_file.write_text("token: example\n", encoding="utf-8")
+
+        selections = filter_by_evidence(scan(tmp_path), real_tools)
+
+        assert {selection.tool_id for selection in selections} == {"gitleaks"}
+        assert set(selections[0].target_evidence) == {
+            str(env_file),
+            str(settings_file),
+        }
+
+    def test_scan_root_tool_never_crosses_inventory_boundaries(
+        self, real_tools, tmp_path
+    ):
+        env_file = tmp_path / ".env"
+        unknown_file = tmp_path / "mystery.raw"
+        ignored_file = tmp_path / ".git" / "ignored.env"
+        depth_file = tmp_path / "deep" / "outside.env"
+        env_file.write_text("TOKEN=example\n", encoding="utf-8")
+        unknown_file.write_bytes(b"not a recognized artifact")
+        ignored_file.parent.mkdir()
+        ignored_file.write_text("TOKEN=ignored\n", encoding="utf-8")
+        depth_file.parent.mkdir()
+        depth_file.write_text("TOKEN=outside\n", encoding="utf-8")
+
+        inventory = scan(tmp_path, max_depth=0, include_unknown=True)
+        selection = next(
+            item
+            for item in filter_by_evidence(inventory, real_tools)
+            if item.tool_id == "gitleaks"
+        )
+
+        assert inventory.depth_limit_hit is True
+        assert any(
+            evidence.path == str(unknown_file)
+            and evidence.evidence_type == "unknown"
+            for evidence in inventory.evidence_list
+        )
+        assert selection.target_evidence == [str(env_file)]
+        assert str(ignored_file) not in selection.target_evidence
+        assert str(depth_file) not in selection.target_evidence
+
     def test_gitleaks_writes_machine_readable_report_to_isolated_output(self, real_tools):
         template = real_tools["gitleaks"].command_templates[0].template
-        assert "--report-path {output_dir}/gitleaks.json" in template
+        assert "--report-path {output_dir}/gitleaks.csv" in template
 
-    def test_code_tree_tools_use_one_scan_root_job(self, real_tools, tmp_path):
+    def test_code_tree_tools_use_only_inventoried_files(self, real_tools, tmp_path):
         first = tmp_path / "one.py"
         second = tmp_path / "pkg" / "two.py"
         second.parent.mkdir()
@@ -301,7 +387,7 @@ class TestRealMetadataRouting:
 
         by_id = {selection.tool_id: selection for selection in selections}
         for tool_id in ("bandit", "semgrep", "gitleaks"):
-            assert by_id[tool_id].target_evidence == [str(tmp_path.resolve())]
+            assert set(by_id[tool_id].target_evidence) == {str(first), str(second)}
 
     def test_root_aggregation_is_disabled_for_mixed_binary_case(
         self, real_tools, tmp_path
@@ -321,7 +407,7 @@ class TestRealMetadataRouting:
         by_id = {selection.tool_id: selection for selection in selections}
         assert by_id["gitleaks"].target_evidence == [str(source)]
 
-    def test_forced_root_scan_tool_keeps_safe_aggregation(
+    def test_forced_root_scan_tool_keeps_inventory_boundary(
         self, real_tools, tmp_path
     ):
         first = tmp_path / "one.py"
@@ -345,7 +431,10 @@ class TestRealMetadataRouting:
         assert len(plan.selected_tools) == 1
         assert plan.selected_tools[0].reason == "forced by --tools"
         assert plan.selected_tools[0].priority == 10
-        assert plan.selected_tools[0].target_evidence == [str(tmp_path.resolve())]
+        assert set(plan.selected_tools[0].target_evidence) == {
+            str(first),
+            str(second),
+        }
 
     def test_forced_tool_still_requires_compatible_input_format(self, real_tools):
         inv = Inventory(

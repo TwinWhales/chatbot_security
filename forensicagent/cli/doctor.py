@@ -189,15 +189,13 @@ def _check_rag_index() -> CheckResult:
 def _check_embedding_provider() -> CheckResult:
     model = settings.EMBEDDING_MODEL
     if model.startswith("openai:"):
-        r = _check_import("openai", hint="pip install openai")
+        r = _check_import("openai", hint='pip install ".[openai]"')
         r.name = f"embedding backend ({model})"
         if r.ok and not settings.OPENAI_API_KEY:
             r.ok = False
             r.detail = "openai imported, but OPENAI_API_KEY env var is empty"
         return r
-    r = _check_import(
-        "sentence_transformers", hint="pip install sentence-transformers"
-    )
+    r = _check_import("sentence_transformers", hint='pip install ".[rag]"')
     r.name = f"embedding backend ({model})"
     return r
 
@@ -217,6 +215,8 @@ def _check_optional_tools() -> list[CheckResult]:
                 detail = "not on PATH"
             elif spec.kind == "pip":
                 detail = f"not installed - `forensicagent install {tool}` (pip {spec.pip_package})"
+            elif spec.kind == "venv":
+                detail = f"not installed - `forensicagent install {tool}` (isolated venv)"
             elif spec.kind == "zip":
                 detail = f"not installed - `forensicagent install {tool}` (zip dl)"
             else:
@@ -237,9 +237,12 @@ def _check_optional_tools() -> list[CheckResult]:
 
 CORE_CHECKS: list[Callable[[], CheckResult]] = [
     _check_python,
-    lambda: _check_import("chromadb", hint="pip install chromadb"),
-    _check_embedding_provider,
     _check_libmagic,
+]
+
+OPTIONAL_CAPABILITY_CHECKS: list[Callable[[], CheckResult]] = [
+    lambda: _check_import("chromadb", hint='pip install ".[rag]"'),
+    _check_embedding_provider,
     _check_ollama,
 ]
 
@@ -249,6 +252,7 @@ def run_doctor(console: Console | None = None, *, show_optional: bool = True) ->
     console = console or Console()
 
     core_results = [c() for c in CORE_CHECKS]
+    capability_results = [c() for c in OPTIONAL_CAPABILITY_CHECKS]
     rag_result = _check_rag_index()
     optional_results = _check_optional_tools() if show_optional else []
 
@@ -262,8 +266,11 @@ def run_doctor(console: Console | None = None, *, show_optional: bool = True) ->
         table.add_row(status, r.name, r.detail)
 
     # RAG 인덱스는 optional — 없어도 결정론+LLM 경로로 폴백되므로 miss 로만 표시.
-    rag_status = "[green]OK[/]" if rag_result.ok else "[yellow]miss[/]"
-    table.add_row(rag_status, rag_result.name, rag_result.detail)
+    table.add_section()
+    table.add_row("", "[dim]-- optional AI capabilities --[/]", "")
+    for r in [*capability_results, rag_result]:
+        status = "[green]OK[/]" if r.ok else "[yellow]miss[/]"
+        table.add_row(status, r.name, r.detail)
 
     if optional_results:
         table.add_section()

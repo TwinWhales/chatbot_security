@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 Severity = Literal["info", "low", "medium", "high", "critical"]
+MAX_RETAINED_FINDINGS = 500
 SEVERITY_RANK: dict[str, int] = {
     "info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4,
 }
@@ -95,6 +96,8 @@ class ToolAnalysis:
     case_used: str = "A"                  # "A" small | "B" filtered | "C" chunked
     llm_invoked: bool = False
     llm_failed: bool = False
+    finding_limit_reached: bool = False
+    coverage_warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -102,6 +105,9 @@ class ToolAnalysis:
             "case_used": self.case_used,
             "llm_invoked": self.llm_invoked,
             "llm_failed": self.llm_failed,
+            "finding_limit_reached": self.finding_limit_reached,
+            "coverage_truncated": bool(self.coverage_warnings),
+            "coverage_warnings": list(self.coverage_warnings),
             "summary": self.summary,
             "findings": [f.to_dict() for f in self.findings],
         }

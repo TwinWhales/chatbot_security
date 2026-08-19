@@ -34,8 +34,6 @@ input_format:
   - ext:.cs
   - ext:.kt
   - ext:.swift
-target_mode: scan_root
-
 output_format: json
 output_size_estimate: medium
 parallelizable: true
@@ -47,7 +45,7 @@ install_check:
 
 command_templates:
   - name: "Auto ruleset on single file (JSON)"
-    template: "semgrep --config=auto --json --quiet {evidence_path}"
+    template: "semgrep --config=auto --json --quiet --disable-nosem --no-git-ignore {evidence_path}"
     when: "Semgrep Registry 의 자동 룰셋 (언어별 OWASP/CWE/secret 등) 으로 단일 파일 스캔. --error 빠진 건 의도 — finding 있어도 exit 0 으로 (forensicagent 는 게이트가 아니라 데이터 수집)."
 
 usage_description: |
@@ -65,11 +63,6 @@ suspicious_indicators:
     pattern: "results[*] 의 check_id, message, severity"
     severity_baseline: medium
     description: "Semgrep 가 보고한 정적 분석 룰 매칭"
-  - id: semgrep_high
-    pattern: "results[*] 중 severity == ERROR (Semgrep 의 최고 등급)"
-    severity_baseline: high
-    description: "Semgrep ERROR 등급은 OWASP top 10 / CWE top 25 후보가 많음"
-
 known_false_positives:
   - "프레임워크가 자체 sanitize 하는 부분 (Django ORM, Express helmet 등)"
   - "테스트/문서용 예제 코드의 의도된 안티패턴"

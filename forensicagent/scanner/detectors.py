@@ -43,7 +43,6 @@ _MAGIC_SIGNATURES: list[tuple[bytes, EvidenceType, Platform, float]] = [
 
 _EXTENSION_MAP: dict[str, tuple[EvidenceType, Platform, float]] = {
     ".evtx": ("evtx_log", "windows", 0.85),
-    ".evt": ("evtx_log", "windows", 0.80),
     ".pcap": ("pcap", "unknown", 0.85),
     ".pcapng": ("pcap", "unknown", 0.85),
     ".cap": ("pcap", "unknown", 0.70),
@@ -64,6 +63,25 @@ _EXTENSION_MAP: dict[str, tuple[EvidenceType, Platform, float]] = {
     ".db": ("sqlite_database", "unknown", 0.45),
     ".log": ("text_log", "unknown", 0.55),
     ".txt": ("text_document", "unknown", 0.60),
+    # Secret-bearing configuration files are text evidence for Gitleaks.  If
+    # they remain ``unknown``, an otherwise config-only tree is never scanned.
+    ".yaml": ("text_document", "unknown", 0.70),
+    ".yml": ("text_document", "unknown", 0.70),
+    ".json": ("text_document", "unknown", 0.70),
+    ".toml": ("text_document", "unknown", 0.70),
+    ".ini": ("text_document", "unknown", 0.65),
+    ".cfg": ("text_document", "unknown", 0.65),
+    ".conf": ("text_document", "unknown", 0.65),
+    ".properties": ("text_document", "unknown", 0.65),
+    ".sh": ("text_document", "unknown", 0.70),
+    ".ps1": ("text_document", "unknown", 0.75),
+    ".bat": ("text_document", "unknown", 0.70),
+    ".cmd": ("text_document", "unknown", 0.70),
+    ".xml": ("text_document", "unknown", 0.65),
+    ".tf": ("text_document", "unknown", 0.75),
+    ".tfvars": ("text_document", "unknown", 0.80),
+    ".pem": ("text_document", "unknown", 0.75),
+    ".key": ("text_document", "unknown", 0.75),
     # --- source code (bandit / semgrep / gitleaks 의 입력) ---
     ".py": ("source_code_python", "unknown", 0.85),
     ".pyi": ("source_code_python", "unknown", 0.80),
@@ -89,6 +107,14 @@ _EXTENSION_MAP: dict[str, tuple[EvidenceType, Platform, float]] = {
 
 # (regex, evidence_type, platform_hint, confidence)
 _FILENAME_PATTERNS: list[tuple[re.Pattern[str], EvidenceType, Platform, float]] = [
+    # Dotfiles have no useful Path.suffix (``.env``) or a misleading one
+    # (``.env.local``), so classify the common credential/config names first.
+    (re.compile(r"^\.env(?:\..+)?$", re.IGNORECASE),
+     "text_document", "unknown", 0.85),
+    (re.compile(r"^\.(npmrc|pypirc|netrc|envrc|git-credentials)$", re.IGNORECASE),
+     "text_document", "unknown", 0.85),
+    (re.compile(r"^(Dockerfile|Makefile|Jenkinsfile)$", re.IGNORECASE),
+     "text_document", "unknown", 0.80),
     # Registry hives (extension-less)
     (re.compile(r"^NTUSER\.DAT$", re.IGNORECASE), "registry_hive", "windows", 0.95),
     (re.compile(r"^UsrClass\.dat$", re.IGNORECASE), "registry_hive", "windows", 0.95),
@@ -124,7 +150,6 @@ _BROWSER_PARENT_PATHS: list[tuple[str, Platform]] = [
 
 # parent-dir keywords (case-insensitive substring matches in the normalized path)
 _PARENT_DIR_HINTS: list[tuple[str, EvidenceType, Platform, float]] = [
-    ("windows/system32/winevt/logs", "evtx_log", "windows", 0.80),
     ("windows/prefetch", "prefetch", "windows", 0.85),
     ("windows/system32/config", "registry_hive", "windows", 0.80),
     *[

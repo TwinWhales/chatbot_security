@@ -117,6 +117,30 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on", "y")
 
 
+def _env_int_range(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if minimum <= value <= maximum else default
+
+
+# RDP business-hour heuristics are organization-local, not inherently UTC.
+# Offset minutes keeps the deterministic core independent of a timezone DB.
+RDP_UTC_OFFSET_MINUTES = _env_int_range(
+    "FORENSICAGENT_RDP_UTC_OFFSET_MINUTES", 0, -1439, 1439
+)
+RDP_BUSINESS_START_HOUR = _env_int_range(
+    "FORENSICAGENT_RDP_BUSINESS_START_HOUR", 7, 0, 23
+)
+RDP_BUSINESS_END_HOUR = _env_int_range(
+    "FORENSICAGENT_RDP_BUSINESS_END_HOUR", 20, 0, 23
+)
+
+
 # === Runtime RAG (tool selection + analyzer context) ===
 # USE_RAG is the *intent* flag (default on). Actual availability is checked
 # lazily at query time — if chromadb / sentence-transformers / the model /

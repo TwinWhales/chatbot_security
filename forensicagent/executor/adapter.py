@@ -23,6 +23,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
+from forensicagent import config as settings
+from forensicagent.executor.types import MAX_INLINE_JSON_BYTES
 from forensicagent.tools.executables import resolve_executable
 from forensicagent.tools.schema import ToolMetadata
 
@@ -75,15 +77,19 @@ class GenericAdapter:
         argv[0] = str(resolved)
 
         try:
+            # Version checks must not inherit an evidence-controlled CWD.  The
+            # package/project root is stable for both source and wheel installs.
+            trusted_cwd = Path(settings.PROJECT_ROOT).resolve(strict=True)
             proc = subprocess.run(
                 argv,
                 capture_output=True,
                 text=True,
                 timeout=10,
+                cwd=trusted_cwd,
                 shell=False,
                 check=False,
             )
-        except (subprocess.TimeoutExpired, OSError) as e:
+        except (subprocess.TimeoutExpired, OSError, RuntimeError) as e:
             return False, f"install_check failed to run: {e}"
 
         haystack = (proc.stdout or "") + (proc.stderr or "")
@@ -140,12 +146,18 @@ class GenericAdapter:
 
     def parse_output(self, stdout_path: str) -> Optional[dict[str, Any]]:
         p = Path(stdout_path)
-        if not p.exists() or p.stat().st_size == 0:
+        try:
+            size = p.stat().st_size
+        except OSError as e:
+            logger.warning("parse_output: cannot stat %s: %s", p, e)
+            return None
+        if size == 0:
             return None
         if self._meta.output_format != "json":
             return None
-        # 출력이 small 일 때만 즉시 파싱; 대용량은 Analyzer 가 스트리밍.
-        if self._meta.output_size_estimate == "large":
+        # Metadata is only an estimate.  The completed stdout byte size is the
+        # availability boundary for eager parsing and report embedding.
+        if size > MAX_INLINE_JSON_BYTES:
             return None
         try:
             text = p.read_text(encoding="utf-8", errors="replace")

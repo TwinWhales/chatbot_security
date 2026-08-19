@@ -13,6 +13,7 @@ import logging
 import os
 import shlex
 import signal
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -21,6 +22,107 @@ from forensicagent.executor.types import ArtifactRole, ExecutionResult, OutputAr
 from forensicagent.tools.schema import ToolMetadata
 
 logger = logging.getLogger(__name__)
+
+
+def _create_windows_kill_job() -> int:
+    """Create a Job Object that kills every assigned process when closed."""
+    import ctypes
+    from ctypes import wintypes
+
+    class _BasicLimits(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class _ExtendedLimits(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimits),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel32.CreateJobObjectW(None, None)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    limits = _ExtendedLimits()
+    limits.BasicLimitInformation.LimitFlags = 0x00002000
+    if not kernel32.SetInformationJobObject(
+        handle,
+        9,  # JobObjectExtendedLimitInformation
+        ctypes.byref(limits),
+        ctypes.sizeof(limits),
+    ):
+        error = ctypes.get_last_error()
+        kernel32.CloseHandle(handle)
+        raise ctypes.WinError(error)
+    return int(handle)
+
+
+def _assign_windows_kill_job(handle: int, proc: subprocess.Popen) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    if not kernel32.AssignProcessToJobObject(handle, int(proc._handle)):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _terminate_windows_kill_job(handle: int) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    if not kernel32.TerminateJobObject(handle, 1):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _close_windows_kill_job(handle: int) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    if not kernel32.CloseHandle(handle):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 def run_tool(
@@ -48,6 +150,10 @@ def run_tool(
     """
     del run_index  # retained in the public signature for backwards compatibility.
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Tool processes must never inherit a caller/evidence working directory.
+    # The executor creates one isolated job directory per invocation; resolving
+    # it here also makes stream artifact paths stable for programmatic callers.
+    output_dir = output_dir.resolve(strict=True)
     stdout_path = output_dir / "stdout"
     stderr_path = output_dir / "stderr"
     command_display = _command_display(argv)
@@ -65,6 +171,7 @@ def run_tool(
     start = time.perf_counter()
     timed_out = False
     exit_code = -1
+    windows_job: int | None = None
     try:
         with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
             # 어떤 옵션으로 실행했는지 stderr 파일 상단에 기록한다.
@@ -82,6 +189,7 @@ def run_tool(
                 popen_kwargs["creationflags"] = getattr(
                     subprocess, "CREATE_NEW_PROCESS_GROUP", 0
                 )
+                windows_job = _create_windows_kill_job()
             else:
                 # A private process group lets timeout handling terminate child
                 # processes spawned by the forensic tool as well as the parent.
@@ -90,14 +198,24 @@ def run_tool(
                 argv,
                 stdout=out_f,
                 stderr=err_f,
+                cwd=output_dir,
                 shell=False,
                 **popen_kwargs,
             )
+            if windows_job is not None:
+                try:
+                    _assign_windows_kill_job(windows_job, proc)
+                except OSError:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                    raise
             try:
                 exit_code = proc.wait(timeout=timeout_sec)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                result.warnings.extend(_terminate_process_tree(proc))
+                result.warnings.extend(
+                    _terminate_process_tree(proc, windows_job=windows_job)
+                )
     except FileNotFoundError as e:
         result.duration_seconds = time.perf_counter() - start
         result.status = "failed"
@@ -112,6 +230,12 @@ def run_tool(
         result.error_message = f"OS error: {e}"
         _finalize_stream_artifacts(result, metadata)
         return result
+    finally:
+        if windows_job is not None:
+            try:
+                _close_windows_kill_job(windows_job)
+            except OSError as e:
+                result.warnings.append(f"Windows process containment close failed: {e}")
 
     result.duration_seconds = time.perf_counter() - start
     if timed_out:
@@ -138,28 +262,63 @@ def _command_display(argv: list[str]) -> str:
     return shlex.join(argv)
 
 
-def _terminate_process_tree(proc: subprocess.Popen) -> list[str]:
+def _system_taskkill() -> Path | None:
+    """Return the real System32 taskkill, never a PATH/CWD substitute."""
+    system_root = os.environ.get("SystemRoot", "")
+    root = Path(system_root)
+    if not system_root or not root.is_absolute():
+        return None
+    expected_parent = root / "System32"
+    candidate = expected_parent / "taskkill.exe"
+    try:
+        resolved_parent = expected_parent.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+        if resolved.parent != resolved_parent or resolved.name.casefold() != "taskkill.exe":
+            return None
+        return resolved if resolved.is_file() else None
+    except OSError:
+        return None
+
+
+def _terminate_process_tree(
+    proc: subprocess.Popen,
+    *,
+    windows_job: int | None = None,
+) -> list[str]:
     """Best-effort termination of the process and every descendant."""
     warnings: list[str] = []
     if proc.poll() is not None:
         return warnings
 
     if os.name == "nt":
-        try:
-            completed = subprocess.run(
-                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if completed.returncode != 0 and proc.poll() is None:
-                detail = (completed.stderr or completed.stdout or "").strip()
-                warnings.append(
-                    f"taskkill could not terminate full process tree: {detail[:200]}"
+        if windows_job is not None:
+            try:
+                _terminate_windows_kill_job(windows_job)
+                proc.wait(timeout=5)
+                return warnings
+            except (OSError, subprocess.TimeoutExpired) as e:
+                warnings.append(f"Windows Job Object termination failed: {e}")
+        taskkill = _system_taskkill()
+        if taskkill is None:
+            warnings.append("trusted System32 taskkill.exe unavailable")
+        else:
+            try:
+                completed = subprocess.run(
+                    [str(taskkill), "/PID", str(proc.pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    cwd=taskkill.parent,
+                    check=False,
                 )
-        except (OSError, subprocess.TimeoutExpired) as e:
-            warnings.append(f"taskkill unavailable: {e}")
+                if completed.returncode != 0 and proc.poll() is None:
+                    detail = (completed.stderr or completed.stdout or "").strip()
+                    warnings.append(
+                        "taskkill could not terminate full process tree: "
+                        f"{detail[:200]}"
+                    )
+            except (OSError, subprocess.TimeoutExpired) as e:
+                warnings.append(f"taskkill unavailable: {e}")
     else:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
@@ -170,17 +329,26 @@ def _terminate_process_tree(proc: subprocess.Popen) -> list[str]:
 
     try:
         proc.wait(timeout=1)
-        return warnings
     except subprocess.TimeoutExpired:
         pass
 
     if os.name != "nt":
+        # The direct child may exit on SIGTERM while a descendant in the same
+        # process group ignores it. Probe and kill the group independently.
+        try:
+            os.killpg(proc.pid, 0)
+        except ProcessLookupError:
+            return warnings
+        except OSError as e:
+            warnings.append(f"process-group probe failed: {e}")
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             return warnings
         except OSError as e:
             warnings.append(f"SIGKILL process-group failed: {e}")
+    elif proc.poll() is not None:
+        return warnings
     if proc.poll() is None:
         try:
             proc.kill()
@@ -248,16 +416,34 @@ def collect_generated_artifacts(
     warnings: list[str] = []
     if not root.is_dir():
         return artifacts, warnings
-    try:
-        paths = sorted(root.rglob("*"), key=lambda p: str(p).lower())
-    except OSError as e:
-        return artifacts, [f"could not enumerate generated outputs: {e}"]
+    paths: list[Path] = []
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError as e:
+            warnings.append(f"could not enumerate generated outputs in {directory}: {e}")
+            continue
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                value = entry.stat(follow_symlinks=False)
+                is_reparse = bool(
+                    getattr(value, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+                )
+                if entry.is_symlink() or is_reparse:
+                    warnings.append(f"ignored generated link/reparse point: {path}")
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(path)
+                elif entry.is_file(follow_symlinks=False):
+                    paths.append(path)
+            except OSError as e:
+                warnings.append(f"could not inspect generated output {path}: {e}")
+    paths.sort(key=lambda path: str(path).lower())
     for path in paths:
-        if path.is_symlink():
-            warnings.append(f"ignored generated symlink: {path}")
-            continue
-        if not path.is_file():
-            continue
         try:
             artifacts.append(
                 describe_artifact(
@@ -275,8 +461,8 @@ def _infer_format(path: Path, default: str) -> str:
     by_suffix = {
         ".csv": "csv",
         ".json": "json",
-        ".jsonl": "json",
-        ".ndjson": "json",
+        ".jsonl": "jsonl",
+        ".ndjson": "jsonl",
         ".txt": "text",
         ".log": "text",
         ".xml": "text",

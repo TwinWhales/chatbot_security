@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import io
+
+from rich.console import Console
+
 from forensicagent.cli import doctor
 
 
@@ -59,3 +63,31 @@ def test_eztools_missing_check_points_to_registered_installer_name(monkeypatch):
 
     assert "forensicagent install recmd" in results["RECmd.exe"].detail
     assert "forensicagent install evtxecmd" in results["EvtxECmd.exe"].detail
+
+
+def test_missing_optional_ai_stack_does_not_fail_core_doctor(monkeypatch):
+    monkeypatch.setattr(
+        doctor,
+        "CORE_CHECKS",
+        [lambda: doctor.CheckResult("python", True, "ok")],
+    )
+    monkeypatch.setattr(
+        doctor,
+        "OPTIONAL_CAPABILITY_CHECKS",
+        [lambda: doctor.CheckResult("rag", False, "install .[rag]", optional=True)],
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_check_rag_index",
+        lambda: doctor.CheckResult("index", False, "missing", optional=True),
+    )
+    output = io.StringIO()
+
+    result = doctor.run_doctor(
+        console=Console(file=output, force_terminal=False),
+        show_optional=False,
+    )
+
+    assert result == 0
+    assert "optional AI capabilities" in output.getvalue()
+    assert "All core checks passed" in output.getvalue()

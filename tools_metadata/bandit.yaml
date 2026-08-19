@@ -14,9 +14,7 @@ platform:
 input_format:
   - ext:.py
   - ext:.pyi
-target_mode: scan_root
-
-output_format: json
+output_format: csv
 output_size_estimate: small
 parallelizable: true
 estimated_runtime: short
@@ -26,13 +24,13 @@ install_check:
   expected_pattern: "bandit"
 
 command_templates:
-  - name: "Single file scan (JSON)"
-    template: "bandit -r -f json -q --exit-zero {evidence_path}"
+  - name: "Single file scan (CSV)"
+    template: "bandit -r -f csv -q --ignore-nosec --exit-zero -o {output_dir}/bandit.csv {evidence_path}"
     when: "단일 .py 파일에서 OWASP/CWE 패턴 (hardcoded passwords, SQL 인젝션, weak crypto, shell injection 등) 을 정적 분석으로 탐지. --exit-zero 는 finding 이 있어도 exit 0 으로 — forensicagent 는 데이터를 원하지 게이트가 아님."
 
 usage_description: |
   Bandit 는 Python 코드의 알려진 보안 약점 패턴을 AST 기반으로 탐지하는
-  SAST 도구다. PyCQA 가 관리. 출력은 JSON 의 "results" 배열이고 각 항목은
+  SAST 도구다. PyCQA 가 관리. 출력은 CSV이고 각 행은
   filename, line_number, issue_severity (LOW|MEDIUM|HIGH),
   issue_confidence, issue_text, test_id 필드를 가진다.
 
@@ -42,14 +40,9 @@ usage_description: |
 
 suspicious_indicators:
   - id: bandit_issue
-    pattern: "results[*] 의 issue_severity / issue_text"
+    pattern: "CSV 행의 issue_severity / issue_text"
     severity_baseline: medium
     description: "Bandit 가 보고한 정적 분석 이슈"
-  - id: bandit_high
-    pattern: "results[*] 중 issue_severity == HIGH"
-    severity_baseline: high
-    description: "Bandit 가 HIGH 로 보고한 이슈는 우선 확인 필요"
-
 known_false_positives:
   - "테스트 코드 (test_*.py) 의 더미 패스워드"
   - "마이그레이션 스크립트의 의도된 SQL 문자열 결합"

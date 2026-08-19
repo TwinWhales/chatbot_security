@@ -14,6 +14,7 @@ from bench.metrics import (
     precision_at_k,
     recall_at_k,
 )
+from bench.harness import _case_metrics
 
 
 # ---- DCG / NDCG ----
@@ -44,6 +45,14 @@ def test_ndcg_all_zero_is_zero():
 def test_ndcg_k_truncation():
     # only top-1 counts at k=1; [1,2] -> dcg=1, idcg from sorted[2,1]=3 -> 1/3
     assert ndcg_at_k([1, 2], 1) == pytest.approx(1.0 / 3.0)
+
+
+def test_case_metrics_penalize_missing_gold_tool():
+    metrics = _case_metrics(["found"], {"found": 2, "missed": 1})
+
+    ideal = 3.0 + 1.0 / math.log2(3)
+    assert metrics["ndcg@3"] == pytest.approx(3.0 / ideal)
+    assert metrics["r@3"] == pytest.approx(0.5)
 
 
 # ---- MRR ----

@@ -52,18 +52,14 @@ suspicious_indicators:
     pattern: "Run/RunOnce 값이 %APPDATA%, %TEMP%, C:\\Users\\Public, 비표준 파일명 (random8.exe 등)"
     severity_baseline: high
     description: "사용자/시스템 자동실행에 등록된 의심 바이너리 = 흔한 persistence"
-  - id: userassist_unsigned_in_temp
-    pattern: "UserAssist 에 실행 기록이 있고 경로가 %TEMP%/Downloads 이며 서명 미상"
+  - id: userassist_temp_execution
+    pattern: "UserAssist 에 %TEMP% / Downloads 경로의 실행 기록"
     severity_baseline: medium
-    description: "임시 경로에서 실행된 미서명 바이너리"
+    description: "사용자 쓰기 가능 경로에서 실행된 바이너리; 서명 상태는 별도 검증 필요"
   - id: service_imagepath_suspicious
     pattern: "Services 키의 ImagePath 가 임의 경로 + 짧은 (8자 이하) 무작위 이름"
     severity_baseline: high
     description: "랜덤 이름 서비스 + 비표준 경로 = 흔한 malware persistence"
-  - id: shimcache_recent_execution
-    pattern: "AppCompatCache (shimcache) 에 최근 실행된 의심 바이너리 경로"
-    severity_baseline: low
-    description: "shimcache 는 실행 증거가 약하지만 타임라인 보강용"
 
 known_false_positives:
   - "관리자가 의도적으로 설치한 OEM/벤더 자동실행 (Dell, Lenovo 등)"

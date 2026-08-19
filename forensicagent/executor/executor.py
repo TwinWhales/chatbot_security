@@ -28,7 +28,11 @@ from rich.progress import (
 from forensicagent import config as settings
 from forensicagent.executor.adapter import GenericAdapter, get_adapter
 from forensicagent.executor.runner import collect_generated_artifacts, run_tool
-from forensicagent.executor.types import ExecutionBundle, ExecutionResult
+from forensicagent.executor.types import (
+    MAX_INLINE_JSON_BYTES,
+    ExecutionBundle,
+    ExecutionResult,
+)
 from forensicagent.observability import Stopwatch
 from forensicagent.selector.types import Plan, ToolSelection
 from forensicagent.tools.executables import resolve_executable
@@ -267,10 +271,21 @@ def _execute_one(
         result.error_message = message
         result.warnings.append(message)
 
-    # Preserve the legacy stdout JSON fast-path while generated-file consumers
-    # migrate to result.artifacts.
+    # Preserve the legacy stdout JSON fast-path only for genuinely small
+    # output. Large JSON remains available through the artifact manifest and
+    # is never duplicated into the report payload.
     if result.status in ("success", "output_missing"):
-        result.parsed_output = adapter.parse_output(result.stdout_path)
+        if (
+            metadata.output_format == "json"
+            and result.output_size_bytes > MAX_INLINE_JSON_BYTES
+        ):
+            result.warnings.append(
+                "JSON eager parse/report embedding skipped: stdout is "
+                f"{result.output_size_bytes} bytes (limit "
+                f"{MAX_INLINE_JSON_BYTES}); raw artifact retained"
+            )
+        else:
+            result.parsed_output = adapter.parse_output(result.stdout_path)
     return result
 
 

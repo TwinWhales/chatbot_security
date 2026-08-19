@@ -157,6 +157,17 @@ class TestExtension:
             (".db", "sqlite_database"),
             (".log", "text_log"),
             (".txt", "text_document"),
+            (".yaml", "text_document"),
+            (".json", "text_document"),
+            (".toml", "text_document"),
+            (".pem", "text_document"),
+            (".sh", "text_document"),
+            (".ps1", "text_document"),
+            (".bat", "text_document"),
+            (".cmd", "text_document"),
+            (".xml", "text_document"),
+            (".tf", "text_document"),
+            (".tfvars", "text_document"),
         ],
     )
     def test_known_extensions(self, tmp_path: Path, ext: str, etype: str) -> None:
@@ -167,6 +178,9 @@ class TestExtension:
 
     def test_unknown_extension(self, tmp_path: Path) -> None:
         assert detect_by_extension(tmp_path / "file.xyz") is None
+
+    def test_legacy_evt_is_not_assumed_to_be_modern_evtx(self, tmp_path: Path) -> None:
+        assert detect_by_extension(tmp_path / "Security.evt") is None
 
     def test_no_extension(self, tmp_path: Path) -> None:
         assert detect_by_extension(tmp_path / "noext") is None
@@ -209,6 +223,12 @@ class TestFilenamePattern:
             ("syslog", "text_log"),
             ("auth.log", "text_log"),
             ("secure", "text_log"),
+            (".env", "text_document"),
+            (".env.local", "text_document"),
+            (".npmrc", "text_document"),
+            ("Dockerfile", "text_document"),
+            ("Makefile", "text_document"),
+            ("Jenkinsfile", "text_document"),
         ],
     )
     def test_patterns(self, tmp_path: Path, name: str, etype: str) -> None:
@@ -225,12 +245,9 @@ class TestFilenamePattern:
 # ---------------------------------------------------------------------------
 
 class TestParentDir:
-    def test_evtx_path_hint(self) -> None:
-        p = Path("C:/Windows/System32/winevt/Logs/Security.evtx")
-        hit = detect_by_parent_dir(p)
-        assert hit is not None
-        assert hit[0] == "evtx_log"
-        assert hit[1] == "windows"
+    def test_winevt_parent_does_not_override_legacy_evt_format(self) -> None:
+        p = Path("C:/Windows/System32/winevt/Logs/Security.evt")
+        assert detect_by_parent_dir(p) is None
 
     def test_prefetch_path_hint(self) -> None:
         p = Path("C:/Windows/Prefetch/CHROME.EXE-XXXX.pf")

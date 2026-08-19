@@ -79,6 +79,8 @@ def _system_prompt(meta: ToolMetadata) -> str:
         f"Tool purpose: {meta.usage_description.strip()[:600]}\n"
         f"Output format: {meta.output_format}.\n\n"
         f"{_SEVERITY_GUIDE}\n\n"
+        "LLM-only observations are advisory and cannot exceed low severity. "
+        "Deterministic rules own medium/high/critical classifications.\n\n"
         f"Known false positives (do not promote these):\n{fp}\n\n"
         "Reply with ONLY a JSON object matching this schema:\n"
         '{ "findings": [\n'
@@ -181,6 +183,10 @@ def extract(
             continue
         sev = str(it.get("severity", "low")).casefold()
         if sev not in VALID_SEVERITIES:
+            sev = "low"
+        # Evidence text is attacker-controlled. Grounding prevents invented
+        # excerpts, but it cannot make model-assigned severity trustworthy.
+        if sev not in {"info", "low"}:
             sev = "low"
         excerpt = str(it.get("raw_excerpt", "")).strip()
         # An LLM finding is admissible only when its quoted evidence exists in

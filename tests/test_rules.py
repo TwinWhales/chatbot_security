@@ -32,6 +32,34 @@ def _meta(
     )
 
 
+def test_finding_cap_prioritizes_a_later_critical_indicator():
+    meta = _meta(
+        tool_id="evtxecmd",
+        indicators=[
+            SuspiciousIndicator(
+                id="service_install_4697",
+                pattern="service path",
+                severity_baseline="low",
+            ),
+            SuspiciousIndicator(
+                id="clear_log_event",
+                pattern="log clear",
+                severity_baseline="critical",
+            ),
+        ],
+    )
+    rows = [
+        {"EventID": 4697, "ServiceFileName": f"%TEMP%\\svc-{index}.exe"}
+        for index in range(501)
+    ]
+    rows.append({"EventID": 1102})
+
+    findings = apply_rules({"items": rows}, "", meta)
+
+    assert len(findings) == 500
+    assert findings[0].rule_id == "clear_log_event:1102"
+
+
 class TestSigmaRuleHit:
     def test_emits_finding_per_rule_name(self):
         meta = _meta(

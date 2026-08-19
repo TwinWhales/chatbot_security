@@ -68,6 +68,8 @@ class Inventory:
     scan_root: str = ""
     depth_limit_hit: bool = False
     unidentified_files: int = 0
+    unreadable_paths: int = 0
+    reparse_paths: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +77,8 @@ class Inventory:
             "scanned_files": self.scanned_files,
             "skipped_files": self.skipped_files,
             "unidentified_files": self.unidentified_files,
+            "unreadable_paths": self.unreadable_paths,
+            "reparse_paths": self.reparse_paths,
             "depth_limit_hit": self.depth_limit_hit,
             "evidence_list": [e.to_dict() for e in self.evidence_list],
         }

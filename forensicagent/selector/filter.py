@@ -6,20 +6,12 @@ input_format까지 검증해 실제로 소비 가능한 입력만 후보로 남�
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from forensicagent.scanner.types import Evidence, Inventory
 from forensicagent.selector.types import ToolSelection
 from forensicagent.tools.schema import ToolMetadata
-
-
-_ROOT_SCAN_SAFE_TYPES = {
-    "source_code_python",
-    "source_code_javascript",
-    "source_code_generic",
-    "text_log",
-    "text_document",
-}
 
 
 def input_format_matches(evidence: Evidence, formats: list[str]) -> bool:
@@ -60,43 +52,46 @@ def input_format_matches(evidence: Evidence, formats: list[str]) -> bool:
     return False
 
 
+def _current_host_platform() -> str | None:
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    if sys.platform == "darwin":
+        return "macos"
+    return None
+
+
 def _matching_evidence(
     inventory: Inventory,
     meta: ToolMetadata,
 ) -> list[Evidence]:
+    host_platforms = set(meta.platform)
+    if "any" not in host_platforms:
+        current_host = _current_host_platform()
+        if current_host is None or current_host not in host_platforms:
+            return []
+
     applicable = set(meta.applicable_evidence_types)
+    evidence_platforms = set(meta.applicable_evidence_platforms)
     return [
         evidence
         for evidence in inventory.evidence_list
         if evidence.evidence_type != "unknown"
         and evidence.evidence_type in applicable
+        and (
+            evidence.platform_hint == "unknown"
+            or "any" in evidence_platforms
+            or evidence.platform_hint in evidence_platforms
+        )
         and input_format_matches(evidence, meta.input_format)
     ]
 
 
 def _target_paths(
-    inventory: Inventory,
-    meta: ToolMetadata,
     matches: list[Evidence],
 ) -> list[str]:
-    """Choose bounded execution targets without broadening forensic scope."""
-    if meta.target_mode == "scan_root" and matches:
-        root = Path(inventory.scan_root) if inventory.scan_root else None
-        identified_types = {
-            evidence.evidence_type
-            for evidence in inventory.evidence_list
-            if evidence.evidence_type != "unknown"
-        }
-        # Directory aggregation is only safe for a source/text corpus. A case
-        # root that also contains memory/disk images must not make gitleaks or
-        # semgrep traverse those multi-gigabyte artifacts.
-        if (
-            root is not None
-            and root.is_dir()
-            and identified_types
-            and identified_types <= _ROOT_SCAN_SAFE_TYPES
-        ):
-            return [str(root.resolve())]
+    """Keep every external invocation inside the scanner inventory boundary."""
     return list(dict.fromkeys(evidence.path for evidence in matches))
 
 
@@ -113,7 +108,7 @@ def filter_by_evidence(
     selections: list[ToolSelection] = []
     for tool_id, meta in tools.items():
         matches = _matching_evidence(inventory, meta)
-        targets = _target_paths(inventory, meta, matches)
+        targets = _target_paths(matches)
         if not targets:
             continue
         matched_types = list(dict.fromkeys(e.evidence_type for e in matches))

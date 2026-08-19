@@ -8,7 +8,11 @@ LLM / 네트워크 없이 임시 디렉토리 트리로만 결정론 검증.
 
 from __future__ import annotations
 
+import builtins
+import os
 from pathlib import Path
+
+import pytest
 
 from forensicagent.scanner import scanner
 from forensicagent.scanner.scanner import scan
@@ -128,8 +132,26 @@ def test_exclude_paths_can_skip_a_file(tmp_path):
     assert names == {"keep.txt"}
 
 
-def test_default_generated_directories_are_ignored(tmp_path):
-    for dirname in (".pytest_cache", "build", "dist", "forensicagent_output"):
+def test_project_generated_directories_are_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr(scanner, "PROJECT_ROOT", tmp_path)
+    for dirname in (
+        ".agents",
+        ".cache",
+        ".claude",
+        ".codex",
+        ".forensicagent",
+        ".hypothesis",
+        ".omc",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".serena",
+        "bench_cli",
+        "bench_full",
+        "bench_scripts",
+        "build",
+        "dist",
+        "forensicagent_output",
+    ):
         _write(tmp_path / dirname / f"{dirname.strip('.')}.txt")
     _write(tmp_path / "case.txt")
 
@@ -137,3 +159,118 @@ def test_default_generated_directories_are_ignored(tmp_path):
     names = {Path(e.path).name for e in inv.evidence_list}
 
     assert names == {"case.txt"}
+
+
+def test_project_named_directory_in_external_evidence_is_scanned(tmp_path):
+    _write(tmp_path / ".codex" / "deploy.ps1", b"$env:TOKEN = 'secret'")
+
+    inv = scan(tmp_path)
+
+    assert {Path(e.path).name for e in inv.evidence_list} == {"deploy.ps1"}
+
+
+def test_symlink_directory_is_not_followed(tmp_path):
+    case = tmp_path / "case"
+    outside = tmp_path / "outside"
+    _write(case / "case.txt")
+    _write(outside / "secret.txt")
+    try:
+        os.symlink(outside, case / "linked", target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("directory symlinks are unavailable on this host")
+
+    inv = scan(case)
+
+    assert {Path(item.path).name for item in inv.evidence_list} == {"case.txt"}
+    assert inv.reparse_paths == 1
+    assert inv.to_dict()["reparse_paths"] == 1
+
+
+def test_reparse_candidate_is_not_descended(tmp_path, monkeypatch):
+    _write(tmp_path / "case.txt")
+    _write(tmp_path / "junction" / "secret.txt")
+    original = scanner._entry_is_link_or_reparse
+
+    def mark_junction(entry):
+        return entry.name == "junction" or original(entry)
+
+    monkeypatch.setattr(scanner, "_entry_is_link_or_reparse", mark_junction)
+
+    inv = scan(tmp_path)
+
+    assert {Path(item.path).name for item in inv.evidence_list} == {"case.txt"}
+    assert inv.reparse_paths == 1
+
+
+def test_reparse_root_is_reported(tmp_path, monkeypatch):
+    target = tmp_path / "case.txt"
+    _write(target)
+    monkeypatch.setattr(scanner, "_stat_is_link_or_reparse", lambda _value: True)
+
+    inv = scan(target)
+
+    assert inv.reparse_paths == 1
+    assert inv.scanned_files == 0
+
+
+def test_file_replaced_by_reparse_after_walk_is_reported(tmp_path, monkeypatch):
+    target = tmp_path / "case.txt"
+    _write(target)
+    calls = 0
+
+    def mark_second_stat(_value):
+        nonlocal calls
+        calls += 1
+        return calls == 2
+
+    monkeypatch.setattr(scanner, "_stat_is_link_or_reparse", mark_second_stat)
+    monkeypatch.setattr(
+        scanner,
+        "_walk",
+        lambda *_args, **_kwargs: ([target], False, 0, 0),
+    )
+
+    inv = scan(tmp_path)
+
+    assert inv.reparse_paths == 1
+    assert inv.skipped_files == 1
+    assert inv.scanned_files == 0
+
+
+def test_unreadable_directory_is_reported_in_inventory(tmp_path, monkeypatch):
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    _write(tmp_path / "case.txt")
+    real_scandir = scanner.os.scandir
+
+    def guarded_scandir(path):
+        if Path(path) == blocked:
+            raise PermissionError("denied")
+        return real_scandir(path)
+
+    monkeypatch.setattr(scanner.os, "scandir", guarded_scandir)
+
+    inv = scan(tmp_path)
+
+    assert inv.unreadable_paths == 1
+    assert inv.to_dict()["unreadable_paths"] == 1
+
+
+def test_unreadable_file_is_skipped_and_reported(tmp_path, monkeypatch):
+    blocked = tmp_path / "blocked.txt"
+    _write(blocked)
+    _write(tmp_path / "case.txt")
+    real_open = builtins.open
+
+    def guarded_open(path, *args, **kwargs):
+        if Path(path) == blocked:
+            raise PermissionError("denied")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", guarded_open)
+
+    inv = scan(tmp_path)
+
+    assert {Path(item.path).name for item in inv.evidence_list} == {"case.txt"}
+    assert inv.skipped_files == 1
+    assert inv.unreadable_paths == 1

@@ -1,10 +1,14 @@
 # forensicagent
 
-[코드 구조·수정 내역·지원 범위·남은 한계 감사 보고서](AUDIT_REPORT.md)
+[코드 구조·수정 내역·지원 범위·남은 한계 감사 보고서](AUDIT_REPORT.md) ·
+[보안 정책](SECURITY.md) · [외부 구성요소 고지](THIRD_PARTY_NOTICES.md)
 
 > 포렌식 자동 분류 CLI 에이전트 — 결정론 Scanner가 증거를 식별하고,
 > 형식 gate와 선택적 RAG/로컬 LLM이 도구 순서를 보강한다. 외부 도구 결과는
 > 근거 기반 규칙으로 의심 항목을 추출해 JSON/Markdown 리포트로 제시한다.
+
+아래 화면은 출력 형식을 보여주는 예시이며, 실제 도구 수와 실행 plugin은 증거,
+대상 OS, scenario, 설치 상태에 따라 달라진다.
 
 ```
 $ cd ~/ctf/forensics-challenge-03/
@@ -16,14 +20,14 @@ $ forensicagent
 [+] 발견: Security.evtx (Windows 이벤트 로그)
 [+] 발견: NTUSER.DAT (레지스트리 하이브)
 
-[*] 적용 가능한 도구 7 개 선별됨:
-    1. volatility3 (pslist, netscan, malfind)
-    2. chainsaw (Sigma hunt)
+[*] 적용 가능한 도구 선별됨:
+    1. volatility3 (Windows pslist, cmdline, netscan, malfind, pstree)
+    2. chainsaw (채널별 Event ID search)
     3. regripper (userassist, run keys)
     ...
 계속 진행할까요? [Y/n] y
 
-[*] [1/7] volatility3 pslist 실행 중... ✓ (12.3s)
+[*] [1/N] volatility3 pslist 실행 중... ✓ (12.3s)
     └─ 의심항목 2 개 발견
 ...
 
@@ -69,18 +73,25 @@ Scanner → Selector → (사용자 승인) → Executor → Analyzer → Report
 
 | 단계 | 책임 | 디렉토리 |
 |---|---|---|
-| **Scanner** | CWD 의 파일을 magic bytes + 확장자 + 파일명 + 부모 디렉토리 힌트로 식별. 9 magic 시그니처 + 22 확장자 + 6 정규식 + 6 디렉토리 키워드. | `forensicagent/scanner/` |
+| **Scanner** | CWD의 파일을 magic bytes + 확장자 + 파일명 + 부모 디렉터리 힌트로 식별. `.env`·YAML/JSON/TOML/INI와 `.sh/.ps1/.bat/.cmd/.xml/.tf/.tfvars`, `Dockerfile`·`Makefile`·`Jenkinsfile`도 secret scan용 text evidence로 분류한다. 깊이 제한, unreadable path, symlink/junction/reparse skip은 coverage 상태로 기록한다. | `forensicagent/scanner/` |
 | **Selector** | 3 단계 하이브리드. **Stage 1** = 결정론 매칭 (evidence_type ∩ applicable_evidence_types) — 실행 자격 게이트. **RAG** = 증거+시나리오로 도구 메타데이터 컬렉션을 벡터 검색해 후보를 관련도순 재정렬하고 도메인 스니펫을 프롬프트에 주입. **Stage 2** = LLM 에게 우선순위 + 보강된 reason 을 JSON 으로 요청. RAG 는 순서/컨텍스트에만 영향(자격 게이트는 불변), 의존성/질의 실패 시 결정론+LLM 경로로 자동 폴백. LLM 파싱 실패 시 Stage 1 결과 그대로 fallback. | `forensicagent/selector/` |
-| **Executor** | 어댑터 패턴. `GenericAdapter` 가 YAML 의 `command_templates` 와 `install_check` 만으로 동작. `subprocess.Popen` + 타임아웃, `shell=False` (인젝션 차단), stdout/stderr 는 메모리가 아니라 **파일로**. `parallelizable=true` 면 ThreadPool, 아니면 직렬. | `forensicagent/executor/` |
-| **Analyzer** | 출력 크기에 따라 분기 — **Case A** (≤100 KB, rules + LLM 둘 다) / **Case B** (≤4 MB, rules 가 추리고 LLM 으로 자연어 보강) / **Case C** (>4 MB, rules only, LLM 안 부름). `suspicious_indicators.id` 별 specific matcher + 미등록은 키워드 AND fallback. dedup + severity 내림차순. | `forensicagent/analyzer/` |
-| **Reporter** | terminal (Rich 표) + JSON (기계 가독) + Markdown (사람 가독) 동시 출력. 한 파일이 한 포맷, 정해진 디렉토리. | `forensicagent/reporter/` |
+| **Executor** | 어댑터 패턴. `GenericAdapter`가 YAML의 `command_templates`와 `install_check`로 동작. `shell=False`, stdout/stderr 파일 저장, Windows Job Object와 POSIX process group으로 timeout 자식 프로세스를 함께 종료한다. `parallelizable=true`면 ThreadPool, 아니면 직렬. | `forensicagent/executor/` |
+| **Analyzer** | 출력 크기에 따라 분기 — **Case A** (≤100 KB), **Case B** (≤4 MB), **Case C** (>4 MB). 등록된 `suspicious_indicators.id`의 명시적 matcher만 실행한다. 코드 보안 출력은 소스 비밀 유출을 막기 위해 LLM에 보내지 않고, 그 밖의 LLM-only 관찰도 근거 excerpt가 실제 입력에 있을 때만 허용하며 severity를 `low` 이하로 제한한다. | `forensicagent/analyzer/` |
+| **Reporter** | terminal (Rich 표) + JSON + Markdown 동시 출력. finding의 rule/source/confidence를 표시하고, 최대 500개를 severity 우선으로 보존하며 finding/분석/scan coverage 한도 도달 여부를 명시한다. | `forensicagent/reporter/` |
 
 ### 왜 이렇게 쪼갰나
 
 - **Scanner / Selector 분리**: "무엇이 있는가" 와 "무엇을 돌릴까" 는 다른
   결정이다. Selector 는 Scanner 결과 + 도구 메타데이터만 보면 되고, 파일
   시스템에 다시 접근하지 않는다.
-- **Selector 의 다단계**: 결정론 필터 단계가 50 → 10~15 개로 줄여주므로,
+- **Scanner 경계가 실행 경계**: Bandit·Semgrep·Gitleaks도 inventory에서
+  host/evidence/input gate를 통과한 파일만 하나씩 받는다. 공통 VCS/dependency
+  디렉터리는 모든 root에서 정책상 제외하지만 `.agents`·`.codex`·`.forensicagent`
+  같은 프로젝트 상태 이름은 신뢰된 `PROJECT_ROOT` 자체를 scan할 때만 제외한다.
+  외부 증거 트리의 같은 이름은 scan한다. 깊이 밖·unreadable·reparse 경로는
+  coverage로 알리며, 큰 소스 트리에서는 파일별 프로세스 비용이 커질 수 있다.
+- **Selector 의 다단계**: 결정론 필터 단계가 현재 등록된 도구 중 증거에 맞는
+  후보만 남겨주므로,
   LLM 컨텍스트가 작아지고 비용/속도가 보존된다. 그 사이에 RAG 가 도구
   메타데이터 코퍼스를 벡터 검색해 (i) 후보를 관련도순으로 재정렬하고
   (ii) 로컬 LLM 의 약한 포렌식 도메인 지식을 검색된 스니펫으로 보강한다.
@@ -119,8 +130,8 @@ display_name: Chainsaw
 category: log_analysis
 applicable_evidence_types: [evtx_log]      # Selector 결정론 필터의 키
 platform: [windows, linux, macos]
-output_format: json
-output_size_estimate: small                # Case A 로 라우팅
+output_format: jsonl
+output_size_estimate: large                # 스트리밍 규칙 분석으로 라우팅
 parallelizable: true
 estimated_runtime: short
 
@@ -129,30 +140,37 @@ install_check:                              # Executor 가 prerequisites 검증
   expected_pattern: "chainsaw"
 
 command_templates:                          # Executor 가 build_command 에 사용
-  - name: "Sigma hunt with bundled rules"
-    template: "chainsaw hunt {evidence_path} -s {sigma_path} ..."
-    when: "evtx 에서 알려진 위협 패턴 탐지가 필요할 때"
+  - name: "Channel-aware Event ID search"
+    template: "chainsaw search -t {channel_event_ids} --match-any --jsonl --output {output_dir}/chainsaw.jsonl {evidence_path}"
+    when: "EVTX 채널별 주요 Event ID를 빠르게 확인할 때"
 
 usage_description: |
   ... (LLM 시스템 프롬프트에 들어가는 자연어 설명)
 
 suspicious_indicators:                      # Analyzer 의 룰 dispatch + 프롬프트
-  - id: sigma_rule_hit
-    pattern: "JSON 출력에 rule_name 필드가 존재하는 항목"
-    severity_baseline: medium
-  - id: rdp_logon_offhours
-    pattern: "EventID 4624 + LogonType 10 + 비업무 시간"
+  - id: service_install_4697
+    pattern: "EventID 4697 + 사용자 쓰기 가능 경로의 ServiceFileName"
     severity_baseline: high
+  - id: rdp_logon_offhours
+    pattern: "EventID 4624 + LogonType 10 + 설정된 조직 현지 업무시간 밖"
+    severity_baseline: medium
 
 known_false_positives:                      # LLM 시스템 프롬프트에 음성 제약
   - "관리자가 PowerShell 로 정상 작업"
 ```
 
-이 YAML 한 파일이 Selector / Executor / Analyzer / LLM 프롬프트 모두를
-구동한다. 새 도구를 추가하는 비용 = YAML 1 개 작성.
+이 YAML이 Selector / Executor / LLM 프롬프트를 구동한다. Analyzer finding을
+추가하려면 YAML indicator와 같은 ID의 concrete matcher 및 회귀 테스트도 필요하다.
 
-현재 reference 3 개: **chainsaw**, **volatility3**, **regripper**.
-규모 확장 (→ 50 개) 은 사람 노가다 — 코드 변경 없이 YAML 만 추가하면 된다.
+`platform`은 도구를 실행할 수 있는 host OS다. 증거의 대상 OS 지원은 별도
+`applicable_evidence_platforms` gate이며, 현재 Volatility 실행 metadata는
+Windows plugin만 선언하므로 Linux/macOS 메모리 증거를 자동 선택하지 않는다.
+
+현재 실행 metadata는 11개다. 각 도구의 정확한 입력 gate와 지원 범위는
+[감사 보고서의 등록 도구 표](AUDIT_REPORT.md#52-현재-등록-도구)를 기준으로 한다.
+기본 metadata가 선언하는 고유 indicator는 30개이고 matcher registry는 custom
+metadata 호환 ID까지 37개를 지원한다. AmcacheParser·EvtxECmd·MFTECmd·PECmd·RECmd
+같은 EZTools 실행 metadata는 Windows host 전용이다.
 
 ---
 
@@ -174,9 +192,8 @@ JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
 ## Benchmark / RAG performance
 
 **"RAG 로 도구 선별" 이 결정론 베이스라인 대비 실제로 순서 품질을 개선하는가?**
-를 정량화하는 하니스가 `bench/` 에 있다. 아래 수치는 합성 골든셋에 대해
-`forensicagent bench --no-rebuild` 와 동일한 하니스를 2026-08-15에 다시 실행해
-얻은 값이다. LLM 모드는 끄고 결정론 순서와 RAG 순서만 비교했다.
+를 정량화하는 하니스가 `bench/` 에 있다. 이 하니스는 Analyzer나 외부 도구를
+실행하지 않는 **도구 선택 순위 benchmark**이며 탐지 precision/recall이 아니다.
 
 ### 어떻게 측정했나 (방법론)
 
@@ -191,43 +208,43 @@ JSON 리포트의 `summary.total_ms` 가 모든 stage 의 합.
   자격을 얻느냐가 아니다.
 - **지표**: NDCG@k (지수 gain `(2^rel-1)/log2(rank+1)`), MRR, Precision@k,
   Recall@k (k=3,5; relevant 임계값 등급≥1). 여기에 핵심 도구만 보는
-  `core_mrr`와 `core_r@k` (등급=2)를 별도로 계산한다. 값은 케이스 평균.
+  `core_mrr`와 `core_r@k` (등급=2)를 별도로 계산한다. 선택 결과에서 누락된
+  gold 도구도 NDCG의 이상 순위와 Recall 분모에 포함하며, 값은 케이스 평균이다.
 - **임베딩**: `all-MiniLM-L6-v2` (CPU). 도구 코퍼스는 도구 YAML 자체
   (`rag/tool_indexer.py`).
 
-### 핵심 결과 (deterministic → RAG)
+### 핵심 결과
+
+2026-08-19에 Windows 11 AMD64 / CPython 3.12.4에서 14개 케이스와 11개
+도구를 1회 재측정했다.
 
 | metric | deterministic | RAG | delta |
-|---|---|---|---|
-| **NDCG@3** | 0.9295 | 0.9422 | **+0.0127** |
-| **NDCG@5** | 0.9485 | 0.9613 | **+0.0128** |
-| **P@3** | 0.6429 | 0.6429 | 0.0000 |
-| **R@3** | 0.9714 | 0.9714 | 0.0000 |
-| **MRR** | 1.0000 | 1.0000 | 0.0000 |
-| **Core MRR (grade=2)** | 0.8929 | 0.9286 | **+0.0357** |
-| **Core Recall@3/@5** | 0.9524 / 1.0000 | 0.9524 / 1.0000 | 0.0000 / 0.0000 |
+|---|---:|---:|---:|
+| NDCG@3 | 0.9295 | 0.9242 | -0.0053 |
+| NDCG@5 | 0.9485 | 0.9442 | -0.0043 |
+| MRR | 1.0000 | 1.0000 | 0.0000 |
+| Core MRR (grade=2) | 0.8929 | 0.8571 | -0.0357 |
+| Recall@3 | 0.9714 | 0.9714 | 0.0000 |
+| Recall@5 | 1.0000 | 1.0000 | 0.0000 |
 
-- 낮은 score margin(0.03)은 EVTX 네 케이스에서 `evtxecmd`를 `chainsaw`보다
-  앞세워 NDCG@3를 **-0.0308** 떨어뜨렸다. 기본 margin을 0.10으로 재보정한
-  뒤에는 14개 중 2개 코드 케이스에서만 순서가 바뀌었고 전체 delta가 양수였다.
-- 기존 MRR은 보조 도구도 relevant로 세어 1.0에 포화됐지만, `core_mrr`는
-  핵심 도구(grade=2)의 첫 위치를 반영해 `0.8929 → 0.9286`으로 개선됐다.
-- 이 개선은 작은 합성셋에서의 **순위 품질** 개선이며 탐지율 향상을 직접
-  증명하지 않는다. Precision/Recall은 자격 도구 집합이 같아 변하지 않았다.
-- 후보가 하나면 임베딩을 로드하지 않는다. 이 PC의 cold process에서는 첫
-  MiniLM 로드가 약 25~30초였고, 최종 하니스 평균 `select_rag`는 2.12초/케이스였다.
-  같은 프로세스에서 모델이 로드된 뒤의 질의는 훨씬 짧지만, CLI를 매번 새로
-  실행하면 cold-start 비용을 다시 낼 수 있다.
+RAG는 3/14 케이스의 순서를 바꿨지만 이번 측정에서는 aggregate NDCG와 Core
+MRR을 **개선하지 못하고 낮췄다**. 첫 index rebuild는 48.26초(embedding
+43,094ms, Chroma write 716ms), 케이스당 RAG 선택 평균은 220.7ms였다. 이 값은
+해당 로컬 환경의 1회 측정이며, 외부 도구와 Analyzer를 실행하지 않는 **도구
+선택 순위**다. finding precision/recall 또는 end-to-end 탐지율이 아니다. 전체
+재현 정보와 케이스별 결과는 `bench/bench_report.md`와
+`bench/bench_result.json`에 있다.
 
 ### 재현
 
-```bash
-pip install chromadb sentence-transformers
-forensicagent rag index-tools          # 도구 코퍼스 인덱싱 (1회)
-forensicagent bench                    # deterministic vs RAG (빠름)
-forensicagent bench --with-llm         # +LLM/+RAG+LLM 모드 (Ollama 필요, 느림)
-forensicagent bench --no-rebuild       # 인덱스 재빌드 생략
-# 또는: python -m bench.run [--with-llm] [--no-rebuild]
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[rag]"
+.\.venv\Scripts\python.exe -m forensicagent rag index-tools
+.\.venv\Scripts\python.exe -m forensicagent bench
+# 선택: Ollama까지 준비한 뒤 --with-llm
+.\.venv\Scripts\python.exe -m forensicagent bench --with-llm
+# metadata/index freshness 검사를 통과하는 기존 index만 재사용
+.\.venv\Scripts\python.exe -m forensicagent bench --no-rebuild
 ```
 
 `forensicagent bench`를 실행하면 전체 표(집계 + delta + 케이스별 + 방법론 +
@@ -240,10 +257,11 @@ forensicagent bench --no-rebuild       # 인덱스 재빌드 생략
 - 도구 11 개뿐. 일부 evidence type 은 자격 도구가 1 개라 순서가 자명(지표=1.0,
   모드 무관) → 측정 delta 를 희석. 신호는 다-도구 케이스(registry_hive /
   evtx_log / source_code_*)에 있다.
-- `all-MiniLM-L6-v2` 는 영어 중심이라 벤치도 영어. 한국어 시나리오는 더 낮게
-  나옴(`FORENSICAGENT_EMBEDDING_MODEL=BAAI/bge-m3` 로 교체 가능).
+- `all-MiniLM-L6-v2` 는 영어 중심이고 벤치도 영어다. 한국어 시나리오는 성능이
+  낮을 수 있으므로 별도 평가가 필요하다(`BAAI/bge-m3` 같은 다국어 모델로 교체 가능).
 - **순서 품질만** 측정 — end-to-end triage 정확도·도구 실행·finding 품질은 아님.
-- RAG 안전속성(자격 밖 도구 승격 불가)·폴백은 이 벤치가 아니라 **단위테스트**가 보증.
+- RAG 안전속성(자격 밖 도구 승격 불가)·폴백은 이 벤치가 아니라 단위테스트로
+  회귀 검증한다.
 
 ---
 
@@ -253,10 +271,10 @@ forensicagent bench --no-rebuild       # 인덱스 재빌드 생략
 |---|---|---|
 | 1. 기초 인프라 (CLI / Ollama / doctor) | 2주 | ✅ 완료 |
 | 2. Scanner | 1주 | ✅ 완료 |
-| 3. 도구 메타데이터 스키마 + 우선 5개 | 2~3주 | ✅ 스키마 + 3개 reference |
-| 4. 단일 도구 end-to-end | 2주 | ✅ 완료 (echo_tool 합성으로 검증) |
-| 5. 다중 도구 확장 (5→20→50) | 3~4주 | ⏳ 코드는 완성, YAML 3개 |
-| 6. 평가 / 튜닝 | 2주 | ⏳ 미시작 |
+| 3. 도구 메타데이터 스키마 + 우선 5개 | 2~3주 | ✅ 스키마 + 실행 metadata 11개 |
+| 4. 단일 도구 end-to-end | 2주 | ✅ 합성 fixture와 mock subprocess로 회귀 검증 |
+| 5. 다중 도구 확장 (5→20→50) | 3~4주 | ⏳ 11개 등록, 실제 증거 E2E 검증 필요 |
+| 6. 평가 / 튜닝 | 2주 | ⏳ 순위 하니스 구현, 탐지 정확도 평가는 미실시 |
 
 **커밋 타임라인**
 
@@ -292,10 +310,25 @@ forensicagent bench --no-rebuild       # 인덱스 재빌드 생략
 
 ### 1. 의존성 설치
 
-```bash
-pip install -r requirements.txt
-pip install -e .       # 'forensicagent' 명령 등록
+Windows PowerShell에서는 저장소 전용 가상환경을 먼저 만든다.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+# 선택: Ollama + RAG
+.\.venv\Scripts\python.exe -m pip install -e ".[llm,rag]"
 ```
+
+Linux에서는 `python-magic`이 사용하는 시스템 `libmagic`도 필요하다. 배포판에
+맞게 설치한 뒤 같은 방식으로 `.venv`를 사용한다(예: Debian/Ubuntu는
+`sudo apt-get install libmagic1`).
+
+> **RAG 보안 주의 (2026-08-19):** 현재 선택 의존성 `chromadb 1.5.9`는
+> 서버 API를 외부에 노출할 때 pre-auth code injection이 가능한
+> CVE-2026-45829의 영향 범위이고 아직 수정 버전이 없다. forensicagent는
+> in-process `PersistentClient`만 사용하며 Chroma HTTP 서버를 시작하지 않는다.
+> 패치 전에는 `chroma run`을 실행하거나 해당 API를 신뢰되지 않은 네트워크에
+> 공개하지 말고, 필요하면 core-only 설치와 `--no-rag`를 사용한다.
 
 ### 2. Ollama 데몬 + 모델 준비
 
@@ -305,51 +338,59 @@ ollama pull qwen2.5:7b       # 기본값. 14b 등은 FORENSICAGENT_LLM_MODEL 로
 ollama serve                  # http://localhost:11434
 ```
 
-다른 모델/엔드포인트는 env 로:
-```bash
-export FORENSICAGENT_LLM_MODEL=llama3.1:8b
-export FORENSICAGENT_LLM_BASE_URL=http://localhost:11434
+다른 모델/엔드포인트는 PowerShell 환경 변수나 프로젝트의 `.env`로 지정한다.
+```powershell
+$env:FORENSICAGENT_LLM_MODEL = "llama3.1:8b"
+$env:FORENSICAGENT_LLM_BASE_URL = "http://localhost:11434"
 ```
 
 ### 3. 환경 점검
 
-```bash
-forensicagent doctor
+```powershell
+.\.venv\Scripts\python.exe -m forensicagent doctor
 ```
 
 설치 안 된 의존성 / Ollama 미접속 / 포렌식 도구(volatility3, chainsaw, ...)
 PATH 미등록을 모두 보여준다. 각 missing 도구 옆에 install 방법 (pip 명령
-또는 다운로드 URL) 이 같이 뜬다.
+또는 다운로드 URL) 이 같이 뜬다. RAG·LLM 의존성은 선택 기능이므로 core-only
+설치에서는 `miss`로 표시돼도 `doctor` 자체는 성공한다.
 
 ### 3-A. 포렌식 도구 설치 도우미
 
 `doctor` 가 잡은 missing 도구를 자동으로 채워주는 헬퍼:
 
-```bash
-forensicagent install                       # 인터랙티브: missing 순회하며 y/n
-forensicagent install chainsaw              # 특정 도구만
-forensicagent install --all                 # 자동 가능한 거 (pip + zip) 한 번에
+```powershell
+.\.venv\Scripts\python.exe -m forensicagent install
+.\.venv\Scripts\python.exe -m forensicagent install chainsaw
+.\.venv\Scripts\python.exe -m forensicagent install --all
 ```
 
-- **pip 가능** (`volatility3`, `binwalk`) → `pip install <pkg>` 실행
-- **zip 다운로드** (`chainsaw`) → GitHub releases 에서 받아
-  `~/.forensicagent/tools_bin/<tool>/` 로 풀고 `doctor` 의 PATH 검색에 자동 등록
+- **Python package** (`volatility3`, `bandit`; `semgrep`은 격리 tool venv) →
+  registry에 고정된 버전을 프로젝트 내부에 설치
+- **zip 다운로드** (`chainsaw`, `gitleaks`) → 고정된 release URL을 HTTPS로 받고 게시된
+  SHA-256을 확인한 뒤 경로 탈출·비정상 member·크기 제한을 검사해 교체 설치
+- **Gitleaks** → 기본 규칙이 전부 무탐지되는 upstream v8.30.1을 제외하고,
+  실제 가짜 AWS 키 탐지를 검증한 v8.30.0만 설치·실행
+- **Binwalk** → 오래된 PyPI 패키지를 자동 설치하지 않고 공식 v3 설치를 안내
 - **수동 설치 필요** (`yara`, `exiftool`, `tshark`, `plaso`, `regripper`,
   `strings`, `tcpdump`) → 다운로드 URL + `curl` 예시를 출력
   (라이선스 마법사 / MSVC Build Tools / 버전 매번 바뀌는 URL 등이라 자동 불가)
 
-zip 도구는 PATH 에 추가 안 해도 forensicagent 가 알아서 발견한다 (
-`~/.forensicagent/tools_bin/*/` 을 자체 검색).
+이 저장소의 로컬 `.env`에서 `FORENSICAGENT_HOME=.forensicagent`로 두면 ZIP과
+격리 venv 도구는 저장소의 `.forensicagent/tools_bin/` 아래에만 설치되고 PATH를
+수정하지 않는다. pip형 도구도 위 명령을 실행한 `.venv`에 설치된다. 이 두
+디렉터리는 Git에서 제외된다. 프로젝트 밖 기본 사용자 상태 경로를 쓰지 않으려면
+`.env.example`을 복사해 이 설정을 유지한다.
 
 ### 4. 분석 실행 — 두 가지 방식
 
 #### (A) 인터랙티브 REPL — 탐색적 분석
 
-```bash
-cd /path/to/evidence
-forensicagent                          # 인자 없이 + TTY 면 자동 REPL 진입
+```powershell
+Set-Location C:\cases\case03
+.\.venv\Scripts\python.exe -m forensicagent   # 인자 없이 + TTY 면 REPL
 # 또는 명시적으로
-forensicagent shell --path /case-03
+.\.venv\Scripts\python.exe -m forensicagent shell --path C:\cases\case03
 
 # REPL 안에서
 forensic> /help                        # 슬래시 명령 목록
@@ -374,50 +415,58 @@ REPL 의 자연어 라우터는 입력을 `{"actions":[...], "message":"..."}` J
 
 #### (B) One-shot 파이프라인 — 배치 / CI
 
-```bash
-forensicagent --auto                   # 승인 없이 자동
-forensicagent --quick                  # estimated_runtime: short 만
-forensicagent --tools chainsaw,volatility3   # 특정 도구 강제
-forensicagent --dry-run                # 계획만 출력
-forensicagent --no-llm                 # 결정론만 (Selector/Analyzer LLM off)
-forensicagent --no-rag                 # RAG 재정렬/컨텍스트 끄고 결정론 순서
-forensicagent --scenario "로그인 실패 후 성공 흔적 조사"   # 시나리오 주입
-forensicagent --path /case-03 --output-dir /reports
+```powershell
+.\.venv\Scripts\python.exe -m forensicagent --auto
+.\.venv\Scripts\python.exe -m forensicagent --quick
+.\.venv\Scripts\python.exe -m forensicagent --tools chainsaw,volatility3
+.\.venv\Scripts\python.exe -m forensicagent --dry-run
+.\.venv\Scripts\python.exe -m forensicagent --no-llm
+.\.venv\Scripts\python.exe -m forensicagent --no-rag
+.\.venv\Scripts\python.exe -m forensicagent --scenario "로그인 실패 후 성공 흔적 조사"
+.\.venv\Scripts\python.exe -m forensicagent --path C:\cases\case03 --output-dir C:\reports
 ```
+
+- `--tools`는 RAG/LLM 순위만 건너뛰고 지정 도구를 우선 선택한다. host OS,
+  evidence type, input format 안전 gate는 우회하지 않는다.
+- `--no-llm`은 Selector/Analyzer LLM만 끈다. RAG는 `--no-rag`도 지정해야 꺼진다.
+- `--no-rag`은 RAG 재정렬과 검색 context만 끈다. LLM은 `--no-llm`도 지정해야 꺼진다.
+- `--scenario`는 RAG query와 Selector/Analyzer LLM context에 들어가지만,
+  결정론 matcher나 도구 자격 gate를 바꾸지 않는다.
 
 > **결정 규칙**: 인자 없이 + TTY = REPL. 플래그 하나라도 있거나 stdin 이
 > 파이프 = one-shot. `forensicagent shell` 은 무조건 REPL.
 
 #### 보조 명령
 
-```bash
-forensicagent tools list               # 사용 가능한 도구
-forensicagent tools info chainsaw      # YAML 상세
-forensicagent doctor                   # 환경 점검 (RAG 인덱스 카운트 포함)
-forensicagent rag index-tools          # 도구 YAML → 런타임 선별용 벡터 인덱스 (재실행 = 재인덱싱)
-forensicagent rag status               # 인덱스 존재/카운트 확인
-forensicagent --version
+```powershell
+.\.venv\Scripts\python.exe -m forensicagent tools list
+.\.venv\Scripts\python.exe -m forensicagent tools info chainsaw
+.\.venv\Scripts\python.exe -m forensicagent doctor
+.\.venv\Scripts\python.exe -m forensicagent rag index-tools
+.\.venv\Scripts\python.exe -m forensicagent rag status
+.\.venv\Scripts\python.exe -m forensicagent --version
 ```
 
-LLM 이 없어도 (Ollama 미설치) `--no-llm` 으로 결정론적으로 돌릴 수 있다 —
-Selector Stage 2 + Analyzer LLM 만 건너뛰고 룰 매처는 그대로 작동.
+LLM이 없어도 `--no-llm`으로 실행할 수 있다. 이 플래그는 Selector Stage 2와
+Analyzer LLM만 건너뛰고 룰 matcher와 RAG 설정은 그대로 둔다.
 
-**RAG 활성화 (선택)**: `pip install chromadb sentence-transformers` 후
-`forensicagent rag index-tools` 로 도구 코퍼스를 1 회 인덱싱하면, Selector 가
+**RAG 활성화 (선택)**: `.\.venv\Scripts\python.exe -m pip install -e ".[rag]"`
+후 `.\.venv\Scripts\python.exe -m forensicagent rag index-tools`로 도구
+코퍼스를 1회 인덱싱하면, Selector가
 런타임에 벡터 검색으로 후보를 관련도순 재정렬하고 Analyzer 에 도메인 스니펫을
-주입한다. 의존성/인덱스가 없으면 자동으로 결정론+LLM 경로로 폴백하므로,
+제공한다(LLM이 허용된 비-code-security 분석에만 사용). 의존성/인덱스가 없으면 자동으로 결정론+LLM 경로로 폴백하므로,
 설치하지 않아도 파이프라인은 그대로 동작한다.
 
 ---
 
 ## 도구 추가하기
 
-```bash
+```powershell
 # 1. YAML 작성
 $EDITOR tools_metadata/yara.yaml
 
 # 2. 검증
-python -c "from forensicagent.tools import load_tool; print(load_tool('tools_metadata/yara.yaml'))"
+.\.venv\Scripts\python.exe -c "from forensicagent.tools import load_tool; print(load_tool('tools_metadata/yara.yaml'))"
 
 # 3. 끝. CLI 가 다음 실행 때 자동으로 픽업.
 ```
@@ -437,7 +486,7 @@ forensicagent/
 │   └── ui.py             # render_inventory, human-readable size
 ├── scanner/              # Layer 1 — CWD 증거 식별
 │   ├── detectors.py      # magic / ext / filename / parent dir 시그니처
-│   ├── scanner.py        # 깊이 제한 BFS, 심볼릭 미추적, 헤더만 읽음
+│   ├── scanner.py        # 깊이 제한 BFS, symlink/junction 미추적, coverage 계수
 │   └── types.py          # Evidence, Inventory
 ├── selector/             # Layer 3 — 도구 선택 (결정론 → RAG → LLM)
 │   ├── filter.py         # Stage 1 결정론 (자격 게이트)
@@ -445,10 +494,10 @@ forensicagent/
 │   └── selector.py       # 오케스트레이션 + RAG 재정렬 + --quick/--tools/--no-rag
 ├── executor/             # Layer 4 — 도구 실행
 │   ├── adapter.py        # GenericAdapter + register_adapter
-│   ├── runner.py         # subprocess + timeout + 파일 저장
+│   ├── runner.py         # subprocess + Job Object/process-group timeout + 파일 저장
 │   └── executor.py       # ThreadPool / serial 라우팅 + Rich Progress
 ├── analyzer/             # Layer 4 — 의심항목 추출
-│   ├── rules.py          # id 기반 specific matcher + fallback
+│   ├── rules.py          # id 기반 명시적 matcher registry
 │   ├── llm_extract.py    # format=json + severity 가이드라인
 │   └── analyzer.py       # Case A/B/C 분기 + dedup
 ├── reporter/             # Layer 5 — 리포트
@@ -473,10 +522,7 @@ forensicagent/
 ├── __init__.py           # __version__
 └── __main__.py           # `python -m forensicagent`
 
-tools_metadata/           # 도구 YAML (사용자가 손으로 채움)
-├── chainsaw.yaml
-├── volatility3.yaml
-└── regripper.yaml
+tools_metadata/           # 실행 metadata YAML 11개 (정확한 목록은 감사 보고서 참조)
 
 scripts/crawlers/         # 도구 카탈로그 보강용 (TryHackMe, CyberDefenders,
                           # DFIR Report, EZTools, HackTricks)
@@ -514,10 +560,31 @@ seed_docs/                # 크롤러 산출물 (도메인 자료)
 - **도구 metadata 의 인덱싱 부담**: 50 개 도구 YAML 은 사람 노가다이고, 이
   부분은 코드로 해결 못 한다. (그래서 `scripts/crawlers/` 가 도메인 자료
   수집을 보조하지만, YAML 변환은 수작업.)
-- **specialized adapter 부재**: 현재 모든 도구가 `GenericAdapter`. 출력
-  포맷이 매우 비표준인 도구는 서브클래스가 필요할 수 있다.
-- **단위 테스트 부재**: `tests/` 디렉토리는 비어 있다. 통합 동작은 합성
-  evidence + echo_tool 어댑터로 검증했지만, 회귀 방지용 테스트는 미작성.
+- **실제 증거 검증 부족**: Chainsaw·RECmd에는 전용 adapter가 있고 자동화
+  테스트도 존재하지만, 테스트 대부분은 합성 fixture와 mock subprocess다.
+  공개 대용량 EVTX·hive·memory corpus를 이용한 버전별 E2E 검증은 남아 있다.
+- **coverage는 성공과 별개**: scan의 `depth_limit_hit`, `unreadable_paths`,
+  `reparse_paths` 또는 분석의 `coverage_truncated`가 있으면 보고서가 생성돼도
+  전체 증거를 다 본 것이 아니다. 원본 artifact와 누락 경로를 검토해야 한다.
+
+---
+
+## CI와 공개 상태
+
+`.github/workflows/ci.yml`은 Windows/Python 3.10·3.14와 Ubuntu/Python 3.12에서
+lint, 테스트, wheel build/install, source tree 밖 CLI smoke test를 수행한다.
+배포·릴리스·클라우드 자격증명을 사용하는 단계는 없으며 **CI만 있고 CD는 없다**.
+
+저장소를 공개하기 전에는 다음 항목이 차단 조건이다.
+
+- `data/`·`seed_docs/` corpus의 재배포 라이선스와 provenance를 파일별로 확인한다.
+- Git 전체 이력의 corpus secret 후보를 개별 판정하고 실제 자격증명이 없음을 확인한다.
+- tracked 생성 산출물과 로컬 절대경로가 포함된 보고서의 공개 범위를 정한다.
+- 선택 의존성 ChromaDB의 미패치 취약점은 core-only/`--no-rag` 운용으로 격리한다.
+- GitHub private vulnerability reporting, push protection, branch protection은 저장소
+  관리자 설정에서 켠다.
+- 합성 선택 benchmark를 실제 사건 finding precision/recall 또는 수상 가능성의
+  증거로 표현하지 않는다. 라벨된 실제 증거 E2E 평가는 아직 없다.
 
 ---
 
@@ -527,9 +594,15 @@ seed_docs/                # 크롤러 산출물 (도메인 자료)
 섹션 참조.
 
 짧게:
-1. 도구 YAML 3 → 10~20 개 확장 (yara, plaso/log2timeline, tshark, exiftool,
-   binwalk, strings, ... 우선)
-2. `tests/` 작성 — scanner detectors, selector filter, analyzer rules 의
-   단위 테스트
-3. 도구 출력 포맷이 비표준인 도구의 specialized adapter
-4. Phase 6 — 공개 CTF 데이터셋 1~2 개로 precision/recall 측정
+1. 공개 CTF/포렌식 증거셋으로 외부 도구와 matcher를 end-to-end 고정
+2. PCAP·disk image·SQLite/browser artifact의 실행 metadata와 parser 추가
+3. Chainsaw Sigma 지원이 필요하면 rules/mapping 경로를 명시하는 별도 실행 경로 추가
+4. 입력 증거 hash·획득 metadata를 포함한 evidence manifest 도입
+
+---
+
+## License
+
+MIT. 자세한 조건은 [LICENSE](LICENSE), 취약점 제보 절차는
+[SECURITY.md](SECURITY.md), 외부 도구·데이터 고지는
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참조한다.

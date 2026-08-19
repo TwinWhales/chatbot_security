@@ -10,7 +10,6 @@ applicable_evidence_types:
 
 platform:
   - windows
-  - linux  # dotnet runtime 으로 cross-platform
 
 input_format:
   - "name:$MFT"
@@ -61,14 +60,6 @@ suspicious_indicators:
     pattern: "FileName 에 ':' 포함, ADS (Alternate Data Stream) 명세"
     severity_baseline: medium
     description: "ADS 는 합법적 사용도 있지만 (Zone.Identifier) 임의 ADS 는 데이터 은닉"
-  - id: zero_byte_executable_recreated
-    pattern: "$MFT 에서 같은 경로의 .exe 가 0 byte → 정상 크기 회복 패턴 (USN journal $J 에서 확인)"
-    severity_baseline: medium
-    description: "프로세스 hollowing / replacement 의 흔적"
-  - id: huge_unallocated_clusters
-    pattern: "Volume 전체 unallocated cluster 가 비정상적으로 큼 (free space steganography 의심)"
-    severity_baseline: low
-    description: "free space 에 데이터 은닉의 가능성"
 
 known_false_positives:
   - "정상 소프트웨어 (Slack, Discord 등) 가 %APPDATA% 에서 자체 업데이트로 실행파일을 임시로 만들었다 지우는 경우"

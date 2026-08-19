@@ -1,59 +1,19 @@
 """Deterministic per-target command expansion for multi-pass tools.
 
 Most tools need one command per evidence file.  Memory and registry analysis
-are different: useful coverage requires selecting a plugin as well as a tool,
-and the safe plugin depends on the scenario or hive basename.  This module
-keeps that decision in the selector layer instead of hard-coding tool behavior
-inside the subprocess executor.
+are different: useful coverage requires selecting a plugin as well as a tool.
+Memory keeps the complete declared detector set, while the safe registry plugin
+depends on the hive basename.  This module keeps that decision in the selector
+layer instead of hard-coding tool behavior inside the subprocess executor.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path, PureWindowsPath
 
 from forensicagent.selector.types import RunSpec, ToolSelection
 from forensicagent.tools.schema import ToolMetadata
 
-
-_FULL_TRIAGE_TERMS = (
-    "full triage",
-    "full intrusion triage",
-    "full host triage",
-    "full memory triage",
-    "comprehensive triage",
-    "complete triage",
-    "전체 트리아지",
-    "전체 분석",
-    "종합 분석",
-    "정밀 분석",
-)
-
-_SCENARIO_TERMS: dict[str, tuple[str, ...]] = {
-    "netscan": (
-        "netscan",
-        "network",
-        "network connection",
-        "네트워크",
-        "외부 통신",
-        "c2 통신",
-    ),
-    "malfind": (
-        "malfind",
-        "memory injection",
-        "injected code",
-        "코드 주입",
-        "메모리 주입",
-    ),
-    "pstree": (
-        "pstree",
-        "process tree",
-        "parent child",
-        "parent-child",
-        "프로세스 트리",
-        "부모 자식",
-    ),
-}
 
 _VOLATILITY_MARKERS = {
     "pslist": "windows.pslist.",
@@ -64,7 +24,6 @@ _VOLATILITY_MARKERS = {
 }
 
 _REGRIPPER_MARKERS = {
-    "ntuser.dat": ("userassist", "-p userassist"),
     "system": ("services", "-p services"),
     "software": ("run", "-p run"),
 }
@@ -105,10 +64,10 @@ def _volatility_specs(
     metadata: ToolMetadata,
     scenario: str | None,
 ) -> list[RunSpec]:
-    # pslist provides process identity/parent linkage; cmdline provides paths
-    # and arguments needed by the unusual-path detector. Both are cheap core
-    # passes, while network/injection/tree plugins remain scenario-driven.
-    plugins = ["pslist", "cmdline", *_scenario_plugins(scenario)]
+    # Scenario text may prioritize a case, but must never disable a detector
+    # advertised by the built-in metadata.
+    del scenario
+    plugins = list(_VOLATILITY_MARKERS)
     templates: list[tuple[str, str]] = []
     for plugin in dict.fromkeys(plugins):
         template = _template_containing(metadata, _VOLATILITY_MARKERS[plugin])
@@ -126,21 +85,6 @@ def _volatility_specs(
         for target in dict.fromkeys(selection.target_evidence)
         for plugin, template in templates
     ]
-
-
-def _scenario_plugins(scenario: str | None) -> list[str]:
-    if not scenario or not scenario.strip():
-        return []
-    normalized = re.sub(r"[_-]+", " ", scenario.casefold())
-    if any(term in normalized for term in _FULL_TRIAGE_TERMS):
-        return ["netscan", "malfind", "pstree"]
-    return [
-        plugin
-        for plugin, terms in _SCENARIO_TERMS.items()
-        if any(term in normalized for term in terms)
-    ]
-
-
 def _regripper_specs(
     selection: ToolSelection,
     metadata: ToolMetadata,
@@ -149,6 +93,21 @@ def _regripper_specs(
     profile_template = _template_containing(metadata, "{profile}")
     for target in dict.fromkeys(selection.target_evidence):
         hive = _basename(target).casefold()
+        if hive == "ntuser.dat":
+            for label, marker in (
+                ("userassist", "-p userassist"),
+                ("run", "-p run"),
+            ):
+                template = _template_containing(metadata, marker)
+                if template:
+                    specs.append(
+                        RunSpec(
+                            target_evidence=target,
+                            command_template=template,
+                            label=label,
+                        )
+                    )
+            continue
         mapped = _REGRIPPER_MARKERS.get(hive)
         if mapped is not None:
             label, marker = mapped

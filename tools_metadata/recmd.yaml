@@ -10,7 +10,6 @@ applicable_evidence_types:
 
 platform:
   - windows
-  - linux
 
 input_format:
   - name:NTUSER.DAT
@@ -70,14 +69,10 @@ suspicious_indicators:
     pattern: "Winlogon\\Shell 이 explorer.exe 외 다른 값으로 변경"
     severity_baseline: critical
     description: "사용자 로그온 시 explorer.exe 대신 임의 바이너리 실행"
-  - id: shellbags_unusual_path
-    pattern: "ShellBags 에 외부 USB / 네트워크 공유 / Recycle Bin 경로의 사용 흔적"
-    severity_baseline: low
-    description: "사용자 행동 재구성에 유용. 단독으로는 의심 신호 약함."
-  - id: userassist_recent_exec_temp
-    pattern: "UserAssist 에 %TEMP% / Downloads 의 미서명 .exe 최근 실행"
+  - id: userassist_temp_execution
+    pattern: "UserAssist 에 %TEMP% / Downloads 경로의 .exe 실행 기록"
     severity_baseline: medium
-    description: "사용자가 다운로드 후 실행한 의심 바이너리 흔적"
+    description: "사용자 쓰기 가능 경로에서 실행한 바이너리 흔적; 시각과 서명은 별도 검증 필요"
 
 known_false_positives:
   - "OEM/벤더 (Dell, Lenovo) 의 정상 자동실행 등록"

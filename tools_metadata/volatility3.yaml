@@ -13,12 +13,16 @@ platform:
   - linux
   - macos
 
+applicable_evidence_platforms:
+  - windows
+
 input_format:
   - ext:.raw
   - ext:.mem
   - ext:.dmp
   - ext:.lime
   - ext:.vmem
+  - ext:.bin
 
 output_format: csv
 output_size_estimate: medium
@@ -47,7 +51,8 @@ command_templates:
     when: "부모-자식 관계의 비정상 패턴 (lsass→cmd 등) 확인."
 
 usage_description: |
-  Volatility 3 는 메모리 덤프에서 OS 자료구조를 walk 해 프로세스, 네트워크
+  현재 실행 계획은 Windows Volatility 플러그인만 지원한다. Windows 메모리
+  덤프에서 OS 자료구조를 walk 해 프로세스, 네트워크
   연결, 인젝션, 핸들, 레지스트리 인메모리 사본 등을 추출하는 표준 도구다.
   명세 2.4 의 Case B (출력이 정형이지만 큼) 의 전형 — pslist 결과 전체를
   LLM 에 넣지 말고 rules 로 사전 필터 후 의심 행만 LLM 으로 보낸다.

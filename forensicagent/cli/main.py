@@ -88,7 +88,10 @@ def root(
     tools: Optional[str] = typer.Option(
         None,
         "--tools",
-        help="Comma-separated tool_ids to force-run (skips selector).",
+        help=(
+            "Force listed tool choices after host/evidence/input safety checks; "
+            "skips RAG/LLM ranking."
+        ),
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Stop after planning; do not execute tools."
@@ -103,15 +106,15 @@ def root(
     ),
     no_llm: bool = typer.Option(
         False, "--no-llm",
-        help="Skip LLM ranking and LLM analysis (deterministic only).",
+        help="Disable Selector/Analyzer LLM; RAG remains unless --no-rag is set.",
     ),
     no_rag: bool = typer.Option(
         False, "--no-rag",
-        help="Disable RAG relevance ranking/context (use deterministic order).",
+        help="Disable RAG reranking/context; LLM remains unless --no-llm is set.",
     ),
     scenario: Optional[str] = typer.Option(
         None, "--scenario",
-        help="Investigation scenario injected into LLM tool-ranking and analysis.",
+        help="Include a scenario in the RAG query and LLM ranking/analysis context.",
     ),
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir",
@@ -175,6 +178,13 @@ def root(
         exclude_paths=[out_dir],
         stage_ms=stage_ms,
     )
+    if inv.depth_limit_hit or inv.unreadable_paths or inv.reparse_paths:
+        c.print(
+            "[yellow]Scan coverage incomplete: "
+            f"depth_limit_hit={str(inv.depth_limit_hit).lower()}, "
+            f"unreadable_paths={inv.unreadable_paths}, "
+            f"reparse_paths={inv.reparse_paths}.[/]"
+        )
     if not inv.evidence_list:
         suffix = (
             f" (미식별 파일 {inv.unidentified_files}개)"

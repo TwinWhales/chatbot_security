@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional
 
 ExecStatus = Literal["success", "failed", "timeout", "skipped", "output_missing"]
 ArtifactRole = Literal["stdout", "stderr", "generated"]
+MAX_INLINE_JSON_BYTES = 100 * 1024
 
 
 @dataclass
@@ -58,6 +59,13 @@ class ExecutionResult:
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        # The runner records the real stdout byte size.  Keep large structured
+        # output as an artifact instead of duplicating it inside every report.
+        parsed_output = (
+            self.parsed_output
+            if self.output_size_bytes <= MAX_INLINE_JSON_BYTES
+            else None
+        )
         return {
             "tool_id": self.tool_id,
             "target_evidence": self.target_evidence,
@@ -73,7 +81,7 @@ class ExecutionResult:
             "error_message": self.error_message,
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
             "warnings": list(self.warnings),
-            "parsed_output": self.parsed_output,
+            "parsed_output": parsed_output,
         }
 
 

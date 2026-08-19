@@ -10,12 +10,22 @@ LLM / 네트워크 없이 결정론적으로 검증한다.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from forensicagent.executor.adapter import get_adapter
 from forensicagent.executor.chainsaw_adapter import (
     ChainsawAdapter,
     event_ids_for_file,
 )
+from forensicagent.tools.loader import load_tool
 from forensicagent.tools.schema import CommandTemplate, InstallCheck, ToolMetadata
+
+
+_METADATA = Path(__file__).resolve().parents[1] / "tools_metadata"
+_SEARCH_TEMPLATE = (
+    "chainsaw search -t {channel_event_ids} --match-any --jsonl "
+    "--output {output_dir}/chainsaw.jsonl {evidence_path}"
+)
 
 
 def _chainsaw_meta() -> ToolMetadata:
@@ -27,14 +37,14 @@ def _chainsaw_meta() -> ToolMetadata:
         command_templates=[
             CommandTemplate(
                 name="search",
-                template="chainsaw search -t {event_query} --json {evidence_path}",
+                template=_SEARCH_TEMPLATE,
                 when="특정 Event ID 검색.",
             )
         ],
         install_check=InstallCheck(
             command="chainsaw --version", expected_pattern="chainsaw"
         ),
-        output_format="json",
+        output_format="jsonl",
         usage_description="Windows EVTX hunting.",
     )
 
@@ -65,7 +75,8 @@ def test_powershell_takes_precedence_and_is_not_treated_as_security():
 
 
 def test_unknown_channel_uses_small_cross_channel_fallback():
-    assert "4104" in event_ids_for_file("Application.evtx")
+    ids = event_ids_for_file("host123.evtx")
+    assert {"4104", "4697", "4720", "4732", "7045"} <= set(ids)
 
 
 def test_system_and_sysmon_channels_get_channel_specific_ids():
@@ -90,7 +101,53 @@ def test_build_command_uses_tau_and_match_any():
     assert "--match-any" in argv
     assert "Event.System.EventID: =4624" in argv
     assert "Event.System.EventID: =4625" in argv
-    assert argv[-2:] == ["--json", r"C:\ev\Security.evtx"]
+    assert argv[-4:] == [
+        "--jsonl",
+        "--output",
+        str(Path("out") / "chainsaw.jsonl"),
+        r"C:\ev\Security.evtx",
+    ]
+    assert adapter.selected_template == _SEARCH_TEMPLATE
+
+
+def test_metadata_declares_only_the_command_the_adapter_can_execute():
+    metadata = load_tool(_METADATA / "chainsaw.yaml")
+    adapter = ChainsawAdapter(metadata)
+    argv = adapter.build_command(
+        r"C:\ev\Security.evtx",
+        output_dir="out",
+        preferred_template=metadata.command_templates[0].template,
+    )
+
+    assert argv[:2] == ["chainsaw", "search"]
+    assert adapter.selected_template == metadata.command_templates[0].template
+    assert {indicator.id for indicator in metadata.suspicious_indicators} >= {
+        "rdp_logon_offhours",
+        "brute_force_followed_by_success",
+        "powershell_encoded_command",
+        "service_install_4697",
+    }
+    assert "sigma_rule_hit" not in {
+        indicator.id for indicator in metadata.suspicious_indicators
+    }
+
+
+def test_sigma_template_is_rejected_without_rules_and_mapping_paths():
+    adapter = ChainsawAdapter(_chainsaw_meta())
+
+    try:
+        adapter.build_command(
+            r"C:\ev\Security.evtx",
+            output_dir="out",
+            preferred_template=(
+                "chainsaw hunt {evidence_path} -s {sigma_path} "
+                "--mapping {mapping_path} --json"
+            ),
+        )
+    except ValueError as error:
+        assert "rules and mapping paths" in str(error)
+    else:
+        raise AssertionError("unsupported Sigma hunt template was accepted")
 
 
 def test_build_command_per_file_event_ids():

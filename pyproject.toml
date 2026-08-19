@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "Forensic auto-triage CLI agent that selects tools, runs them, and extracts grounded findings."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [
     { name = "forensicagent contributors" },
 ]
@@ -16,9 +16,6 @@ authors = [
 dependencies = [
     "typer>=0.12.0",
     "rich>=13.7.0",
-    "ollama>=0.3.0",
-    "chromadb>=0.5.0",
-    "sentence-transformers>=3.0.0",
     "pyyaml>=6.0",
     "pydantic>=2.7.0",
     "python-magic-bin>=0.4.14; sys_platform == 'win32'",
@@ -27,19 +24,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+llm = ["ollama>=0.3.0"]
+rag = ["chromadb>=0.5.0", "sentence-transformers>=3.0.0"]
 openai = ["openai>=1.0.0"]
 crawlers = ["requests>=2.31.0", "beautifulsoup4>=4.12.0"]
 dev = [
     "pytest>=8.0",
     "pytest-mock>=3.12",
+    "hypothesis==6.165.10",
     "ruff==0.16.0",
     "pip-audit==2.10.1",
     "detect-secrets==1.5.0",
+    "tomli>=2.0; python_version < '3.11'",
 ]
-# pip-installable forensic tools. `pip install -e .[forensic-tools]` 또는
-# `forensicagent install --all` 로 채울 수 있음. plaso 는 Windows 에서 MSVC
-# Build Tools 가 필요해서 별도 (`pip install plaso` 수동).
-forensic-tools = ["volatility3>=2.5.0", "binwalk>=2.3.0"]
+# Portable memory-analysis extra. Other external tools are installed through
+# `forensicagent install`; plaso remains manual on Windows because it needs MSVC.
+forensic-tools = ["volatility3==2.28.0"]
 
 [project.scripts]
 forensicagent = "forensicagent.cli.main:app"
@@ -57,7 +57,17 @@ exclude = [
 # Tool YAMLs are runtime assets, not development-only files. Install them
 # inside the package so a wheel works outside a source checkout.
 [tool.hatch.build.targets.wheel.force-include]
-"tools_metadata" = "forensicagent/builtin_tools"
+"tools_metadata/amcacheparser.yaml" = "forensicagent/builtin_tools/amcacheparser.yaml"
+"tools_metadata/bandit.yaml" = "forensicagent/builtin_tools/bandit.yaml"
+"tools_metadata/chainsaw.yaml" = "forensicagent/builtin_tools/chainsaw.yaml"
+"tools_metadata/evtxecmd.yaml" = "forensicagent/builtin_tools/evtxecmd.yaml"
+"tools_metadata/gitleaks.yaml" = "forensicagent/builtin_tools/gitleaks.yaml"
+"tools_metadata/mftecmd.yaml" = "forensicagent/builtin_tools/mftecmd.yaml"
+"tools_metadata/pecmd.yaml" = "forensicagent/builtin_tools/pecmd.yaml"
+"tools_metadata/recmd.yaml" = "forensicagent/builtin_tools/recmd.yaml"
+"tools_metadata/regripper.yaml" = "forensicagent/builtin_tools/regripper.yaml"
+"tools_metadata/semgrep.yaml" = "forensicagent/builtin_tools/semgrep.yaml"
+"tools_metadata/volatility3.yaml" = "forensicagent/builtin_tools/volatility3.yaml"
 "bench/goldenset.json" = "bench/goldenset.json"
 
 # Crawled corpora are development inputs, not source-distribution assets. In
@@ -66,9 +76,13 @@ exclude = [
 [tool.hatch.build.targets.sdist]
 exclude = [
     "/.agents/**",
+    "/.claude/**",
     "/.codex/**",
     "/.serena/**",
     "/AGENTS.md",
+    "/CLAUDE.md",
+    "/GUIDELINE.md",
+    "/PROJECT_TOUR.md",
     "/data/**",
     "/seed_docs/**",
     "/forensicagent_output/**",
@@ -77,6 +91,7 @@ exclude = [
     "/bench/bench_scripts/**",
     "/bench/bench_report.md",
     "/bench/bench_result.json",
+    "/tools_metadata/_failures/**",
 ]
 
 [tool.pytest.ini_options]

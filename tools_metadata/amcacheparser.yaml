@@ -10,7 +10,6 @@ applicable_evidence_types:
 
 platform:
   - windows
-  - linux
 
 input_format:
   - name:Amcache.hve
@@ -46,18 +45,6 @@ suspicious_indicators:
     pattern: "Unassociated entry + FullPath 가 %TEMP% / %APPDATA% / Public / Downloads"
     severity_baseline: high
     description: "정식 설치 안된 + 임시 경로에서 실행된 바이너리. malware 첫 의심 위치."
-  - id: amcache_sha1_known_bad
-    pattern: "SHA1 이 VirusTotal / abuse.ch / MalwareBazaar 의 known-malware 매칭"
-    severity_baseline: critical
-    description: "Hash IoC 직접 매치. 즉시 격리 대상."
-  - id: amcache_deleted_executable
-    pattern: "Amcache 에 entry 는 있는데 디스크에는 FullPath 가 없음 (삭제됨)"
-    severity_baseline: high
-    description: "실행 후 흔적 삭제. anti-forensics 또는 일시적 dropper."
-  - id: amcache_signing_status_invalid
-    pattern: "PEAFileSigner / IsPeFile + 디지털 서명 invalid 또는 없음 + Program Files 외 경로"
-    severity_baseline: medium
-    description: "미서명 바이너리가 표준 경로 밖에서 실행"
   - id: amcache_credential_dump_tool
     pattern: "ApplicationName 또는 FullPath 가 mimikatz / procdump / lsass / nltest / lazagne 등"
     severity_baseline: critical

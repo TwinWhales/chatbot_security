@@ -10,7 +10,6 @@ applicable_evidence_types:
 
 platform:
   - windows
-  - linux
 
 input_format:
   - ext:.pf
@@ -40,26 +39,14 @@ usage_description: |
   프로그램의 로딩 속도 최적화용이지만 forensic 가치는 매우 높다 - 어떤
   실행파일이, 언제, 몇 번, 어떤 다른 파일을 함께 사용했는지가 기록된다.
   Windows 10+ 는 MAM 압축이라 단순 hex 로는 못 읽지만 PECmd 가 처리한다.
-  출력 CSV 의 핵심 컬럼: Executable, RunCount, LastRun, ExecutablePath,
+  출력 CSV 의 핵심 컬럼: ExecutableName, RunCount, LastRun,
   FilesLoaded (각 prefetch 당 최대 1024 파일 참조).
 
 suspicious_indicators:
-  - id: prefetch_unusual_path
-    pattern: "Prefetch entry 의 ExecutablePath 가 %TEMP% / %APPDATA% / Public / 임의 폴더"
-    severity_baseline: high
-    description: "정상 프로그램은 보통 Program Files / System32 / AppData\\Local\\Programs"
-  - id: prefetch_deleted_executable
-    pattern: "Prefetch 는 있는데 실제 디스크에서 ExecutablePath 가 없음 (삭제됨)"
-    severity_baseline: high
-    description: "공격자가 실행 후 흔적 삭제한 강한 신호 (anti-forensics)"
   - id: prefetch_with_credential_tools
-    pattern: "Prefetch 에 mimikatz / lazagne / procdump / nltest / dsquery / wmic 등 도구"
+    pattern: "Prefetch 실행 파일명이 mimikatz / lazagne / nanodump / sekurlsa / lsassy"
     severity_baseline: critical
-    description: "자격증명 덤프 / 도메인 정찰 도구 실행 흔적"
-  - id: prefetch_run_count_one_recent
-    pattern: "RunCount=1, LastRun 최근, ExecutablePath 가 임시 경로"
-    severity_baseline: medium
-    description: "단발성 실행 + 임시 경로 = malware 일회용 실행 패턴"
+    description: "명시적인 자격증명 접근 도구 실행 흔적"
   - id: prefetch_referenced_lsass_dump
     pattern: "Prefetch 의 FilesLoaded 에 lsass.dmp / lsass.exe 직접 참조 (정상 프로그램은 직접 참조 안 함)"
     severity_baseline: critical

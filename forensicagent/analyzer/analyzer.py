@@ -14,27 +14,37 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from forensicagent.analyzer.llm_extract import extract as llm_extract
-from forensicagent.analyzer.rules import MAX_RULE_FINDINGS, apply_rules
+from forensicagent.analyzer.rules import (
+    apply_rules_with_status,
+    cross_batch_correlation_family,
+)
 from forensicagent.analyzer.types import (
+    MAX_RETAINED_FINDINGS,
     SEVERITY_RANK,
     Finding,
     ToolAnalysis,
     by_severity_count,
 )
-from forensicagent.executor.types import ExecutionResult
+from forensicagent.executor.types import MAX_INLINE_JSON_BYTES, ExecutionResult
 from forensicagent.llm import OllamaClient
 from forensicagent.observability import Stopwatch
 from forensicagent.tools.schema import ToolMetadata
 
 logger = logging.getLogger(__name__)
 
-CASE_A_MAX = 100 * 1024
+CASE_A_MAX = MAX_INLINE_JSON_BYTES
 CASE_B_MAX = 4 * 1024 * 1024
 ROW_BATCH_SIZE = 5_000
 ROW_OVERLAP = 512
+ROW_BATCH_MAX_CHARS = CASE_B_MAX
+# Only Event IDs used by cross-row matchers are retained. Families are isolated
+# so a failed-logon flood cannot evict account events (or vice versa), and each
+# family remains bounded to one batch's worth of relevant records.
+CORRELATION_FAMILY_CARRY = ROW_BATCH_SIZE
+CORRELATION_FAMILY_MAX_CHARS = CASE_B_MAX
 TEXT_CHUNK_CHARS = 512 * 1024
 TEXT_OVERLAP_CHARS = 8 * 1024
 
@@ -45,6 +55,50 @@ class _ArtifactInput:
     role: str
     format: str
     size_bytes: int
+
+
+class _CsvRecordLimitError(Exception):
+    def __init__(self, *, line_number: int, recoverable: bool) -> None:
+        super().__init__("CSV record exceeds the analysis limit")
+        self.line_number = line_number
+        self.recoverable = recoverable
+
+
+class _BoundedCsvLines:
+    """Feed csv.reader without allowing it to buffer an unbounded record."""
+
+    def __init__(self, handle: Any) -> None:
+        self.handle = handle
+        self.line_number = 0
+        self.record_chars = 0
+
+    def __iter__(self) -> _BoundedCsvLines:
+        return self
+
+    def __next__(self) -> str:
+        line = self.handle.readline(ROW_BATCH_MAX_CHARS + 1)
+        if not line:
+            raise StopIteration
+        self.line_number += 1
+        prior_chars = self.record_chars
+        if len(line) > ROW_BATCH_MAX_CHARS:
+            while line and not line.endswith(("\n", "\r")):
+                line = self.handle.readline(ROW_BATCH_MAX_CHARS + 1)
+            self.record_chars = 0
+            raise _CsvRecordLimitError(
+                line_number=self.line_number,
+                recoverable=prior_chars == 0,
+            )
+        self.record_chars += len(line)
+        if self.record_chars > ROW_BATCH_MAX_CHARS:
+            raise _CsvRecordLimitError(
+                line_number=self.line_number,
+                recoverable=False,
+            )
+        return line
+
+    def reset_record(self) -> None:
+        self.record_chars = 0
 
 
 def _rag_context_for(metadata: ToolMetadata) -> str:
@@ -165,34 +219,204 @@ def _render_rows(rows: list[dict[str, Any]], budget: int = CASE_A_MAX) -> str:
     return "\n".join(pieces)
 
 
+def _row_size(row: dict[str, Any]) -> int:
+    return len(json.dumps(row, ensure_ascii=False, default=str, sort_keys=True)) + 1
+
+
 def _iter_row_batches(
     rows: Iterator[dict[str, Any]],
+    coverage_warnings: list[str],
 ) -> Iterator[tuple[dict[str, list[dict[str, Any]]], str]]:
     carry: list[dict[str, Any]] = []
+    correlation_carry: dict[str, list[tuple[dict[str, Any], int]]] = {}
+    pending_correlation: list[dict[str, Any]] | None = None
     current: list[dict[str, Any]] = []
+    current_chars = 0
     for row in rows:
-        current.append(row)
-        if len(current) < ROW_BATCH_SIZE:
+        row_chars = _row_size(row)
+        if row_chars > ROW_BATCH_MAX_CHARS:
+            warning = (
+                "structured artifact contains a record above the "
+                f"{ROW_BATCH_MAX_CHARS}-character analysis limit; the record was "
+                "skipped and the raw artifact was retained"
+            )
+            if warning not in coverage_warnings:
+                logger.warning(warning)
+                coverage_warnings.append(warning)
             continue
-        batch = carry + current
+        # Delay state retention until another row proves that a later batch
+        # exists. An exact-size final batch cannot lose a future correlation.
+        if pending_correlation is not None:
+            _update_correlation_carry(
+                correlation_carry,
+                pending_correlation,
+                coverage_warnings,
+            )
+            pending_correlation = None
+        current.append(row)
+        current_chars += row_chars
+        if len(current) < ROW_BATCH_SIZE and current_chars < ROW_BATCH_MAX_CHARS:
+            continue
+        correlation_groups = [
+            [item[0] for item in family_rows]
+            for family_rows in correlation_carry.values()
+        ]
+        batch = _merge_unique_rows(*correlation_groups, carry, current)
         yield {"items": batch}, _render_rows(batch)
-        carry = batch[-ROW_OVERLAP:]
+        carry = current[-ROW_OVERLAP:]
+        pending_correlation = current
         current = []
+        current_chars = 0
     if current:
-        batch = carry + current
+        correlation_groups = [
+            [item[0] for item in family_rows]
+            for family_rows in correlation_carry.values()
+        ]
+        batch = _merge_unique_rows(*correlation_groups, carry, current)
         yield {"items": batch}, _render_rows(batch)
 
 
-def _iter_csv(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
+def _merge_unique_rows(
+    *groups: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge row references without double-counting overlap/correlation carry."""
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for group in groups:
+        for row in group:
+            identity = id(row)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            out.append(row)
+    return out
+
+
+def _update_correlation_carry(
+    carry: dict[str, list[tuple[dict[str, Any], int]]],
+    current: list[dict[str, Any]],
+    coverage_warnings: list[str],
+) -> None:
+    for row in current:
+        family = cross_batch_correlation_family(row)
+        if family is not None:
+            carry.setdefault(family, []).append((row, _row_size(row)))
+
+    for family, family_rows in carry.items():
+        total_chars = sum(item[1] for item in family_rows)
+        drop = 0
+        while drop < len(family_rows) and (
+            len(family_rows) - drop > CORRELATION_FAMILY_CARRY
+            or total_chars > CORRELATION_FAMILY_MAX_CHARS
+        ):
+            total_chars -= family_rows[drop][1]
+            drop += 1
+        if drop == 0:
+            continue
+        del family_rows[:drop]
+        warning = (
+            f"{family} event correlation carry exceeded its bounded "
+            f"{CORRELATION_FAMILY_CARRY}-row/{CORRELATION_FAMILY_MAX_CHARS}-character "
+            "budget; cross-batch correlation "
+            "coverage was truncated"
+        )
+        if warning not in coverage_warnings:
+            logger.warning(warning)
+            coverage_warnings.append(warning)
+
+
+def _iter_csv(
+    artifact: _ArtifactInput,
+    coverage_warnings: list[str],
+) -> Iterator[tuple[Any, str]]:
     with artifact.path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-        reader = csv.DictReader(handle)
-        yield from _iter_row_batches(dict(row) for row in reader)
+        source = _BoundedCsvLines(handle)
+        header_reader = csv.reader(source)
+        try:
+            fieldnames = next(header_reader)
+        except (StopIteration, csv.Error, _CsvRecordLimitError) as exc:
+            warning = (
+                f"CSV artifact {artifact.path} has an unreadable or oversized header: "
+                f"{exc}; the raw artifact was retained"
+            )
+            logger.warning(warning)
+            coverage_warnings.append(warning)
+            return
+        source.reset_record()
+        reader = csv.DictReader(source, fieldnames=fieldnames)
+
+        def rows() -> Iterator[dict[str, Any]]:
+            nonlocal reader
+            errors = 0
+            while True:
+                try:
+                    row = next(reader)
+                except StopIteration:
+                    return
+                except _CsvRecordLimitError as exc:
+                    errors += 1
+                    warning = (
+                        f"CSV artifact {artifact.path} contains a record above the "
+                        f"{ROW_BATCH_MAX_CHARS}-character limit near line "
+                        f"{exc.line_number}; the record was skipped and the raw "
+                        "artifact was retained"
+                    )
+                    logger.warning(warning)
+                    if warning not in coverage_warnings:
+                        coverage_warnings.append(warning)
+                    source.reset_record()
+                    if not exc.recoverable or errors >= 100:
+                        return
+                    reader = csv.DictReader(source, fieldnames=fieldnames)
+                    continue
+                except csv.Error as exc:
+                    errors += 1
+                    warning = (
+                        f"CSV artifact {artifact.path} contains an oversized or "
+                        f"malformed record near line {reader.line_num}: {exc}; "
+                        "the record was skipped and the raw artifact was retained"
+                    )
+                    logger.warning(warning)
+                    if warning not in coverage_warnings:
+                        coverage_warnings.append(warning)
+                    if errors >= 100:
+                        return
+                    source.reset_record()
+                    reader = csv.DictReader(source, fieldnames=fieldnames)
+                    continue
+                source.reset_record()
+                yield dict(row)
+
+        yield from _iter_row_batches(rows(), coverage_warnings)
 
 
-def _iter_ndjson(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
+def _iter_ndjson(
+    artifact: _ArtifactInput,
+    coverage_warnings: list[str],
+) -> Iterator[tuple[Any, str]]:
     def rows() -> Iterator[dict[str, Any]]:
+        oversized_warning_emitted = False
+        malformed_warning_emitted = False
         with artifact.path.open("r", encoding="utf-8-sig", errors="replace") as handle:
-            for line_number, line in enumerate(handle, 1):
+            line_number = 0
+            while True:
+                line = handle.readline(CASE_A_MAX + 1)
+                if not line:
+                    break
+                line_number += 1
+                if len(line) > CASE_A_MAX:
+                    while line and not line.endswith("\n"):
+                        line = handle.readline(CASE_A_MAX + 1)
+                    if not oversized_warning_emitted:
+                        warning = (
+                            f"NDJSON artifact {artifact.path} contains records above "
+                            f"the {CASE_A_MAX}-character line limit; oversized records "
+                            "were skipped and the raw artifact was retained"
+                        )
+                        logger.warning(warning)
+                        coverage_warnings.append(warning)
+                        oversized_warning_emitted = True
+                    continue
                 stripped = line.strip()
                 if not stripped:
                     continue
@@ -205,20 +429,58 @@ def _iter_ndjson(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
                         line_number,
                         exc,
                     )
+                    if not malformed_warning_emitted:
+                        warning = (
+                            f"NDJSON artifact {artifact.path} contains malformed "
+                            "records; invalid records were skipped and the raw "
+                            "artifact was retained"
+                        )
+                        coverage_warnings.append(warning)
+                        malformed_warning_emitted = True
                     continue
                 if isinstance(value, dict):
                     yield value
 
-    yield from _iter_row_batches(rows())
+    yield from _iter_row_batches(rows(), coverage_warnings)
 
 
-def _iter_json(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
+def _iter_json(
+    artifact: _ArtifactInput,
+    coverage_warnings: list[str],
+) -> Iterator[tuple[Any, str]]:
+    if artifact.size_bytes > CASE_B_MAX:
+        warning = (
+            f"JSON artifact {artifact.path} is {artifact.size_bytes} bytes, above "
+            f"the {CASE_B_MAX}-byte parser limit; raw artifact retained but "
+            "content was not analyzed"
+        )
+        logger.warning(warning)
+        coverage_warnings.append(warning)
+        return
     try:
         with artifact.path.open("r", encoding="utf-8-sig", errors="replace") as handle:
             value = json.load(handle)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("cannot parse JSON artifact %s: %s", artifact.path, exc)
+        coverage_warnings.append(
+            f"JSON artifact {artifact.path} could not be parsed; raw artifact "
+            "retained but content was not analyzed"
+        )
         return
+    rows: list[dict[str, Any]] | None = None
+    if isinstance(value, list):
+        rows = [row for row in value if isinstance(row, dict)]
+    elif isinstance(value, dict):
+        for key, candidate in value.items():
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+            if normalized in {"items", "results", "rows", "events", "records"}:
+                if isinstance(candidate, list):
+                    rows = [row for row in candidate if isinstance(row, dict)]
+                    break
+    if rows is not None:
+        yield from _iter_row_batches(iter(rows), coverage_warnings)
+        return
+
     raw = ""
     if artifact.size_bytes <= CASE_A_MAX:
         try:
@@ -228,7 +490,10 @@ def _iter_json(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
     yield value, raw
 
 
-def _iter_text(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
+def _iter_text(
+    artifact: _ArtifactInput,
+    coverage_warnings: list[str],
+) -> Iterator[tuple[Any, str]]:
     try:
         with artifact.path.open("r", encoding="utf-8-sig", errors="replace") as handle:
             overlap = ""
@@ -241,18 +506,25 @@ def _iter_text(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
                 overlap = text[-TEXT_OVERLAP_CHARS:]
     except OSError as exc:
         logger.warning("cannot read text artifact %s: %s", artifact.path, exc)
+        coverage_warnings.append(
+            f"text artifact {artifact.path} could not be read; raw artifact "
+            "coverage is incomplete"
+        )
 
 
-def _iter_artifact_batches(artifact: _ArtifactInput) -> Iterator[tuple[Any, str]]:
+def _iter_artifact_batches(
+    artifact: _ArtifactInput,
+    coverage_warnings: list[str],
+) -> Iterator[tuple[Any, str]]:
     fmt = _infer_format(artifact)
     if fmt == "csv":
-        yield from _iter_csv(artifact)
+        yield from _iter_csv(artifact, coverage_warnings)
     elif fmt in {"jsonl", "ndjson"}:
-        yield from _iter_ndjson(artifact)
+        yield from _iter_ndjson(artifact, coverage_warnings)
     elif fmt == "json":
-        yield from _iter_json(artifact)
+        yield from _iter_json(artifact, coverage_warnings)
     else:
-        yield from _iter_text(artifact)
+        yield from _iter_text(artifact, coverage_warnings)
 
 
 def _line_hint(finding: Finding) -> str:
@@ -305,6 +577,14 @@ def _sort_severity_desc(findings: list[Finding]) -> list[Finding]:
         key=lambda finding: (SEVERITY_RANK[finding.severity], finding.confidence),
         reverse=True,
     )
+
+
+def _merge_bounded(
+    existing: list[Finding], incoming: list[Finding], *, tool_id: str
+) -> tuple[list[Finding], bool]:
+    merged = _dedupe(existing + incoming, tool_id=tool_id)
+    ordered = _sort_severity_desc(merged)
+    return ordered[:MAX_RETAINED_FINDINGS], len(ordered) > MAX_RETAINED_FINDINGS
 
 
 def _grounded_rule_input(findings: list[Finding]) -> str:
@@ -364,34 +644,45 @@ def analyze_one(
 
     rule_findings: list[Finding] = []
     llm_raw_parts: list[str] = []
+    coverage_warnings = analysis.coverage_warnings
     with Stopwatch() as sw_rules:
         if artifacts:
             for artifact in artifacts:
-                for parsed, raw in _iter_artifact_batches(artifact):
+                for parsed, raw in _iter_artifact_batches(
+                    artifact,
+                    coverage_warnings,
+                ):
                     if analysis.case_used == "A" and raw:
                         remaining = CASE_A_MAX - sum(len(part) for part in llm_raw_parts)
                         if remaining > 0:
                             llm_raw_parts.append(raw[:remaining])
-                    batch_findings = apply_rules(
+                    batch_findings, batch_limit_reached = apply_rules_with_status(
                         parsed,
                         raw,
                         metadata,
                         evidence_path=target_evidence,
                     )
-                    rule_findings.extend(batch_findings)
-                    if len(rule_findings) >= MAX_RULE_FINDINGS:
-                        rule_findings = rule_findings[:MAX_RULE_FINDINGS]
-                        break
-                if len(rule_findings) >= MAX_RULE_FINDINGS:
-                    break
+                    rule_findings, merge_limit_reached = _merge_bounded(
+                        rule_findings,
+                        batch_findings,
+                        tool_id=metadata.tool_id,
+                    )
+                    if batch_limit_reached or merge_limit_reached:
+                        analysis.finding_limit_reached = True
         else:
-            rule_findings.extend(
-                apply_rules(
-                    parsed_inline,
-                    "",
-                    metadata,
-                    evidence_path=target_evidence,
-                )
+            batch_findings, batch_limit_reached = apply_rules_with_status(
+                parsed_inline,
+                "",
+                metadata,
+                evidence_path=target_evidence,
+            )
+            rule_findings, merge_limit_reached = _merge_bounded(
+                rule_findings,
+                batch_findings,
+                tool_id=metadata.tool_id,
+            )
+            analysis.finding_limit_reached = (
+                batch_limit_reached or merge_limit_reached
             )
 
     if stage_ms is not None:
@@ -404,7 +695,9 @@ def analyze_one(
     invoked = False
     failed = False
     llm_input = ""
-    if use_llm and analysis.case_used != "C":
+    # Code-security artifacts can contain live credentials or source literals.
+    # Deterministic parsers handle them without sending raw content to an LLM.
+    if use_llm and analysis.case_used != "C" and metadata.category != "code_security":
         if analysis.case_used == "B":
             # Case B never sends a raw multi-megabyte artifact to the model.
             llm_input = _grounded_rule_input(deterministic)
@@ -430,6 +723,9 @@ def analyze_one(
 
     merged = _dedupe(deterministic + llm_findings, tool_id=metadata.tool_id)
     merged = _sort_severity_desc(merged)
+    if len(merged) > MAX_RETAINED_FINDINGS:
+        analysis.finding_limit_reached = True
+        merged = merged[:MAX_RETAINED_FINDINGS]
     analysis.findings = merged
     analysis.llm_invoked = invoked
     analysis.llm_failed = failed
@@ -454,9 +750,14 @@ def analyze_one(
     warnings = _artifact_value(result, "warnings", None) or []
     if warnings:
         summary_parts.append(f"executor_warnings={len(warnings)}")
+    if coverage_warnings:
+        summary_parts.append("coverage_truncated=true")
+        summary_parts.append(f"coverage_warning={coverage_warnings[0][:240]}")
     if llm_summary.strip():
         # The model may add context, but can never replace deterministic counts.
         summary_parts.append(f"llm_note={llm_summary.strip()[:240]}")
+    if analysis.finding_limit_reached:
+        summary_parts.append("finding_limit_reached=true")
     analysis.summary = "; ".join(summary_parts)
     return analysis
 
@@ -478,8 +779,8 @@ def analyze_all(
         if metadata is None:
             logger.warning("no metadata for tool_id=%r", tool_id)
             continue
-        out.append(
-            analyze_one(
+        try:
+            analysis = analyze_one(
                 result,
                 metadata,
                 use_llm=use_llm,
@@ -488,5 +789,14 @@ def analyze_all(
                 scenario=scenario,
                 stage_ms=stage_ms,
             )
-        )
+        except Exception as exc:  # noqa: BLE001 - isolate one malformed tool artifact.
+            logger.exception("analysis failed for tool_id=%s", tool_id)
+            analysis = ToolAnalysis(
+                tool_id=tool_id,
+                summary=f"not analyzed: analyzer error: {exc}",
+                coverage_warnings=[
+                    f"analyzer failed for {tool_id}; raw artifacts were retained"
+                ],
+            )
+        out.append(analysis)
     return out

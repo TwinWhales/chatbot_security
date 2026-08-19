@@ -33,7 +33,16 @@ def test_explicit_executable_path_is_resolved(tmp_path):
     assert executables.resolve_executable(expected) == expected.resolve()
 
 
-def test_path_takes_precedence_over_tools_bin(tmp_path, monkeypatch):
+def test_relative_executable_path_is_rejected(tmp_path, monkeypatch):
+    filename = "relative.exe" if os.name == "nt" else "relative"
+    expected = tmp_path / "bin" / filename
+    _make_executable(expected)
+    monkeypatch.chdir(tmp_path)
+
+    assert executables.resolve_executable(Path("bin") / filename) is None
+
+
+def test_tools_bin_takes_precedence_over_path(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "USER_HOME", tmp_path / "home")
     filename = "priorityprobe.exe" if os.name == "nt" else "priorityprobe"
     on_path = tmp_path / "path_bin" / filename
@@ -42,7 +51,71 @@ def test_path_takes_precedence_over_tools_bin(tmp_path, monkeypatch):
     _make_executable(local)
     monkeypatch.setenv("PATH", str(on_path.parent))
 
-    assert executables.resolve_executable("priorityprobe") == on_path.resolve()
+    assert executables.resolve_executable("priorityprobe") == local.resolve()
+
+
+def test_project_venv_takes_precedence_over_global_path(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    environment = project / ".venv"
+    bin_dir = environment / ("Scripts" if os.name == "nt" else "bin")
+    suffix = ".exe" if os.name == "nt" else ""
+    interpreter = bin_dir / f"python{suffix}"
+    local = bin_dir / f"bandit{suffix}"
+    global_tool = tmp_path / "global" / f"bandit{suffix}"
+    for candidate in (interpreter, local, global_tool):
+        _make_executable(candidate)
+
+    monkeypatch.setattr(settings, "PROJECT_ROOT", project)
+    monkeypatch.setattr(settings, "USER_HOME", project / ".forensicagent")
+    monkeypatch.setattr(executables.sys, "executable", str(interpreter))
+    monkeypatch.setattr(executables.sys, "prefix", str(environment))
+    monkeypatch.setenv("PATH", str(global_tool.parent))
+
+    assert executables.resolve_executable("bandit") == local.resolve()
+
+
+def test_interpreter_bin_outside_project_is_not_trusted(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    environment = tmp_path / "unrelated" / ".venv"
+    bin_dir = environment / ("Scripts" if os.name == "nt" else "bin")
+    suffix = ".exe" if os.name == "nt" else ""
+    interpreter = bin_dir / f"python{suffix}"
+    unrelated = bin_dir / f"bandit{suffix}"
+    on_path = tmp_path / "global" / f"bandit{suffix}"
+    for candidate in (interpreter, unrelated, on_path):
+        _make_executable(candidate)
+
+    project.mkdir()
+    monkeypatch.setattr(settings, "PROJECT_ROOT", project)
+    monkeypatch.setattr(settings, "USER_HOME", project / ".forensicagent")
+    monkeypatch.setattr(executables.sys, "executable", str(interpreter))
+    monkeypatch.setattr(executables.sys, "prefix", str(environment))
+    monkeypatch.setenv("PATH", str(on_path.parent))
+
+    assert executables.resolve_executable("bandit") == on_path.resolve()
+
+
+def test_plain_name_never_resolves_from_current_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "USER_HOME", tmp_path / "home")
+    evidence_dir = tmp_path / "evidence"
+    filename = "rogueprobe.exe" if os.name == "nt" else "rogueprobe"
+    _make_executable(evidence_dir / filename)
+    monkeypatch.chdir(evidence_dir)
+    monkeypatch.setenv("PATH", "")
+
+    assert executables.resolve_executable("rogueprobe") is None
+
+
+def test_path_access_error_means_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "USER_HOME", tmp_path / "home")
+    monkeypatch.setenv("PATH", str(tmp_path / "path_bin"))
+
+    def denied(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(executables.shutil, "which", denied)
+
+    assert executables.resolve_executable("blockedprobe") is None
 
 
 def test_installer_doctor_and_executor_share_resolver():
