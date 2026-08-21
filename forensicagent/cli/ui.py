@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.table import Table
 
 from forensicagent.scanner.types import Evidence, Inventory
+from forensicagent.ui_text import safe_text
 
 _console = Console()
 
@@ -22,8 +23,7 @@ def render_inventory(inv: Inventory, *, max_rows: int = 30) -> Table:
     flooding the console with thousands of rows before planning begins.
     """
     table = Table(
-        title=f"Evidence inventory - {inv.scan_root}",
-        title_style="bold cyan",
+        title=safe_text(f"Evidence inventory - {inv.scan_root}", style="bold cyan"),
         show_lines=False,
     )
     table.add_column("type", style="bold")
@@ -38,7 +38,7 @@ def render_inventory(inv: Inventory, *, max_rows: int = 30) -> Table:
     for e in shown:
         table.add_row(
             _type_style(e),
-            e.path,
+            safe_text(e.path),
             _human_size(e.size_bytes),
             e.detected_by,
             e.platform_hint,
@@ -48,6 +48,30 @@ def render_inventory(inv: Inventory, *, max_rows: int = 30) -> Table:
     if omitted:
         table.caption = (
             f"showing {len(shown)} of {len(evidence)} detected items; "
+            f"{omitted} more are retained in the report"
+        )
+    return table
+
+
+def render_oversized_exclusions(inv: Inventory, *, max_rows: int = 30) -> Table:
+    table = Table(title="1.5 GiB 이상 파일 자동 제외", show_lines=False)
+    table.add_column("file", overflow="fold")
+    table.add_column("size", justify="right")
+    table.add_column("reason", overflow="fold")
+    items = inv.oversized_files
+    shown = items if max_rows <= 0 else items[:max_rows]
+    for item in shown:
+        table.add_row(
+            safe_text(item.get("path", "")),
+            _human_size(int(item.get("size_bytes", 0))),
+            safe_text(
+                item.get("reason", "size is at or above the 1.5 GiB scan limit")
+            ),
+        )
+    omitted = len(items) - len(shown)
+    if omitted:
+        table.caption = (
+            f"showing {len(shown)} of {len(items)} excluded files; "
             f"{omitted} more are retained in the report"
         )
     return table

@@ -15,8 +15,8 @@ def test_all_builtin_indicators_have_concrete_matchers():
 
     supported = supported_indicator_ids()
 
-    assert len(declared) == 30
-    assert len(supported) == 37
+    assert len(declared) == 34
+    assert len(supported) == 41
     assert declared <= supported
     assert "amcache_signing_status_invalid" not in {
         indicator.id for indicator in tools["amcacheparser"].suspicious_indicators

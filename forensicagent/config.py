@@ -227,6 +227,24 @@ LLM_REQUEST_TIMEOUT_SEC = float(
 # === Execution settings ===
 DEFAULT_TIMEOUT_SEC = int(os.getenv("FORENSICAGENT_TIMEOUT_SEC", "300"))
 MAX_PARALLEL_TOOLS = int(os.getenv("FORENSICAGENT_MAX_PARALLEL", "3"))
+MAX_JOB_OUTPUT_BYTES = _env_int_range(
+    "FORENSICAGENT_MAX_JOB_OUTPUT_BYTES",
+    512 * 1024**2,
+    1024**2,
+    1024**4,
+)
+MAX_TOTAL_OUTPUT_BYTES = _env_int_range(
+    "FORENSICAGENT_MAX_TOTAL_OUTPUT_BYTES",
+    2 * 1024**3,
+    MAX_JOB_OUTPUT_BYTES,
+    4 * 1024**4,
+)
+MIN_FREE_DISK_BYTES = _env_int_range(
+    "FORENSICAGENT_MIN_FREE_DISK_BYTES",
+    512 * 1024**2,
+    1024**2,
+    1024**4,
+)
 
 # === Optional API keys (for OpenAI embedding backend, if user opts in) ===
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

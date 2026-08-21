@@ -289,7 +289,10 @@ class TestRealMetadataRouting:
             ("/case/Amcache.hve", "registry_hive", {"amcacheparser"}),
             ("/case/SYSTEM", "registry_hive", {"recmd", "regripper"}),
             ("/case/$MFT", "ntfs_metadata", {"mftecmd"}),
-            ("/case/disk.e01", "disk_image", set()),
+            ("/case/disk.e01", "disk_image", {"fls"}),
+            ("/case/capture.pcap", "pcap", {"tshark"}),
+            ("/case/History", "browser_artifact", {"browser_sqlite"}),
+            ("/case/browser.sqlite", "sqlite_database", set()),
         ],
     )
     def test_exact_input_routing(self, real_tools, path, etype, expected):
@@ -461,7 +464,7 @@ class TestRealMetadataRouting:
             ]
         )
 
-        expected = ["/case/disk.e01", "/case/browser.sqlite"]
+        expected = ["/case/browser.sqlite"]
         assert unhandled_evidence_paths(inv, real_tools) == expected
 
         plan = select(inv, real_tools, use_llm=False, use_rag=False)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import platform
 from collections import defaultdict
+from typing import Any
 
 from forensicagent import __version__
 from forensicagent.analyzer.types import (
@@ -12,7 +14,7 @@ from forensicagent.analyzer.types import (
     Finding,
     ToolAnalysis,
 )
-from forensicagent.executor.types import ExecutionBundle
+from forensicagent.executor.types import ExecutionBundle, ExecutionResult
 from forensicagent.reporter.types import (
     Report,
     ReportMeta,
@@ -53,6 +55,151 @@ def _dedupe_and_cap(analysis: ToolAnalysis) -> None:
     if len(retained) > MAX_RETAINED_FINDINGS:
         analysis.finding_limit_reached = True
     analysis.findings = retained[:MAX_RETAINED_FINDINGS]
+
+
+def _path_key(value: str) -> str:
+    return os.path.normcase(os.path.abspath(value))
+
+
+def _planned_owners(plan: Plan) -> dict[str, str]:
+    claimed: dict[str, tuple[int, str]] = {}
+    for selection in plan.selected_tools:
+        targets = (
+            [spec.target_evidence for spec in selection.run_specs]
+            if selection.run_specs
+            else selection.target_evidence
+        )
+        for target in targets:
+            key = _path_key(target)
+            previous = claimed.get(key)
+            if previous is None or selection.priority > previous[0]:
+                claimed[key] = (selection.priority, selection.tool_id)
+    return {key: owner for key, (_, owner) in claimed.items()}
+
+
+def _has_analysis_input(result: ExecutionResult) -> bool:
+    if result.parsed_output is not None or result.output_size_bytes > 0:
+        return True
+    return any(
+        artifact.role in ("stdout", "generated") and artifact.size_bytes > 0
+        for artifact in result.artifacts
+    )
+
+
+def _artifact_ledger(
+    inventory: Inventory,
+    plan: Plan,
+    execution: ExecutionBundle,
+    analyses: list[ToolAnalysis],
+) -> list[dict[str, Any]]:
+    owners = _planned_owners(plan)
+    results_by_path: dict[str, list[ExecutionResult]] = defaultdict(list)
+    for result in execution.results:
+        if result.target_evidence:
+            results_by_path[_path_key(result.target_evidence)].append(result)
+
+    analyses_by_target: dict[tuple[str, str], list[ToolAnalysis]] = defaultdict(list)
+    for analysis in analyses:
+        if analysis.target_evidence:
+            analyses_by_target[
+                (analysis.tool_id, _path_key(analysis.target_evidence))
+            ].append(analysis)
+
+    ledger: list[dict[str, Any]] = []
+    for evidence in inventory.evidence_list:
+        key = _path_key(evidence.path)
+        results = results_by_path.get(key, [])
+        statuses = list(dict.fromkeys(result.status for result in results))
+        executed_tool_ids = list(
+            dict.fromkeys(result.tool_id for result in results)
+        )
+        target_analyses = [
+            analysis
+            for tool_id in executed_tool_ids
+            for analysis in analyses_by_target.get((tool_id, key), [])
+        ]
+        analyzed = [
+            analysis
+            for analysis in target_analyses
+            if analysis.status == "analyzed"
+        ]
+        if not analyzed:
+            analysis_status = "not_analyzed"
+            finding_count: int | None = None
+        elif len(analyzed) == len(target_analyses) == len(results):
+            analysis_status = "analyzed"
+            finding_count = sum(len(analysis.findings) for analysis in analyzed)
+        else:
+            analysis_status = "partial"
+            finding_count = sum(len(analysis.findings) for analysis in analyzed)
+
+        ledger.append(
+            {
+                "path": evidence.path,
+                "discovery_status": "included",
+                "size_bytes": evidence.size_bytes,
+                "mtime_ns": evidence.mtime_ns,
+                "sha256": evidence.sha256,
+                "detected_type": evidence.evidence_type,
+                "detected_by": evidence.detected_by,
+                "selected_tool_id": owners.get(key),
+                "executed_tool_ids": executed_tool_ids,
+                "preflight_status": (
+                    "not_run"
+                    if not results
+                    else "failed"
+                    if all(result.status == "skipped" for result in results)
+                    else "mixed"
+                    if any(result.status == "skipped" for result in results)
+                    else "passed"
+                ),
+                "execution_status": (
+                    "not_run"
+                    if not statuses
+                    else statuses[0]
+                    if len(statuses) == 1
+                    else "mixed"
+                ),
+                "executions": [
+                    {
+                        "executed_tool_id": result.tool_id,
+                        "status": result.status,
+                        "command_executed": result.command_executed,
+                        "provenance": dict(result.provenance),
+                    }
+                    for result in results
+                ],
+                "analysis_status": analysis_status,
+                "finding_count": finding_count,
+            }
+        )
+
+    for item in inventory.oversized_files:
+        ledger.append(
+            {
+                "path": str(item.get("path", "")),
+                "discovery_status": "excluded_oversized",
+                "exclusion_reason": str(
+                    item.get(
+                        "reason", "size is at or above the 1.5 GiB scan limit"
+                    )
+                ),
+                "size_limit_bytes": int(item.get("limit_bytes", 0) or 0),
+                "size_bytes": int(item.get("size_bytes", 0)),
+                "mtime_ns": int(item.get("mtime_ns", 0) or 0),
+                "sha256": None,
+                "detected_type": None,
+                "detected_by": None,
+                "selected_tool_id": None,
+                "executed_tool_ids": [],
+                "preflight_status": "not_run",
+                "execution_status": "not_run",
+                "executions": [],
+                "analysis_status": "not_analyzed",
+                "finding_count": None,
+            }
+        )
+    return ledger
 
 
 def build(
@@ -97,6 +244,8 @@ def build(
                 llm_failed=a.llm_failed,
                 finding_limit_reached=a.finding_limit_reached,
                 coverage_warnings=list(a.coverage_warnings),
+                target_evidence=a.target_evidence,
+                status=a.status,
             )
         else:
             existing.findings.extend(a.findings)
@@ -108,6 +257,10 @@ def build(
             existing.coverage_warnings = list(
                 dict.fromkeys(existing.coverage_warnings + a.coverage_warnings)
             )
+            if existing.target_evidence != a.target_evidence:
+                existing.target_evidence = ""
+            if a.status == "analyzed":
+                existing.status = "analyzed"
             # case 는 더 보수적인 쪽 (A < B < C) 유지.
             order = {"A": 0, "B": 1, "C": 2}
             if order.get(a.case_used, 0) > order.get(existing.case_used, 0):
@@ -121,17 +274,24 @@ def build(
     for a in merged_analyses.values():
         executions = bundle_map.get(a.tool_id, ToolBundle(a.tool_id)).execution
         successful = [e for e in executions if e.status == "success"]
-        if executions and not successful:
+        if executions and not any(_has_analysis_input(e) for e in executions):
+            a.status = "not_analyzed"
+        if a.status == "not_analyzed":
             statuses: dict[str, int] = {}
-            for execution in executions:
-                statuses[execution.status] = statuses.get(execution.status, 0) + 1
+            for result in executions:
+                statuses[result.status] = statuses.get(result.status, 0) + 1
             status_text = ", ".join(
                 f"{name}={count}" for name, count in sorted(statuses.items())
             )
             first_error = next(
                 (e.error_message for e in executions if e.error_message), ""
             )
-            a.summary = f"not analyzed: no successful execution ({status_text})"
+            reason = (
+                "no successful execution"
+                if executions and not successful
+                else "no analyzable execution output"
+            )
+            a.summary = f"not analyzed: {reason} ({status_text or 'not_run'})"
             if first_error:
                 a.summary += f"; {first_error[:240]}"
             continue
@@ -152,6 +312,21 @@ def build(
             a.summary += (
                 f"; coverage_truncated=true; coverage_warnings="
                 f"{len(a.coverage_warnings)}"
+            )
+        partial_statuses: dict[str, int] = {}
+        for result in executions:
+            if result.status != "success":
+                partial_statuses[result.status] = (
+                    partial_statuses.get(result.status, 0) + 1
+                )
+        if partial_statuses:
+            status_text = ", ".join(
+                f"{name}={count}"
+                for name, count in sorted(partial_statuses.items())
+            )
+            a.summary += (
+                "; partial_artifacts_analyzed=true; "
+                f"execution_status={status_text}"
             )
 
     for a in merged_analyses.values():
@@ -186,7 +361,11 @@ def build(
     tools_failed = sum(
         1
         for b in ordered
-        if any(e.status in ("failed", "timeout", "output_missing") for e in b.execution)
+        if any(
+            e.status
+            in ("failed", "timeout", "cancelled", "output_limit", "output_missing")
+            for e in b.execution
+        )
     )
     tools_skipped = sum(
         1 for b in ordered if all(e.status == "skipped" for e in b.execution)
@@ -211,6 +390,7 @@ def build(
         depth_limit_hit=inventory.depth_limit_hit,
         unreadable_paths=inventory.unreadable_paths,
         reparse_paths=inventory.reparse_paths,
+        oversized_files=len(inventory.oversized_files),
     )
 
     return Report(
@@ -220,4 +400,5 @@ def build(
         tool_bundles=ordered,
         summary=summary,
         stage_ms=dict(stage_ms or {}),
+        artifact_ledger=_artifact_ledger(inventory, plan, execution, analyses),
     )

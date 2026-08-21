@@ -8,9 +8,17 @@ from forensicagent.analyzer.types import SEVERITY_RANK, Finding
 from forensicagent.reporter.types import Report
 
 
+def _single_line(value: object) -> str:
+    text = " ".join(str(value).splitlines())
+    return "".join(
+        "\N{REPLACEMENT CHARACTER}" if ord(char) < 32 or 127 <= ord(char) <= 159 else char
+        for char in text
+    )
+
+
 def _md_text(value: object) -> str:
     """Escape untrusted/tool-controlled text used outside code spans."""
-    text = " ".join(str(value).splitlines())
+    text = _single_line(value)
     for char in ("\\", "`", "*", "_", "{", "}", "[", "]", "<", ">", "|", "#"):
         text = text.replace(char, f"\\{char}")
     return text
@@ -18,7 +26,7 @@ def _md_text(value: object) -> str:
 
 def _inline_code(value: object) -> str:
     """Create a safe inline code span even when the value contains backticks."""
-    text = " ".join(str(value).splitlines())
+    text = _single_line(value)
     longest = 0
     run = 0
     for char in text:
@@ -89,13 +97,14 @@ def write_md(report: Report, path: str | Path) -> Path:
     lines.append(f"- total ms: {s.total_ms}")
     scan_status = (
         "**incomplete**"
-        if s.depth_limit_hit or s.unreadable_paths or s.reparse_paths
+        if s.depth_limit_hit or s.unreadable_paths or s.reparse_paths or s.oversized_files
         else "complete"
     )
     lines.append(
         f"- scan coverage: {scan_status} "
         f"(depth_limit_hit={str(s.depth_limit_hit).lower()}, "
-        f"unreadable_paths={s.unreadable_paths}, reparse_paths={s.reparse_paths})"
+        f"unreadable_paths={s.unreadable_paths}, reparse_paths={s.reparse_paths}, "
+        f"oversized_files={s.oversized_files})"
     )
     if s.finding_limit_reached:
         lines.append(
@@ -109,6 +118,85 @@ def write_md(report: Report, path: str | Path) -> Path:
         )
     lines.append("")
 
+    # ---- Finding timeline ----
+    timeline = report.timeline()
+    lines.append("## Finding timeline")
+    lines.append("")
+    if timeline["events"]:
+        lines.append(
+            "| time (UTC) | original timestamp | severity | status | tool | event | "
+            "finding | fingerprint | title | source |"
+        )
+        lines.append("|---|---|---|---|---|---:|---|---|---|---|")
+        for item in timeline["events"]:
+            timestamp = str(item["timestamp_utc"])
+            if item["timezone_assumed"]:
+                timestamp += " (assumed UTC)"
+            lines.append(
+                f"| {_md_text(timestamp)} | "
+                f"{_md_text(item['timestamp_original'])} | "
+                f"{_md_text(item['severity'])} | "
+                f"{_md_text(item['annotation_status'])} | {_md_text(item['tool_id'])} | "
+                f"{_md_text(item['event_id'] or '')} | "
+                f"{_inline_code(item['finding_id'])} | "
+                f"{_inline_code(item['fingerprint'][:12])} | "
+                f"{_md_text(item['title'])} | "
+                f"{_inline_code(item['source_file'])} |"
+            )
+        lines.append("")
+    else:
+        lines.append("- No findings have a usable timestamp.")
+        lines.append("")
+    if timeline["undated"]:
+        lines.append("### Findings without a usable timestamp")
+        lines.append("")
+        lines.append(
+            "| reason | original timestamp | severity | status | tool | event | "
+            "finding | fingerprint | title | source |"
+        )
+        lines.append("|---|---|---|---|---|---:|---|---|---|---|")
+        for item in timeline["undated"]:
+            lines.append(
+                f"| {_md_text(item['reason'])} | "
+                f"{_md_text(item['timestamp_original'])} | "
+                f"{_md_text(item['severity'])} | "
+                f"{_md_text(item['annotation_status'])} | "
+                f"{_md_text(item['tool_id'])} | {_md_text(item['event_id'] or '')} | "
+                f"{_inline_code(item['finding_id'])} | "
+                f"{_inline_code(item['fingerprint'][:12])} | "
+                f"{_md_text(item['title'])} | "
+                f"{_inline_code(item['source_file'])} |"
+            )
+        lines.append("")
+
+    # ---- Finding correlations ----
+    correlations = report.correlations()
+    lines.append("## Related findings sharing an entity")
+    lines.append("")
+    lines.append(
+        "Shared entities are correlation pivots only; they do not establish "
+        "causation between findings."
+    )
+    lines.append("")
+    if correlations:
+        for correlation in correlations:
+            lines.append(
+                f"### {_md_text(correlation['entity_type'])}: "
+                f"{_inline_code(correlation['entity_value'])}"
+            )
+            lines.append("")
+            for reference in correlation["findings"]:
+                lines.append(
+                    f"- {_inline_code(reference['fingerprint'][:12])} "
+                    f"[{_md_text(reference['tool_id'])}] "
+                    f"{_md_text(reference['title'])} "
+                    f"(status: {_md_text(reference['annotation_status'])})"
+                )
+            lines.append("")
+    else:
+        lines.append("- No retained findings share an explicit entity.")
+        lines.append("")
+
     # ---- Evidence inventory ----
     if report.evidence_inventory:
         inv = report.evidence_inventory
@@ -121,15 +209,54 @@ def write_md(report: Report, path: str | Path) -> Path:
             f"unidentified: {inv.unidentified_files}, skipped: {inv.skipped_files}"
         )
         lines.append("")
-        lines.append("| type | file | size | by | platform | conf |")
-        lines.append("|---|---|---:|---|---|---:|")
+        lines.append("| type | file | size | mtime_ns | sha256 | by | platform | conf |")
+        lines.append("|---|---|---:|---:|---|---|---|---:|")
         for e in inv.evidence_list:
             lines.append(
                 f"| {_md_text(e.evidence_type)} | {_md_text(e.path)} | "
-                f"{_human_size(e.size_bytes)} | {_md_text(e.detected_by)} | "
+                f"{_human_size(e.size_bytes)} | {e.mtime_ns} | "
+                f"{_inline_code(e.sha256)} | {_md_text(e.detected_by)} | "
                 f"{_md_text(e.platform_hint)} | {e.confidence:.2f} |"
             )
         lines.append("")
+        if inv.oversized_files:
+            lines.append("### Files excluded from scan (>=1.5 GiB)")
+            lines.append("")
+            lines.append("- SHA-256 was not computed for these excluded files.")
+            for item in inv.oversized_files:
+                lines.append(
+                    f"- {_inline_code(item.get('path', ''))} "
+                    f"({_human_size(int(item.get('size_bytes', 0)))}) — "
+                    f"reason: {_md_text(item.get('reason', 'size is at or above the 1.5 GiB scan limit'))}"
+                )
+            lines.append("")
+
+    # ---- Per-artifact coverage ----
+    lines.append("## Artifact coverage ledger")
+    lines.append("")
+    if report.artifact_ledger:
+        lines.append(
+            "| artifact | discovery | type | selected | executed | preflight | "
+            "execution | analysis | findings |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|---:|")
+        for item in report.artifact_ledger:
+            executed = ", ".join(item.get("executed_tool_ids", [])) or "-"
+            findings = item.get("finding_count")
+            lines.append(
+                f"| {_inline_code(item.get('path', ''))} | "
+                f"{_md_text(item.get('discovery_status', ''))} | "
+                f"{_md_text(item.get('detected_type') or '-')} | "
+                f"{_md_text(item.get('selected_tool_id') or '-')} | "
+                f"{_md_text(executed)} | "
+                f"{_md_text(item.get('preflight_status', ''))} | "
+                f"{_md_text(item.get('execution_status', ''))} | "
+                f"{_md_text(item.get('analysis_status', ''))} | "
+                f"{findings if findings is not None else 'n/a'} |"
+            )
+    else:
+        lines.append("- No discovered artifacts were recorded.")
+    lines.append("")
 
     # ---- Findings by severity ----
     all_findings: list[tuple[str, Finding]] = []
@@ -150,10 +277,24 @@ def write_md(report: Report, path: str | Path) -> Path:
             lines.append("")
             for tid, f in sev_items:
                 lines.append(f"- **[{_md_text(tid)}]** {_md_text(f.title)}")
+                annotation = report.annotation_for(f.fingerprint)
                 lines.append(
                     f"    - rule/source/confidence: {_inline_code(f.rule_id or 'n/a')} / "
                     f"{_md_text(f.source)} / {f.confidence:.2f}"
                 )
+                lines.append(
+                    f"    - fingerprint/status: {_inline_code(f.fingerprint)} / "
+                    f"{_md_text(annotation['status'])}"
+                )
+                if annotation["updated_at"]:
+                    lines.append(
+                        f"    - annotation updated: "
+                        f"{_md_text(annotation['updated_at'])}"
+                    )
+                if annotation["notes"]:
+                    lines.append(
+                        f"    - analyst note: {_md_text(annotation['notes'])}"
+                    )
                 if f.description:
                     lines.append(f"    - {_md_text(f.description)}")
                 if f.evidence_ref.source_file:
@@ -177,7 +318,7 @@ def write_md(report: Report, path: str | Path) -> Path:
         for e in b.execution:
             lines.append(f"- target: {_inline_code(e.target_evidence)}")
             lines.append(
-                f"    - status: **{_md_text(e.status)}** (exit={e.exit_code})"
+                f"    - status: **{e.status}** (exit={e.exit_code})"
             )
             lines.append(f"    - command: {_inline_code(e.command_executed)}")
             lines.append(
@@ -188,6 +329,31 @@ def write_md(report: Report, path: str | Path) -> Path:
                 lines.append(f"    - stdout: {_inline_code(e.stdout_path)}")
             if e.error_message:
                 lines.append(f"    - error: {_md_text(e.error_message)}")
+            if e.provenance:
+                lines.append(
+                    f"    - provenance: app={_inline_code(e.provenance.get('app_version', ''))} "
+                    f"tool_version={_inline_code(e.provenance.get('tool_version', 'n/a'))}"
+                )
+                resume = e.provenance.get("resume")
+                if isinstance(resume, dict):
+                    lines.append(
+                        f"    - resume: reused={str(resume.get('reused', False)).lower()} "
+                        f"job={_inline_code(resume.get('job_key', ''))} "
+                        f"input_sha256={_inline_code(resume.get('input_sha256', ''))} "
+                        f"settings_sha256={_inline_code(resume.get('settings_sha256', ''))}"
+                    )
+                if e.provenance.get("executable_path"):
+                    lines.append(
+                        f"    - executable: "
+                        f"{_inline_code(e.provenance['executable_path'])} "
+                        f"sha256={_inline_code(e.provenance.get('executable_sha256', ''))}"
+                    )
+                lines.append(
+                    f"    - metadata sha256: "
+                    f"{_inline_code(e.provenance.get('tool_metadata_sha256', ''))}; "
+                    f"rules sha256: "
+                    f"{_inline_code(e.provenance.get('rule_definition_sha256', ''))}"
+                )
             for warning in e.warnings:
                 lines.append(f"    - warning: {_md_text(warning)}")
             for artifact in e.artifacts:
@@ -199,6 +365,7 @@ def write_md(report: Report, path: str | Path) -> Path:
         if b.analysis:
             lines.append(
                 f"- analyzer: case={b.analysis.case_used} "
+                f"status={b.analysis.status} "
                 f"llm_invoked={b.analysis.llm_invoked} "
                 f"llm_failed={b.analysis.llm_failed} "
                 f"finding_limit_reached={b.analysis.finding_limit_reached} "

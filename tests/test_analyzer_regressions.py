@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 
 from forensicagent.analyzer import llm_extract
-from forensicagent.analyzer.analyzer import CASE_A_MAX, CASE_B_MAX, analyze_one
+from forensicagent.analyzer.analyzer import (
+    CASE_A_MAX,
+    CASE_B_MAX,
+    _iter_row_batches,
+    analyze_one,
+)
 from forensicagent.analyzer.rules import apply_rules, supported_indicator_ids
 from forensicagent.analyzer.types import MAX_RETAINED_FINDINGS, EvidenceRef, Finding
 from forensicagent.executor.types import ExecutionResult, OutputArtifact
@@ -633,6 +640,75 @@ def test_real_secret_in_example_file_is_not_suppressed():
     assert len(findings) == 1
     assert findings[0].severity == "critical"
     assert secret not in findings[0].evidence_ref.raw_excerpt
+
+
+def test_csv_surplus_columns_do_not_create_mixed_json_keys(tmp_path):
+    report_path = tmp_path / "evtxecmd.csv"
+    report_path.write_text(
+        "EventID,Computer\n1102,host01,unexpected-value\n",
+        encoding="utf-8",
+    )
+
+    analysis = analyze_one(
+        ExecutionResult(
+            tool_id="evtxecmd",
+            status="success",
+            artifacts=[
+                OutputArtifact(
+                    path=str(report_path),
+                    role="generated",
+                    format="csv",
+                    size_bytes=report_path.stat().st_size,
+                )
+            ],
+        ),
+        _meta("clear_log_event", tool_id="evtxecmd"),
+        use_llm=False,
+    )
+
+    assert [item.rule_id for item in analysis.findings] == ["clear_log_event:1102"]
+    assert "unexpected-value" in analysis.findings[0].evidence_ref.raw_excerpt
+
+
+def test_csv_surplus_key_never_overwrites_a_real_header(tmp_path):
+    report_path = tmp_path / "evtxecmd.csv"
+    report_path.write_text(
+        "EventID,__extra_fields__\n1102,legitimate-value,unexpected-value\n",
+        encoding="utf-8",
+    )
+
+    analysis = analyze_one(
+        ExecutionResult(
+            tool_id="evtxecmd",
+            status="success",
+            artifacts=[
+                OutputArtifact(
+                    path=str(report_path),
+                    role="generated",
+                    format="csv",
+                    size_bytes=report_path.stat().st_size,
+                )
+            ],
+        ),
+        _meta("clear_log_event", tool_id="evtxecmd"),
+        use_llm=False,
+    )
+
+    excerpt = analysis.findings[0].evidence_ref.raw_excerpt
+    assert "legitimate-value" in excerpt
+    assert "unexpected-value" in excerpt
+
+
+def test_mixed_json_keys_are_preserved_in_shared_row_serialization():
+    row = {None: "null-key-value", "null": "literal-key-value"}
+
+    parsed, raw = next(_iter_row_batches(iter([row]), []))
+
+    assert parsed == {"items": [row]}
+    assert json.loads(raw, object_pairs_hook=list) == [
+        ("null", "null-key-value"),
+        ("null", "literal-key-value"),
+    ]
 
 
 def test_bandit_and_gitleaks_csv_reports_are_analyzed(tmp_path):
@@ -1272,6 +1348,26 @@ def test_dict_shaped_execution_and_artifact_are_compatible(tmp_path):
     assert "execution_status=failed" in analysis.summary
 
 
+def test_missing_analysis_input_is_distinct_from_zero_findings():
+    result = ExecutionResult(
+        tool_id="regripper",
+        status="skipped",
+        target_evidence="NTUSER.DAT",
+        error_message="prerequisites failed",
+    )
+
+    analysis = analyze_one(
+        result,
+        _meta("run_key_unusual_binary", tool_id="regripper"),
+        use_llm=False,
+    )
+
+    assert analysis.target_evidence == "NTUSER.DAT"
+    assert analysis.status == "not_analyzed"
+    assert analysis.findings == []
+    assert analysis.to_dict()["status"] == "not_analyzed"
+
+
 class _GroundedClient:
     def __init__(self):
         self.messages = None
@@ -1490,6 +1586,76 @@ def test_large_jsonl_stream_keeps_tail_detection(tmp_path):
 
     assert {finding.rule_id for finding in analysis.findings} == {"clear_log_event:1102"}
     assert analysis.case_used == "C"
+
+
+def test_modified_output_artifact_is_not_analyzed(tmp_path):
+    output = tmp_path / "events.csv"
+    output.write_text("EventID\n1102\n", encoding="utf-8")
+    recorded_size = output.stat().st_size
+    recorded_sha256 = hashlib.sha256(output.read_bytes()).hexdigest()
+    output.write_text("EventID\n4624\n", encoding="utf-8")
+    assert output.stat().st_size == recorded_size
+
+    analysis = analyze_one(
+        ExecutionResult(
+            tool_id="evtxecmd",
+            status="success",
+            target_evidence="Security.evtx",
+            artifacts=[
+                OutputArtifact(
+                    path=str(output),
+                    role="generated",
+                    format="csv",
+                    size_bytes=recorded_size,
+                    sha256=recorded_sha256,
+                )
+            ],
+        ),
+        _meta("clear_log_event", tool_id="evtxecmd"),
+        use_llm=False,
+    )
+
+    assert analysis.status == "not_analyzed"
+    assert analysis.findings == []
+    assert any(
+        "artifact integrity mismatch before analysis" in warning
+        for warning in analysis.coverage_warnings
+    )
+
+
+def test_executor_artifact_outside_job_directory_is_not_analyzed(tmp_path):
+    job_dir = tmp_path / "raw" / "job"
+    job_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.csv"
+    outside.write_text("EventID\n1102\n", encoding="utf-8")
+    digest = hashlib.sha256(outside.read_bytes()).hexdigest()
+
+    analysis = analyze_one(
+        ExecutionResult(
+            tool_id="evtxecmd",
+            status="success",
+            target_evidence="Security.evtx",
+            artifacts=[
+                OutputArtifact(
+                    path=str(outside),
+                    role="generated",
+                    format="csv",
+                    size_bytes=outside.stat().st_size,
+                    sha256=digest,
+                )
+            ],
+            provenance={"job_output_dir": str(job_dir)},
+        ),
+        _meta("clear_log_event", tool_id="evtxecmd"),
+        use_llm=False,
+    )
+
+    assert analysis.status == "not_analyzed"
+    assert analysis.findings == []
+    assert any(
+        "artifact integrity verification failed before analysis" in warning
+        for warning in analysis.coverage_warnings
+    )
 
 
 class _UngroundedClient:

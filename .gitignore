@@ -87,6 +87,9 @@ tools_metadata/_draft/
 /tools_metadata/_failures/
 # Phase 6 evaluation golden set (LLM extracted)
 eval/goldenset/
+# Public evaluation manifests are tracked; downloaded corpora and run output are not.
+/eval/corpus/
+/eval/runs/
 
 # Local assistant/session notes. Repository-wide Codex policy lives in
 # AGENTS.md, .agents/, and .codex/ instead.

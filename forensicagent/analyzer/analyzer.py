@@ -11,7 +11,9 @@ import csv
 import hashlib
 import json
 import logging
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -27,6 +29,11 @@ from forensicagent.analyzer.types import (
     Finding,
     ToolAnalysis,
     by_severity_count,
+)
+from forensicagent.executor.runner import (
+    contained_directory,
+    contained_regular_file,
+    hash_file,
 )
 from forensicagent.executor.types import MAX_INLINE_JSON_BYTES, ExecutionResult
 from forensicagent.llm import OllamaClient
@@ -47,6 +54,7 @@ CORRELATION_FAMILY_CARRY = ROW_BATCH_SIZE
 CORRELATION_FAMILY_MAX_CHARS = CASE_B_MAX
 TEXT_CHUNK_CHARS = 512 * 1024
 TEXT_OVERLAP_CHARS = 8 * 1024
+CSV_EXTRA_FIELDS_KEY = "__extra_fields__"
 
 
 @dataclass(frozen=True)
@@ -55,6 +63,7 @@ class _ArtifactInput:
     role: str
     format: str
     size_bytes: int
+    sha256: str = ""
 
 
 class _CsvRecordLimitError(Exception):
@@ -127,21 +136,57 @@ def _artifact_value(artifact: Any, name: str, default: Any = "") -> Any:
     return getattr(artifact, name, default)
 
 
-def _artifact_inputs(result: ExecutionResult) -> list[_ArtifactInput]:
+def _link_or_reparse(value: os.stat_result) -> bool:
+    return stat.S_ISLNK(value.st_mode) or bool(
+        getattr(value, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _artifact_inputs(
+    result: ExecutionResult,
+    coverage_warnings: list[str],
+) -> tuple[list[_ArtifactInput], bool]:
     generated: list[_ArtifactInput] = []
     stdout: list[_ArtifactInput] = []
     seen: set[str] = set()
+    integrity_failed = False
+    provenance = _artifact_value(result, "provenance", {})
+    job_output_dir = (
+        provenance.get("job_output_dir") if isinstance(provenance, dict) else None
+    )
+    output_root = (
+        provenance.get("output_root") if isinstance(provenance, dict) else None
+    )
+    if job_output_dir and output_root:
+        try:
+            job_output_dir = str(contained_directory(job_output_dir, output_root))
+        except OSError:
+            coverage_warnings.append(
+                "artifact integrity verification failed: unsafe job output directory"
+            )
+            return [], True
 
     for artifact in _artifact_value(result, "artifacts", None) or []:
         path_text = _artifact_value(artifact, "path")
         if not path_text:
             continue
         path = Path(str(path_text))
-        if not path.is_file():
-            continue
+        expected_sha256 = str(_artifact_value(artifact, "sha256", "") or "")
         try:
-            actual_size = path.stat().st_size
+            if job_output_dir:
+                path = contained_regular_file(path, str(job_output_dir))
+            else:
+                value = path.lstat()
+                if _link_or_reparse(value) or not stat.S_ISREG(value.st_mode):
+                    raise OSError("artifact is not a regular non-link file")
+            actual_size, actual_sha256 = hash_file(path)
         except OSError:
+            if expected_sha256:
+                integrity_failed = True
+                coverage_warnings.append(
+                    f"artifact integrity verification failed before analysis: {path}"
+                )
             continue
         if actual_size <= 0:
             continue
@@ -153,10 +198,25 @@ def _artifact_inputs(result: ExecutionResult) -> list[_ArtifactInput]:
         fmt = str(_artifact_value(artifact, "format", "")).casefold()
         declared_size = _artifact_value(artifact, "size_bytes", actual_size)
         try:
-            size = max(actual_size, int(declared_size or 0))
+            recorded_size = int(declared_size)
         except (TypeError, ValueError):
-            size = actual_size
-        item = _ArtifactInput(path=path, role=role, format=fmt, size_bytes=size)
+            recorded_size = -1
+        if expected_sha256 and (
+            recorded_size != actual_size or expected_sha256 != actual_sha256
+        ):
+            integrity_failed = True
+            coverage_warnings.append(
+                f"artifact integrity mismatch before analysis: {path}; artifact skipped"
+            )
+            continue
+        size = max(actual_size, recorded_size, 0)
+        item = _ArtifactInput(
+            path=path,
+            role=role,
+            format=fmt,
+            size_bytes=size,
+            sha256=expected_sha256,
+        )
         if role == "generated":
             generated.append(item)
         elif role == "stdout":
@@ -164,6 +224,16 @@ def _artifact_inputs(result: ExecutionResult) -> list[_ArtifactInput]:
 
     # Compatibility with pre-artifact executor results.
     stdout_path = Path(str(_artifact_value(result, "stdout_path", "") or ""))
+    if stdout_path:
+        try:
+            if job_output_dir:
+                stdout_path = contained_regular_file(
+                    stdout_path, str(job_output_dir)
+                )
+            elif not stdout_path.is_file():
+                raise OSError("stdout artifact is not a regular file")
+        except OSError:
+            stdout_path = Path()
     if stdout_path.is_file():
         key = str(stdout_path.resolve()).casefold()
         if key not in seen:
@@ -184,7 +254,23 @@ def _artifact_inputs(result: ExecutionResult) -> list[_ArtifactInput]:
     # Generated files are authoritative and are analyzed first.  Stdout is
     # still evidence for tools that emit a useful summary in addition to a
     # generated CSV/JSON; canonical de-duplication removes repeated records.
-    return generated + stdout
+    return generated + stdout, integrity_failed
+
+
+def _artifacts_still_match(artifacts: list[_ArtifactInput]) -> bool:
+    for artifact in artifacts:
+        if not artifact.sha256:
+            continue
+        try:
+            value = artifact.path.lstat()
+            if _link_or_reparse(value) or not stat.S_ISREG(value.st_mode):
+                return False
+            size, digest = hash_file(artifact.path)
+        except OSError:
+            return False
+        if size != artifact.size_bytes or digest != artifact.sha256:
+            return False
+    return True
 
 
 def _infer_format(artifact: _ArtifactInput) -> str:
@@ -207,11 +293,20 @@ def _infer_format(artifact: _ArtifactInput) -> str:
     }.get(suffix, "text")
 
 
+def _serialize_row(row: dict[str, Any]) -> str:
+    try:
+        return json.dumps(row, ensure_ascii=False, default=str, sort_keys=True)
+    except TypeError:
+        # JSON-supported mixed key types cannot be ordered. Preserve every
+        # entry instead of coercing keys into a collision-prone string dict.
+        return json.dumps(row, ensure_ascii=False, default=str)
+
+
 def _render_rows(rows: list[dict[str, Any]], budget: int = CASE_A_MAX) -> str:
     pieces: list[str] = []
     used = 0
     for row in rows:
-        rendered = json.dumps(row, ensure_ascii=False, default=str, sort_keys=True)
+        rendered = _serialize_row(row)
         if used + len(rendered) + 1 > budget:
             break
         pieces.append(rendered)
@@ -219,8 +314,22 @@ def _render_rows(rows: list[dict[str, Any]], budget: int = CASE_A_MAX) -> str:
     return "\n".join(pieces)
 
 
+def _record_coverage_warnings(parsed: Any, warnings: list[str]) -> None:
+    if not isinstance(parsed, dict):
+        return
+    candidates = parsed.get("items")
+    rows = candidates if isinstance(candidates, list) else [parsed]
+    for row in rows:
+        if not isinstance(row, dict) or row.get("record_type") != "coverage_warning":
+            continue
+        message = str(row.get("message") or "tool reported incomplete coverage")
+        warning = f"tool-reported coverage: {message[:240]}"
+        if warning not in warnings:
+            warnings.append(warning)
+
+
 def _row_size(row: dict[str, Any]) -> int:
-    return len(json.dumps(row, ensure_ascii=False, default=str, sort_keys=True)) + 1
+    return len(_serialize_row(row)) + 1
 
 
 def _iter_row_batches(
@@ -343,7 +452,17 @@ def _iter_csv(
             coverage_warnings.append(warning)
             return
         source.reset_record()
-        reader = csv.DictReader(source, fieldnames=fieldnames)
+        # DictReader otherwise stores surplus columns under a ``None`` key.
+        # That mixed key type crashes the deterministic JSON rendering used by
+        # both batch sizing and row rendering when ``sort_keys=True``.
+        restkey = CSV_EXTRA_FIELDS_KEY
+        while restkey in fieldnames:
+            restkey = "_" + restkey
+        reader = csv.DictReader(
+            source,
+            fieldnames=fieldnames,
+            restkey=restkey,
+        )
 
         def rows() -> Iterator[dict[str, Any]]:
             nonlocal reader
@@ -367,7 +486,11 @@ def _iter_csv(
                     source.reset_record()
                     if not exc.recoverable or errors >= 100:
                         return
-                    reader = csv.DictReader(source, fieldnames=fieldnames)
+                    reader = csv.DictReader(
+                        source,
+                        fieldnames=fieldnames,
+                        restkey=restkey,
+                    )
                     continue
                 except csv.Error as exc:
                     errors += 1
@@ -382,7 +505,11 @@ def _iter_csv(
                     if errors >= 100:
                         return
                     source.reset_record()
-                    reader = csv.DictReader(source, fieldnames=fieldnames)
+                    reader = csv.DictReader(
+                        source,
+                        fieldnames=fieldnames,
+                        restkey=restkey,
+                    )
                     continue
                 source.reset_record()
                 yield dict(row)
@@ -624,13 +751,34 @@ def analyze_one(
     scenario: str | None = None,
     stage_ms: dict[str, int] | None = None,
 ) -> ToolAnalysis:
-    analysis = ToolAnalysis(tool_id=metadata.tool_id)
-    artifacts = _artifact_inputs(result)
-    parsed_inline = _artifact_value(result, "parsed_output", None)
-    status = str(_artifact_value(result, "status", "skipped"))
     target_evidence = str(_artifact_value(result, "target_evidence", "") or "")
-
+    analysis = ToolAnalysis(
+        tool_id=metadata.tool_id,
+        target_evidence=target_evidence,
+    )
+    coverage_warnings = analysis.coverage_warnings
+    status = str(_artifact_value(result, "status", "skipped"))
+    provenance = _artifact_value(result, "provenance", {})
+    input_integrity = (
+        provenance.get("input_integrity") if isinstance(provenance, dict) else None
+    )
+    if (
+        isinstance(input_integrity, dict)
+        and input_integrity.get("status") == "failed"
+    ):
+        detail = str(input_integrity.get("detail", "input integrity failed"))[:240]
+        coverage_warnings.append(f"input integrity failure: {detail}")
+        analysis.status = "not_analyzed"
+        analysis.summary = f"not analyzed: input integrity failure: {detail}"
+        return analysis
+    artifacts, artifact_integrity_failed = _artifact_inputs(
+        result, coverage_warnings
+    )
+    parsed_inline = _artifact_value(result, "parsed_output", None)
+    if artifact_integrity_failed:
+        parsed_inline = None
     if not artifacts and parsed_inline is None:
+        analysis.status = "not_analyzed"
         analysis.summary = (
             f"deterministic=0; total=0; execution_status={status}: "
             f"{str(_artifact_value(result, 'error_message', ''))[:160]}"
@@ -644,7 +792,6 @@ def analyze_one(
 
     rule_findings: list[Finding] = []
     llm_raw_parts: list[str] = []
-    coverage_warnings = analysis.coverage_warnings
     with Stopwatch() as sw_rules:
         if artifacts:
             for artifact in artifacts:
@@ -652,6 +799,7 @@ def analyze_one(
                     artifact,
                     coverage_warnings,
                 ):
+                    _record_coverage_warnings(parsed, coverage_warnings)
                     if analysis.case_used == "A" and raw:
                         remaining = CASE_A_MAX - sum(len(part) for part in llm_raw_parts)
                         if remaining > 0:
@@ -670,6 +818,7 @@ def analyze_one(
                     if batch_limit_reached or merge_limit_reached:
                         analysis.finding_limit_reached = True
         else:
+            _record_coverage_warnings(parsed_inline, coverage_warnings)
             batch_findings, batch_limit_reached = apply_rules_with_status(
                 parsed_inline,
                 "",
@@ -688,6 +837,15 @@ def analyze_one(
     if stage_ms is not None:
         key = f"analyze_rules:{metadata.tool_id}"
         stage_ms[key] = stage_ms.get(key, 0) + sw_rules.elapsed_ms
+
+    if not _artifacts_still_match(artifacts):
+        coverage_warnings.append(
+            "artifact integrity changed during analysis; findings were discarded"
+        )
+        analysis.status = "not_analyzed"
+        analysis.findings = []
+        analysis.summary = "not analyzed: artifact integrity changed during analysis"
+        return analysis
 
     deterministic = _dedupe(rule_findings, tool_id=metadata.tool_id)
     llm_findings: list[Finding] = []
@@ -793,6 +951,10 @@ def analyze_all(
             logger.exception("analysis failed for tool_id=%s", tool_id)
             analysis = ToolAnalysis(
                 tool_id=tool_id,
+                target_evidence=str(
+                    _artifact_value(result, "target_evidence", "") or ""
+                ),
+                status="not_analyzed",
                 summary=f"not analyzed: analyzer error: {exc}",
                 coverage_warnings=[
                     f"analyzer failed for {tool_id}; raw artifacts were retained"

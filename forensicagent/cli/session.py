@@ -24,6 +24,9 @@ class SessionOptions:
     use_rag: bool = True   # RAG 순서/컨텍스트 보강 (의존성 없으면 런타임 자동 폴백).
     max_depth: int = 5
     timeout_sec: int = 0
+    max_job_output_bytes: int = settings.MAX_JOB_OUTPUT_BYTES
+    max_total_output_bytes: int = settings.MAX_TOTAL_OUTPUT_BYTES
+    min_free_disk_bytes: int = settings.MIN_FREE_DISK_BYTES
     forced_tools: list[str] = field(default_factory=list)
     auto_yes: bool = True  # REPL 안에서는 매 단계 사용자 입력이 곧 승인.
 

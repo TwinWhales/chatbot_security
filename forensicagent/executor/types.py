@@ -5,7 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
-ExecStatus = Literal["success", "failed", "timeout", "skipped", "output_missing"]
+ExecStatus = Literal[
+    "success",
+    "failed",
+    "timeout",
+    "cancelled",
+    "output_limit",
+    "skipped",
+    "output_missing",
+]
 ArtifactRole = Literal["stdout", "stderr", "generated"]
 MAX_INLINE_JSON_BYTES = 100 * 1024
 
@@ -57,6 +65,7 @@ class ExecutionResult:
     command_template_used: str = ""
     artifacts: list[OutputArtifact] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         # The runner records the real stdout byte size.  Keep large structured
@@ -81,6 +90,7 @@ class ExecutionResult:
             "error_message": self.error_message,
             "artifacts": [artifact.to_dict() for artifact in self.artifacts],
             "warnings": list(self.warnings),
+            "provenance": dict(self.provenance),
             "parsed_output": parsed_output,
         }
 

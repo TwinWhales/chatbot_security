@@ -33,6 +33,7 @@ chatbot_security/
 ├─ tools_metadata/     현재 실행 가능한 도구 정의 YAML
 ├─ tests/              단위·통합·회귀 테스트
 ├─ bench/              합성 golden set과 deterministic/RAG/LLM 순위 평가
+├─ eval/               공개 출처·라이선스·gold label E2E manifest
 ├─ scripts/            선택적 외부 자료 수집·가공 보조
 └─ sample.txt          사용자가 직접 재수집할 외부 출처 URL 목록
 ```
@@ -68,11 +69,11 @@ chatbot_security/
 
 | 단계 | 입력 | 핵심 동작 | 출력 |
 |---|---|---|---|
-| Scanner | 단일 파일 또는 디렉터리 | symlink·Windows junction/reparse를 따라가지 않고 깊이 제한 순회. magic → 확장자 → 파일명 → 부모 경로 순으로 분류하고 coverage 누락을 계수 | `Inventory` |
+| Scanner | 단일 파일 또는 디렉터리 | symlink·Windows junction/reparse를 따라가지 않고 깊이 제한 순회. magic → 확장자 → 파일명 → 부모 경로 순으로 분류하고, 1.5 GiB 미만 증거의 SHA-256·크기·mtime과 coverage 누락을 기록 | `Inventory` |
 | Selector | Inventory + 도구 metadata | `evidence_type`과 `input_format`을 모두 만족하는 후보만 통과. 선택적으로 RAG와 LLM이 순위만 보강 | `Plan`, `RunSpec` |
-| Executor | Plan + metadata | target별 격리 job 생성, preflight, 우선순위·병렬 정책 적용, `shell=False` 실행, 생성 파일 manifest | `ExecutionBundle` |
+| Executor | Plan + metadata + Inventory | artifact별 최고 우선순위 owner 하나를 확정하고, 입력·설정·실행 파일·규칙 provenance와 안전한 resume를 검증한 뒤 `shell=False` 실행 | `ExecutionBundle` |
 | Analyzer | 실행 산출물 + indicator metadata | 생성 artifact 우선 분석, CSV/NDJSON/text 스트리밍, 명시적 matcher 적용, 선택적 LLM 보조 | `ToolAnalysis`, `Finding` |
-| Reporter | 앞 단계 전체 결과 | 도구별 실행·분석 병합, fingerprint 중복 제거, 상태·요약·단계 시간 직렬화 | terminal, `report_*.json`, `report_*.md` |
+| Reporter | 앞 단계 전체 결과 | coverage ledger, finding 타임라인, user/IP/process 피벗, analyst annotation, 상태·요약·단계 시간 직렬화 | terminal, `report_*.json`, `report_*.md` |
 
 ### Scanner의 중요한 경계
 
@@ -87,6 +88,7 @@ chatbot_security/
   프로젝트 상태 이름은 scan root가 신뢰된 `PROJECT_ROOT` 자체일 때만 제외한다.
   외부 증거 트리에 같은 이름이 있어도 자동 제외하지 않는다.
 - `depth_limit_hit`, `unreadable_paths`, `reparse_paths`는 terminal·JSON·Markdown에 전파된다. 값이 있으면 실행 성공과 별개로 scan coverage가 불완전하다.
+- 크기가 **1.5 GiB 이상**인 파일은 자동 제외하고 hash하지 않는다. 경로·크기·상한·제외 이유는 inventory와 report ledger에 남는다.
 
 ## 4. 근본 원인과 이번 수정
 
@@ -106,7 +108,11 @@ chatbot_security/
 | P1 | 대용량 출력의 앞부분만 보거나, chunk 경계와 여러 exporter에서 중복 finding이 생길 수 있었고 500건 한도 도달 여부가 보고서에 드러나지 않았다. | CSV row batch+overlap, bounded NDJSON, text chunk+overlap, generated 우선 순서, canonical location과 fingerprint 중복 제거를 적용했다. 100KiB 초과 JSON은 report에 inline하지 않고 4MiB 초과 단일 JSON은 원본 artifact·SHA와 `coverage_truncated` 경고를 남긴다. 실제 누락이 생긴 501건부터 severity 우선 500건과 `finding_limit_reached`를 전파한다. | coverage/finding-limit flag가 있으면 결과가 완전하지 않으므로 원본 artifact를 별도 검토해야 한다. |
 | P1 | RAG가 일부 후보 점수만 있거나 관련도가 낮아도 결정론 순서를 바꿨고, query에 실제 파일명이 없었다. | 파일명+타입+scenario를 query에 포함한다. 모든 eligible 도구의 유효 점수가 있고 최소 similarity와 score margin을 통과할 때만 정렬하며, 실제 순서가 바뀐 경우에만 `rag_used=True`다. | 기본 embedding과 합성 benchmark가 한국어 사건 질의를 충분히 대표하는지는 검증되지 않았다. |
 | P1 | LLM 결과가 자유 형식이거나 근거 없는 finding을 만들 수 있었고, 코드 보안 출력의 소스·secret이 LLM에 전달될 수 있었다. | JSON schema와 재시도, exact model tag health check, 입력에 실제 존재하는 excerpt만 허용, LLM confidence 상한, deterministic finding 보존을 적용했다. LLM-only finding은 severity `low` 이하이고 source/confidence로 구분한다. `code_security` 결과는 LLM에 보내지 않는다. | LLM 설명은 비결정적이며 최종 포렌식 판단을 대체하지 않는다. |
-| P1 | 동일 초에 보고서를 쓰거나 여러 target 분석을 합칠 때 덮어쓰기·누락 가능성이 있었다. | timestamp+run ID 파일명, 도구별 다중 execution/analysis 병합, fingerprint 기반 finding 중복 제거, 실행 상태와 artifact manifest를 보고서에 포함한다. | 보고서는 입력 증거 자체의 hash/chain-of-custody manifest까지 생성하지 않는다. |
+| P1 | 동일 초에 보고서를 쓰거나 여러 target 분석을 합칠 때 덮어쓰기·누락 가능성이 있었다. | timestamp+run ID 파일명, 도구별 다중 execution/analysis 병합, fingerprint 기반 finding 중복 제거, 실행 상태와 입력·출력 artifact manifest를 보고서에 포함한다. | 입력 hash manifest는 획득 장비·서명·WORM 보관까지 포함한 완전한 chain of custody를 대체하지 않는다. |
+| P1 | EvtxECmd CSV의 헤더보다 긴 행은 `csv.DictReader`가 `None` 키를 만들고, 정렬 JSON 직렬화가 `None`/문자열 키 비교에서 중단됐다. | 충돌하지 않는 surplus-column 키를 지정하고 공용 row 직렬화가 혼합 키를 보존하도록 보강했다. | 비정상 행은 coverage 상한을 넘으면 원본을 보존하고 경고와 함께 건너뛴다. |
+| P1 | 같은 증거에 여러 도구가 겹치거나 고우선순위 도구가 없을 때 하위 도구로 암묵적 fallback할 수 있었고, 완료 작업 재사용에 입력·설정 무결성 계약이 없었다. | artifact별 최고 우선순위 owner 하나만 실행하며 unavailable owner는 명시적으로 skip한다. 입력별 실행 전·후 SHA-256, job별 stat, executable/tool/rule/settings hash와 산출물 hash가 모두 일치한 성공만 resume한다. | 검사 사이에 변경 후 완전히 복구하는 악의적 ABA writer는 읽기 전용 snapshot 없이는 배제할 수 없다. |
+| P1 | 빈 성공 디렉터리, 무제한 출력, Ctrl+C 후 자식 프로세스, 실패/timeout/누락 상태 혼합이 운영을 불안정하게 했다. | 실제 출력이 없는 성공 job dir은 제거하고 disk preflight·job/전체 출력 상한·프로세스 트리 취소를 적용했다. `timeout`, `cancelled`, `output_limit`, `output_missing`을 구분하며 실패 부분 산출물은 보존한다. | 외부 바이너리 자체에는 파일·네트워크 sandbox가 없다. |
+| P1 | 보고서가 시각 순서·coverage 상태·분석가 판정을 지속적으로 보존하지 못했다. | finding 시각을 UTC와 원문으로 함께 정렬하고, 무시각/파싱 불가 finding은 분리한다. artifact ledger, user/IP/process 비인과적 correlation, fingerprint 기반 `confirmed`/`false_positive`/`pending` 노트를 JSON·Markdown에 보존한다. | 원본 이벤트 전체 timeline이나 자동 인과관계 재구성은 이번 범위가 아니다. |
 
 ## 5. 탐지 범위와 지원 증거
 
@@ -117,11 +123,11 @@ chatbot_security/
 | `memory_dump` | `.mem`, `.dmp`, `.vmem`, `.lime`; `memory`, `memdump`, `ram`, `physmem`, `winpmem` 이름 패턴의 `.raw/.bin` 등 | Volatility 3 (Windows 증거만) | 일반 `disk.raw`는 메모리로 단정하지 않는다. `.lime` 등 Linux/macOS 힌트가 있는 증거는 현재 Windows plugin 실행 계획의 platform gate를 통과하지 않는다. |
 | `evtx_log` | `ElfFile` magic 또는 `.evtx` 확장자 | Chainsaw, EvtxECmd | 실제 EVTX magic은 확장자와 무관하게 식별한다. 두 도구가 지원하지 않는 legacy `.evt`는 unknown으로 남긴다. |
 | `registry_hive` | `regf` magic, NTUSER.DAT·UsrClass.dat·SYSTEM·SOFTWARE·SAM·SECURITY·DEFAULT·Amcache.hve | AmcacheParser, RECmd, RegRipper | 각 도구가 허용하는 hive basename이 다르다. |
-| `pcap` | classic PCAP μs/ns 양 endian, PCAPNG magic, `.pcap/.pcapng/.cap` | 없음 | 현재 scanner 탐지만 지원한다. tshark/tcpdump는 doctor 대상이지만 실행 metadata가 없다. |
-| `disk_image` | EWF/VMDK magic, `.dd/.e01/.aff/.vhd/.vhdx/.vmdk` | 없음 | MFTECmd는 디스크 이미지 자체가 아니라 추출된 NTFS metadata를 입력으로 받는다. |
+| `pcap` | classic PCAP μs/ns 양 endian, PCAPNG magic, `.pcap/.pcapng/.cap` | TShark | 설치된 TShark 하나만 owner로 실행하며 없으면 fallback 없이 skip한다. |
+| `disk_image` | EWF/VMDK magic, `.dd/.e01/.aff/.vhd/.vhdx/.vmdk` | Sleuth Kit `fls` | 설치된 `fls`로 파일 목록 triage만 수행하며 mount·파일 복구를 뜻하지 않는다. |
 | `ntfs_metadata` | `$MFT`, `$J`, `$Boot`, `$SDS`, `$I30`, `.mft` | MFTECmd | 원시 이미지에서 이 파일들을 자동 추출하지 않는다. |
 | `sqlite_database` | SQLite magic, `.sqlite/.sqlite3/.db` | 없음 | 브라우저 맥락이 없으면 일반 DB로 남는다. |
-| `browser_artifact` | History·Cookies·Web Data·Places.sqlite·formhistory.sqlite 또는 Chrome/Edge/Firefox profile 경로 | 없음 | 현재 분류만 지원하며 브라우저 전용 parser는 등록돼 있지 않다. |
+| `browser_artifact` | History·Cookies·Web Data·Places.sqlite·formhistory.sqlite 또는 Chrome/Edge/Firefox profile 경로 | 내장 Browser SQLite | stdlib SQLite read-only query로 history/download row를 bounded 추출한다. 알 수 없는 schema·누락 table은 coverage warning으로 남긴다. |
 | `prefetch` | `MAM\x04`, version DWORD 뒤 offset 4의 `SCCA`, `.pf`, Windows Prefetch 경로 | PECmd | 압축/버전 변형 전체를 검증한 것은 아니다. |
 | `text_log` | `.log`, syslog/auth.log/secure 계열, `/var/log` | Gitleaks | 현재 연결은 secret 탐지이며 일반 로그 포렌식 parser가 아니다. |
 | `text_document` | `.txt`, `.env*`, YAML/JSON/TOML/INI/config, `.sh/.ps1/.bat/.cmd/.xml/.tf/.tfvars`, `.pem/.key`, `Dockerfile`·`Makefile`·`Jenkinsfile` | Gitleaks | 구조화 포맷이나 script 의미 분석이 아니라 text secret 탐지 라우팅이다. |
@@ -136,14 +142,17 @@ chatbot_security/
 |---|---|---|---|
 | AmcacheParser (Windows) | `Amcache.hve` | CSV | Amcache 실행 흔적 |
 | Bandit | `.py`, `.pyi` | CSV | Python 정적 보안 분석 |
+| Browser SQLite (내장) | Chrome/Edge History, Firefox Places 계열 | JSON | bounded history/download 추출 |
 | Chainsaw | `.evtx` | JSONL (large) | 채널별 주요 Event ID의 결정론적 Tau search |
 | EvtxECmd (Windows) | `.evtx` | CSV | Windows Event Log 정규화 |
+| `fls` | disk image | text | 이미지 파일 목록 triage |
 | Gitleaks | source/text 전반 | CSV | secret·credential 패턴 탐지 |
 | MFTECmd (Windows) | 추출 NTFS metadata 이름 또는 `.mft` | CSV | MFT/USN 등 NTFS metadata |
 | PECmd (Windows) | `.pf` | CSV | Windows Prefetch |
 | RECmd (Windows) | 허용된 registry hive 이름 | CSV | Registry batch 분석 |
 | RegRipper | 허용된 registry hive 이름 | text | hive별 plugin/profile 분석 |
 | Semgrep | metadata에 열거된 source 확장자 | JSON | 다중 언어 정적 분석 |
+| TShark | PCAP/PCAPNG | JSON | 패킷·프로토콜 필드 triage |
 | Volatility 3 | Windows로 식별되거나 OS가 미상인 memory dump | CSV | scenario 문구와 무관한 Windows 5-plugin detector coverage |
 
 이 표의 “등록”은 실행 명령과 metadata가 있다는 뜻이다. 바이너리·ruleset·plugin이 함께 설치됐거나 실제 사건 데이터에서 성공했다는 보장은 아니다.
@@ -153,7 +162,7 @@ Bandit·Semgrep·Gitleaks도 실제 실행은 Scanner가 inventory에 넣고 hos
 ### 5.3 Finding 생성 범위
 
 - 규칙 엔진은 matcher registry에 명시적으로 등록된 indicator만 finding으로 만든다.
-- 현재 metadata에 선언된 고유 indicator ID는 30개이며 모두 matcher와 연결된다. `supported_indicator_ids()`는 custom metadata 호환용 ID까지 포함해 37개를 반환한다.
+- 현재 metadata에 선언된 고유 indicator ID는 34개이며 모두 matcher와 연결된다. `supported_indicator_ids()`는 custom metadata 호환용 ID까지 포함해 41개를 반환한다.
 - EVTX Event ID 기반 규칙, registry persistence, Prefetch, Amcache, NTFS metadata, Volatility의 parent-child·실행 경로·network·`malfind`, Bandit/Semgrep/Gitleaks 구조화 결과 등에 대한 matcher가 존재한다.
 - 실제 TI 조회, 파일 삭제·존재 확인, 일부 교차 artifact 상관분석 또는 기본 도구 출력에 없는 필드가 필요한 indicator는 구현된 것처럼 보이지 않도록 기본 metadata에서 제거했다. 향후 필요한 데이터와 matcher를 함께 구현할 때만 다시 선언해야 한다.
 - custom metadata의 미지원 indicator는 warning과 0 finding이 정상 동작이다. 이를 “이상 없음”으로 해석해서는 안 된다.
@@ -190,7 +199,7 @@ Bandit·Semgrep·Gitleaks도 실제 실행은 Scanner가 inventory에 넣고 hos
 └─ report_<timestamp>_<run-id>.md
 ```
 
-각 실행 결과는 `success`, `failed`, `timeout`, `skipped`, `output_missing` 중 하나다. stdout·stderr·generated 파일은 role, format, size, SHA-256과 함께 manifest에 들어간다. 명령은 argv 배열과 `shell=False`로 실행하지만, 외부 프로그램 자체는 현재 사용자 권한으로 동작하며 별도 sandbox는 없다.
+각 실행 결과는 `success`, `failed`, `timeout`, `cancelled`, `output_limit`, `skipped`, `output_missing` 중 하나다. stdout·stderr·generated 파일은 role, format, size, SHA-256과 함께 manifest에 들어간다. 성공 재사용은 입력 SHA-256/size/mtime, tool metadata·rule·analyzer code·실행 파일·command dependency·argv·resource 설정, 기존 산출물 hash가 모두 일치하고 최종 입력 검증이 `verified`일 때만 허용한다. 명령은 argv 배열과 `shell=False`로 실행하지만, 외부 프로그램 자체는 현재 사용자 권한으로 동작하며 별도 sandbox는 없다.
 
 ### 6.3 Analyzer 크기별 처리
 
@@ -201,6 +210,8 @@ Bandit·Semgrep·Gitleaks도 실제 실행은 Scanner가 inventory에 넣고 hos
 - malformed/oversized row, 단일 거대 JSON 등 때문에 전체를 해석하지 못하면
   `coverage_warnings`와 `coverage_truncated`가 보고서까지 전파된다.
 - `code_security` category는 소스·secret이 모델에 전달되지 않도록 LLM을 호출하지 않는다.
+- analysis 상태가 `analyzed`이고 finding이 0개인 경우와 `not_analyzed`는 coverage
+  ledger에서 구분한다. 후자를 “이상 없음”으로 해석하면 안 된다.
 
 ### 6.4 RAG 동작과 폴백
 
@@ -253,6 +264,9 @@ Selector와 Analyzer의 `retrieve_tools()` 경로는 tool metadata collection을
   끄며 LLM은 유지된다. 둘 다 끄려면 두 플래그를 함께 사용한다.
 - `--scenario`는 RAG query와 Selector/Analyzer LLM context에만 들어가고
   결정론 도구 자격 gate나 matcher를 바꾸지 않는다.
+- `/summary`의 결정론 화면과 선택적 LLM context는 집계·도구 상태만 사용한다.
+  finding 본문, 원본 경로, 실행 명령, raw excerpt는 보내지 않으며 모델 출력은
+  4,000자로 제한하고 terminal markup/control 문자를 literal로 처리한다.
 
 ## 7. 아직 남는 한계와 위험
 
@@ -273,12 +287,12 @@ Selector와 Analyzer의 `retrieve_tools()` 경로는 tool metadata collection을
 
 ### 7.2 탐지·규칙 커버리지
 
-- PCAP, disk image, 일반 SQLite, browser artifact는 분류 가능하지만 현재 소비 도구가 없다.
+- PCAP은 TShark, disk image는 `fls`, browser SQLite는 내장 parser metadata가 있다. 해당 단일 owner가 설치되지 않았거나 schema를 지원하지 않으면 다른 도구로 fallback하지 않고 skip/coverage warning을 남긴다.
 - raw disk image 자동 판별·mount·artifact 추출 기능이 없다.
 - 기본 metadata의 indicator는 모두 matcher와 연결된다. 다만 이는 제거된 TI·파일 존재·교차 artifact 의존 탐지까지 지원한다는 뜻이 아니다. 레거시 `sigma_rule_hit` matcher는 registry에 남아 있지만 기본 Chainsaw metadata와 실행 경로는 이를 사용하지 않는다.
 - 보고서에 `finding_limit_reached=true`가 있으면 severity 우선 500건만 보존된 상태이므로 0 finding이나 낮은 건수를 전체 결과로 해석하면 안 된다.
 - 알려진 악성 hash/IP, 서명 검증, 파일 존재·삭제 여부, 시간선 상관분석은 외부 데이터나 교차 artifact 없이는 확정하지 않는다.
-- Scanner는 입력 증거의 cryptographic hash, filesystem timestamp, acquisition metadata를 저장하지 않는다. 출력 artifact에는 SHA-256이 있지만 입력 chain-of-custody를 대체하지 못한다.
+- Scanner는 포함 증거의 SHA-256·크기·mtime을 기록하고 Executor가 시작·종료 시 다시 확인한다. 이는 획득 장비·서명·WORM 보관을 포함한 완전한 chain of custody를 대체하지 않으며, 1.5 GiB 이상 자동 제외 파일은 hash하지 않는다.
 - 기본 scan 깊이, unreadable path, symlink/junction/reparse 미추적 때문에 특정 배치 구조에서는 증거를 놓칠 수 있다. 이 경우 coverage 필드는 경고하지만 누락 데이터를 대신 복구하지는 않는다. 공통 VCS/dependency ignore는 별도의 정책 제외라 coverage 경고에 포함되지 않는다.
 
 ### 7.3 RAG와 LLM
@@ -415,9 +429,15 @@ ollama pull qwen2.5:7b
 
 # 기존 index를 재사용
 .\.venv\Scripts\python.exe -m forensicagent bench --no-rebuild
+
+# 공개 corpus finding E2E. 다운로드는 하지 않으며 corpus/run은 Git에서 제외된다.
+.\.venv\Scripts\python.exe -m forensicagent.e2e_detection eval\e2e_manifest.json
 ```
 
 benchmark 통과는 합성 selection 품질을 뜻할 뿐, 실제 공격 탐지 recall/precision이나 법적 증거 신뢰성을 증명하지 않는다.
+현재 E2E manifest는 검증된 corpus SHA-256이 고정되지 않아 `executed_cases=0`,
+`metrics_available=false`, aggregate metric `null`이 정상이다. 이 값을 0점 성능이나
+탐지 정확도 증거로 사용하면 안 된다.
 
 현재 matcher 지원 수와 metadata 공백은 다음처럼 코드에서 다시 산출할 수 있다.
 
@@ -450,11 +470,10 @@ Linux job은 `libmagic1`을 설치한다. 배포, release publish, cloud credent
 ## 9. 다음 우선 작업
 
 1. 실제 공개 증거셋을 이용해 도구별 설치 버전, command, 생성 artifact, matcher 결과를 end-to-end 고정한다.
-2. PCAP, disk image, SQLite/browser artifact용 metadata·adapter·parser를 추가한다.
-3. 입력 증거 SHA-256, 획득 시각·원본 경로·case ID를 포함하는 읽기 전용 evidence manifest를 도입한다.
-4. 제거한 TI·파일 존재·교차 artifact 의존 indicator는 필요한 데이터 소스와 matcher를 함께 구현할 때만 기본 metadata에 다시 노출한다.
-5. 한국어 시나리오와 혼합 언어 파일명을 포함한 RAG golden set을 별도로 만들고 threshold를 재보정한다.
-6. 정리된 현재 tree로 fresh public repository를 만들고 기존 corpus 포함 이력은 private로 보존한다.
+2. 1.5 GiB 이상 원본은 읽기 전용 snapshot·분할 복제본 등 별도 대형 증거 운용 절차를 마련하고, 필요하면 명시적 정책 설정을 추가한다.
+3. 제거한 TI·파일 존재·교차 artifact 의존 indicator는 필요한 데이터 소스와 matcher를 함께 구현할 때만 기본 metadata에 다시 노출한다.
+4. 한국어 시나리오와 혼합 언어 파일명을 포함한 RAG golden set을 별도로 만들고 threshold를 재보정한다.
+5. 정리된 현재 tree로 fresh public repository를 만들고 기존 corpus 포함 이력은 private로 보존한다.
 
 현재 상태의 적절한 표현은 **“실패 시 결정론 경로를 보존하는 자동 트리아지 파이프라인”**이다. 등록 도구와 명시적 규칙이 다루는 범위에서는 재현성과 관찰 가능성이 개선됐지만, 지원하지 않는 증거·indicator까지 탐지한다고 해석해서는 안 된다.
 

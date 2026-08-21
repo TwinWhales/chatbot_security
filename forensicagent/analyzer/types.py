@@ -47,6 +47,10 @@ class Finding:
     rule_id: str = ""
     fingerprint: str = ""
     confidence: float = 1.0
+    # Structured entities are optional, rule-supplied correlation hints.  They
+    # deliberately stay outside the fingerprint payload so analyst identity is
+    # stable when entity extraction evolves.
+    entities: dict[str, list[str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         try:
@@ -85,6 +89,7 @@ class Finding:
             "rule_id": self.rule_id,
             "fingerprint": self.fingerprint,
             "confidence": self.confidence,
+            "entities": {key: list(values) for key, values in self.entities.items()},
         }
 
 
@@ -98,6 +103,8 @@ class ToolAnalysis:
     llm_failed: bool = False
     finding_limit_reached: bool = False
     coverage_warnings: list[str] = field(default_factory=list)
+    target_evidence: str = ""
+    status: Literal["analyzed", "not_analyzed"] = "analyzed"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,6 +115,8 @@ class ToolAnalysis:
             "finding_limit_reached": self.finding_limit_reached,
             "coverage_truncated": bool(self.coverage_warnings),
             "coverage_warnings": list(self.coverage_warnings),
+            "target_evidence": self.target_evidence,
+            "status": self.status,
             "summary": self.summary,
             "findings": [f.to_dict() for f in self.findings],
         }

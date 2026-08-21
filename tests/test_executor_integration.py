@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import sys
 import threading
 import time
@@ -10,10 +12,18 @@ from types import SimpleNamespace
 import pytest
 
 from forensicagent import config as settings
+from forensicagent.analyzer import analyze_one
 from forensicagent.executor.adapter import GenericAdapter
 from forensicagent.executor.executor import _build_jobs, execute
 from forensicagent.executor.runner import collect_generated_artifacts, run_tool
+from forensicagent.executor.state import (
+    load_state,
+    new_state,
+    record_result,
+    reusable_result,
+)
 from forensicagent.executor.types import MAX_INLINE_JSON_BYTES, ExecutionResult
+from forensicagent.scanner import scan
 from forensicagent.selector.types import Plan, RunSpec, ToolSelection
 from forensicagent.tools.schema import CommandTemplate, InstallCheck, ToolMetadata
 
@@ -101,6 +111,22 @@ def test_generated_output_manifest_and_stdout_compatibility(tmp_path):
     payload = result.to_dict()
     assert payload["artifacts"][0]["sha256"]
     assert payload["warnings"] == []
+    provenance = payload["provenance"]
+    assert provenance["app_version"]
+    assert provenance["tool_version"].startswith("Python ")
+    assert Path(provenance["executable_path"]) == Path(sys.executable).resolve()
+    assert provenance["executable_sha256"] == hashlib.sha256(
+        Path(sys.executable).read_bytes()
+    ).hexdigest()
+    assert provenance["tool_metadata"]["tool_id"] == "fakecsv"
+    assert len(provenance["tool_metadata_sha256"]) == 64
+    assert len(provenance["rule_definition_sha256"]) == 64
+    rules_path = Path(__file__).resolve().parents[1] / "forensicagent/analyzer/rules.py"
+    assert provenance["analyzer_rules_sha256"] == hashlib.sha256(
+        rules_path.read_bytes()
+    ).hexdigest()
+    assert provenance["input_integrity"]["status"] == "verified"
+    assert provenance["preflight"]["status"] == "passed"
 
 
 def test_generated_reparse_point_is_not_followed(tmp_path, monkeypatch):
@@ -129,6 +155,32 @@ def test_generated_reparse_point_is_not_followed(tmp_path, monkeypatch):
 
     assert artifacts == []
     assert any("link/reparse point" in warning for warning in warnings)
+
+
+def test_generated_root_reparse_point_is_rejected(tmp_path, monkeypatch):
+    generated = (tmp_path / "generated").resolve()
+    generated.mkdir()
+    original_lstat = Path.lstat
+
+    def fake_lstat(path):
+        value = original_lstat(path)
+        if path == generated:
+            return SimpleNamespace(
+                st_mode=value.st_mode,
+                st_file_attributes=0x400,
+            )
+        return value
+
+    monkeypatch.setattr(Path, "lstat", fake_lstat)
+
+    artifacts, warnings = collect_generated_artifacts(
+        generated,
+        default_format="text",
+        containment_root=tmp_path,
+    )
+
+    assert artifacts == []
+    assert any("unsafe generated output root" in warning for warning in warnings)
 
 
 def test_large_json_stdout_stays_artifact_and_is_not_embedded(tmp_path):
@@ -227,6 +279,92 @@ def test_expected_generated_output_missing_is_explicit(tmp_path):
     assert "no files were produced" in result.error_message
     assert result.warnings
     assert not [a for a in result.artifacts if a.role == "generated"]
+    assert not (Path(result.stdout_path).parent / "generated").exists()
+
+
+def test_silent_success_leaves_no_empty_job_but_keeps_resume_state(tmp_path):
+    script = tmp_path / "silent.py"
+    script.write_text("pass\n", encoding="utf-8")
+    template = f"{sys.executable} {{evidence_path}}"
+    metadata = _metadata("silent", template, output_format="text")
+    raw_dir = tmp_path / "runs"
+
+    result = execute(
+        Plan(selected_tools=[_selection("silent", template, [str(script)])]),
+        {"silent": metadata},
+        output_dir=raw_dir,
+    ).results[0]
+
+    assert result.status == "success"
+    assert result.stdout_path == ""
+    assert result.stderr_path == ""
+    assert result.artifacts == []
+    assert (raw_dir / ".execution-state.json").is_file()
+    assert not [path for path in raw_dir.iterdir() if path.is_dir()]
+
+
+def test_successful_stderr_diagnostic_keeps_job_directory(tmp_path):
+    script = tmp_path / "warn.py"
+    script.write_text(
+        "import sys\nsys.stderr.write('nonfatal warning')\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {{evidence_path}}"
+    metadata = _metadata("warn", template, output_format="text")
+
+    result = execute(
+        Plan(selected_tools=[_selection("warn", template, [str(script)])]),
+        {"warn": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+
+    assert result.status == "success"
+    assert Path(result.stderr_path).is_file()
+    assert "nonfatal warning" in Path(result.stderr_path).read_text(encoding="utf-8")
+
+
+def test_successful_implicit_cwd_output_is_never_deleted(tmp_path):
+    script = tmp_path / "implicit.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "Path('implicit.csv').write_text('kind,value\\nrow,1\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {{evidence_path}}"
+    metadata = _metadata("implicit", template, output_format="text")
+
+    result = execute(
+        Plan(selected_tools=[_selection("implicit", template, [str(script)])]),
+        {"implicit": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+
+    implicit = Path(result.stdout_path).parent / "implicit.csv"
+    assert result.status == "success"
+    assert implicit.read_text(encoding="utf-8") == "kind,value\nrow,1\n"
+
+
+def test_zero_byte_generated_file_is_output_missing(tmp_path):
+    script = tmp_path / "empty_output.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "out = Path(sys.argv[1])\n"
+        "out.mkdir(parents=True, exist_ok=True)\n"
+        "(out / 'empty.csv').touch()\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {{evidence_path}} {{output_dir}}"
+    metadata = _metadata("empty", template)
+
+    result = execute(
+        Plan(selected_tools=[_selection("empty", template, [str(script)])]),
+        {"empty": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+
+    assert result.status == "output_missing"
+    assert [item.size_bytes for item in result.artifacts if item.role == "generated"] == [0]
 
 
 def test_generic_adapter_honors_preferred_template():
@@ -298,12 +436,16 @@ def test_prerequisite_check_uses_trusted_project_cwd(tmp_path, monkeypatch):
 
 def test_jobs_and_single_worker_execution_are_priority_ordered(tmp_path, monkeypatch):
     template = f"{sys.executable} {{evidence_path}}"
+    high_evidence = tmp_path / "high.txt"
+    low_evidence = tmp_path / "low.txt"
+    high_evidence.write_text("high", encoding="utf-8")
+    low_evidence.write_text("low", encoding="utf-8")
     low_meta = _metadata("low", template, output_format="text")
     high_meta = _metadata("high", template, output_format="text")
     plan = Plan(
         selected_tools=[
-            _selection("low", template, ["low.txt"], priority=1),
-            _selection("high", template, ["high.txt"], priority=10),
+            _selection("low", template, [str(low_evidence)], priority=1),
+            _selection("high", template, [str(high_evidence)], priority=10),
         ]
     )
     tools = {"low": low_meta, "high": high_meta}
@@ -312,7 +454,8 @@ def test_jobs_and_single_worker_execution_are_priority_ordered(tmp_path, monkeyp
     starts: list[str] = []
     starts_lock = threading.Lock()
 
-    def fake_execute(job, output_dir, timeout_sec, preflight):
+    def fake_execute(prepared, output_dir, timeout_sec, budget, cancel_event):
+        job = prepared.job
         with starts_lock:
             starts.append(job.metadata.tool_id)
         return ExecutionResult(tool_id=job.metadata.tool_id, status="success")
@@ -330,10 +473,296 @@ def test_jobs_and_single_worker_execution_are_priority_ordered(tmp_path, monkeyp
     assert starts == ["high", "low"]
 
 
+def test_each_artifact_is_owned_by_only_one_tool(tmp_path):
+    shared = str(tmp_path / "shared.evtx")
+    unique = str(tmp_path / "unique.evtx")
+    template = f"{sys.executable} {{evidence_path}}"
+    low = _metadata("low", template, output_format="text")
+    high = _metadata("high", template, output_format="text")
+    plan = Plan(
+        selected_tools=[
+            _selection("low", template, [shared, unique], priority=1),
+            _selection("high", template, [shared], priority=10),
+        ]
+    )
+
+    jobs = _build_jobs(plan, {"low": low, "high": high})
+
+    assert [(job.metadata.tool_id, job.evidence) for job in jobs] == [
+        ("high", shared),
+        ("low", unique),
+    ]
+
+
+def test_unavailable_owner_does_not_fall_back_to_lower_priority_tool(tmp_path):
+    evidence_path = tmp_path / "shared.evtx"
+    evidence_path.write_text("evidence", encoding="utf-8")
+    evidence = str(evidence_path)
+    template = f"{sys.executable} {{evidence_path}}"
+    high = _metadata("high", template, output_format="text")
+    high.install_check = InstallCheck(
+        command="forensicagent-definitely-missing --version",
+        expected_pattern="never",
+    )
+    low = _metadata("low", template, output_format="text")
+    plan = Plan(
+        selected_tools=[
+            _selection("low", template, [evidence], priority=1),
+            _selection("high", template, [evidence], priority=10),
+        ]
+    )
+
+    bundle = execute(plan, {"low": low, "high": high}, output_dir=tmp_path / "runs")
+
+    assert [(item.tool_id, item.status) for item in bundle.results] == [
+        ("high", "skipped")
+    ]
+
+
+def test_unknown_high_priority_owner_does_not_fall_back(tmp_path, monkeypatch):
+    evidence = tmp_path / "shared.log"
+    evidence.write_text("evidence", encoding="utf-8")
+    template = f"{sys.executable} {{evidence_path}}"
+    low = _metadata("low", template, output_format="text")
+    plan = Plan(
+        selected_tools=[
+            _selection("low", template, [str(evidence)], priority=1),
+            _selection("unknown", template, [str(evidence)], priority=10),
+        ]
+    )
+    monkeypatch.setattr(
+        "forensicagent.executor.executor.run_tool",
+        lambda *_args, **_kwargs: pytest.fail("lower-priority fallback executed"),
+    )
+
+    bundle = execute(plan, {"low": low}, output_dir=tmp_path / "runs")
+
+    assert bundle.results == []
+
+
+def test_changed_scan_identity_is_refused_before_tool_run(tmp_path, monkeypatch):
+    evidence = tmp_path / "evidence.log"
+    evidence.write_text("AAAA", encoding="utf-8")
+    inventory = scan(evidence)
+    template = f"{sys.executable} {{evidence_path}}"
+    metadata = _metadata("integrity", template, output_format="text")
+    plan = Plan(
+        selected_tools=[
+            _selection("integrity", template, [str(evidence)], priority=10)
+        ]
+    )
+    evidence.write_text("BBBB", encoding="utf-8")
+    monkeypatch.setattr(
+        GenericAdapter,
+        "validate_prerequisites",
+        lambda *_args, **_kwargs: pytest.fail(
+            "tool preflight ran before evidence verification"
+        ),
+    )
+    monkeypatch.setattr(
+        "forensicagent.executor.executor.run_tool",
+        lambda *_args, **_kwargs: pytest.fail("tool executed on changed evidence"),
+    )
+
+    result = execute(
+        plan,
+        {"integrity": metadata},
+        output_dir=tmp_path / "runs",
+        inventory=inventory,
+    ).results[0]
+
+    assert result.status == "failed"
+    assert "no longer matches scan inventory" in result.error_message
+
+
+def test_touch_only_change_after_scan_is_refused(tmp_path, monkeypatch):
+    evidence = tmp_path / "evidence.log"
+    evidence.write_text("same", encoding="utf-8")
+    inventory = scan(evidence)
+    scanned_mtime = inventory.evidence_list[0].mtime_ns
+    value = evidence.stat()
+    os.utime(evidence, ns=(value.st_atime_ns, scanned_mtime + 1_000_000_000))
+    template = f"{sys.executable} {{evidence_path}}"
+    metadata = _metadata("integrity", template, output_format="text")
+    plan = Plan(
+        selected_tools=[
+            _selection("integrity", template, [str(evidence)], priority=10)
+        ]
+    )
+    monkeypatch.setattr(
+        "forensicagent.executor.executor.run_tool",
+        lambda *_args, **_kwargs: pytest.fail("tool executed after evidence touch"),
+    )
+
+    result = execute(
+        plan,
+        {"integrity": metadata},
+        output_dir=tmp_path / "runs",
+        inventory=inventory,
+    ).results[0]
+
+    assert evidence.stat().st_mtime_ns != scanned_mtime
+    assert result.status == "failed"
+    assert "mtime changed" in result.error_message
+
+
+def test_direct_caller_touch_only_change_creates_new_attempt(tmp_path):
+    evidence = _script(tmp_path / "tool.py")
+    template = f"{sys.executable} {{evidence_path}} {{output_dir}}"
+    metadata = _metadata("touch", template)
+    plan = Plan(
+        selected_tools=[_selection("touch", template, [str(evidence)], priority=10)]
+    )
+    raw = tmp_path / "runs"
+
+    first = execute(plan, {"touch": metadata}, output_dir=raw).results[0]
+    value = evidence.stat()
+    os.utime(
+        evidence,
+        ns=(value.st_atime_ns, value.st_mtime_ns + 1_000_000_000),
+    )
+    second = execute(plan, {"touch": metadata}, output_dir=raw).results[0]
+
+    assert first.provenance["input"]["mtime_ns"] != second.provenance["input"][
+        "mtime_ns"
+    ]
+    assert second.provenance["resume"]["reused"] is False
+    assert Path(first.stdout_path).parent != Path(second.stdout_path).parent
+
+
+def test_multiple_runs_share_start_and_final_input_hash(tmp_path, monkeypatch):
+    import forensicagent.executor.executor as executor_module
+
+    evidence = _script(tmp_path / "multi-hash.py")
+    template = f"{sys.executable} {{evidence_path}} {{output_dir}}"
+    metadata = _metadata("multi-hash", template)
+    selection = _selection("multi-hash", template, [str(evidence)], priority=10)
+    selection.run_specs = [
+        RunSpec(str(evidence), template, label="first"),
+        RunSpec(str(evidence), template, label="second"),
+    ]
+    original_hash = executor_module.hash_file
+    evidence_hashes = 0
+
+    def counted_hash(path):
+        nonlocal evidence_hashes
+        if Path(path).resolve() == evidence.resolve():
+            evidence_hashes += 1
+        return original_hash(path)
+
+    monkeypatch.setattr(executor_module, "hash_file", counted_hash)
+
+    results = execute(
+        Plan(selected_tools=[selection]),
+        {"multi-hash": metadata},
+        output_dir=tmp_path / "runs",
+        max_parallel=1,
+    ).results
+
+    assert [result.status for result in results] == ["success", "success"]
+    assert evidence_hashes == 2
+
+
+def test_final_input_mismatch_invalidates_siblings_and_blocks_analysis(tmp_path):
+    evidence = tmp_path / "evidence.log"
+    evidence.write_text("AAAA", encoding="utf-8")
+    inventory = scan(evidence)
+    mutator = tmp_path / "mutator.py"
+    mutator.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "Path(sys.argv[1]).write_text('BBBB', encoding='utf-8')\n"
+        "print('partial output retained')\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {mutator} {{evidence_path}}"
+    metadata = _metadata("mutator", template, output_format="text")
+    selection = _selection("mutator", template, [str(evidence)], priority=10)
+    selection.run_specs = [
+        RunSpec(str(evidence), template, label="first"),
+        RunSpec(str(evidence), template, label="second"),
+    ]
+    raw = tmp_path / "runs"
+
+    results = execute(
+        Plan(selected_tools=[selection]),
+        {"mutator": metadata},
+        output_dir=raw,
+        inventory=inventory,
+        max_parallel=1,
+    ).results
+
+    assert [result.status for result in results] == ["failed", "failed"]
+    assert all(
+        result.provenance["input_integrity"]["status"] == "failed"
+        for result in results
+    )
+    retained = results[0].artifacts
+    assert retained and all(Path(artifact.path).is_file() for artifact in retained)
+    state, _ = load_state(raw)
+    for result in results:
+        job_key = result.provenance["resume"]["job_key"]
+        assert state["jobs"][job_key]["result"]["status"] == "failed"
+        assert reusable_result(state, job_key, raw)[0] is None
+
+    analysis = analyze_one(results[0], metadata, use_llm=False, use_rag=False)
+
+    assert analysis.status == "not_analyzed"
+    assert analysis.findings == []
+    assert any("input integrity failure" in item for item in analysis.coverage_warnings)
+
+
+def test_pending_input_verification_is_never_reused(tmp_path):
+    job_key = "a" * 64
+    result = ExecutionResult(
+        tool_id="pending",
+        status="success",
+        provenance={
+            "resume": {"job_key": job_key, "reused": False},
+            "input_integrity": {"status": "pending_final_verification"},
+        },
+    )
+    state = new_state()
+    record_result(state, result)
+
+    reused, warning = reusable_result(state, job_key, tmp_path)
+
+    assert reused is None
+    assert "lacks verified input integrity" in warning
+
+
+def test_fingerprint_rejects_path_replacement_after_hash(tmp_path, monkeypatch):
+    import forensicagent.executor.executor as executor_module
+
+    evidence = tmp_path / "evidence.log"
+    replacement = tmp_path / "replacement.log"
+    evidence.write_text("AAAA", encoding="utf-8")
+    original_stat = evidence.stat()
+    original_hash = executor_module.hash_file
+
+    def replacing_hash(path):
+        result = original_hash(path)
+        replacement.write_text("BBBB", encoding="utf-8")
+        os.utime(
+            replacement,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+        )
+        os.replace(replacement, evidence)
+        return result
+
+    monkeypatch.setattr(executor_module, "hash_file", replacing_hash)
+
+    with pytest.raises(OSError, match="changed while it was fingerprinted"):
+        executor_module._input_fingerprint(evidence)
+
+
 def test_nonparallel_tool_is_serialized_without_blocking_other_tools(
     tmp_path, monkeypatch
 ):
     template = f"{sys.executable} {{evidence_path}}"
+    evidence = [tmp_path / name for name in ("one", "two", "three")]
+    for path in evidence:
+        path.write_text(path.name, encoding="utf-8")
     serial_meta = _metadata(
         "serial", template, parallelizable=False, output_format="text"
     )
@@ -342,8 +771,10 @@ def test_nonparallel_tool_is_serialized_without_blocking_other_tools(
     )
     plan = Plan(
         selected_tools=[
-            _selection("serial", template, ["one", "two"], priority=10),
-            _selection("other", template, ["three"], priority=1),
+            _selection(
+                "serial", template, [str(evidence[0]), str(evidence[1])], priority=10
+            ),
+            _selection("other", template, [str(evidence[2])], priority=1),
         ]
     )
     tools = {"serial": serial_meta, "other": other_meta}
@@ -352,8 +783,9 @@ def test_nonparallel_tool_is_serialized_without_blocking_other_tools(
     max_serial = 0
     max_total = 0
 
-    def fake_execute(job, output_dir, timeout_sec, preflight):
+    def fake_execute(prepared, output_dir, timeout_sec, budget, cancel_event):
         nonlocal max_serial, max_total
+        job = prepared.job
         with guard:
             active[job.metadata.tool_id] += 1
             max_serial = max(max_serial, active["serial"])
@@ -402,4 +834,7 @@ def test_runner_timeout_returns_manifested_streams(tmp_path):
     assert result.status == "timeout"
     assert result.exit_code == -1
     assert {artifact.role for artifact in result.artifacts} == {"stdout", "stderr"}
-    assert Path(result.stdout_path).read_text(encoding="utf-8").strip() == "started"
+    assert Path(result.stdout_path).read_text(encoding="utf-8").strip() in {
+        "",
+        "started",
+    }

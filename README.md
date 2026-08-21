@@ -1,7 +1,8 @@
 # forensicagent
 
 [코드 구조·수정 내역·지원 범위·남은 한계 감사 보고서](AUDIT_REPORT.md) ·
-[보안 정책](SECURITY.md) · [외부 구성요소 고지](THIRD_PARTY_NOTICES.md)
+[보안 정책](SECURITY.md) · [기여 안내](CONTRIBUTING.md) ·
+[외부 구성요소 고지](THIRD_PARTY_NOTICES.md)
 
 > 포렌식 자동 분류 CLI 에이전트 — 결정론 Scanner가 증거를 식별하고,
 > 형식 gate와 선택적 RAG/로컬 LLM이 도구 순서를 보강한다. 외부 도구 결과는
@@ -16,7 +17,7 @@ $ forensicagent
 
 [*] 작업 디렉토리: ~/ctf/forensics-challenge-03/
 [*] 증거 스캔 중...
-[+] 발견: memory.raw (메모리 덤프, 2.1GB)
+[+] 발견: memory.raw (메모리 덤프, 1.2 GiB)
 [+] 발견: Security.evtx (Windows 이벤트 로그)
 [+] 발견: NTUSER.DAT (레지스트리 하이브)
 
@@ -51,10 +52,12 @@ $ forensicagent
 으로 뽑아 리포트로 묶는 **triage** 단계.
 
 **의도적으로 안 하는 것.**
-- 침해 사고 전체 시나리오 자동 재구성 (분석가가 리포트 보고 판단)
-- 도구 결과 간 상관관계 분석 (도구별 finding 만 노출, 머지 안 함)
+- 원본 이벤트 전체 정규화 또는 침해 시나리오·인과관계 자동 재구성
+  (finding 타임라인과 명시적 user/IP/process 피벗만 제공)
 - 새로운 익스플로잇/악성코드 탐지 (알려진 패턴만)
-- 증거 무결성 검증 / chain of custody (격리 랩 가정)
+- 증거 획득·서명·WORM 보관까지 포함하는 완전한 chain of custody
+  (포함 증거 SHA-256/크기/mtime manifest와 실행 provenance는 제공)
+- Sigma/YARA 오프라인 규칙팩 버전 관리자와 STIX/CSV/Timesketch 외부 export
 - 실시간 모니터링 (사후 분석 전용)
 
 ---
@@ -73,11 +76,11 @@ Scanner → Selector → (사용자 승인) → Executor → Analyzer → Report
 
 | 단계 | 책임 | 디렉토리 |
 |---|---|---|
-| **Scanner** | CWD의 파일을 magic bytes + 확장자 + 파일명 + 부모 디렉터리 힌트로 식별. `.env`·YAML/JSON/TOML/INI와 `.sh/.ps1/.bat/.cmd/.xml/.tf/.tfvars`, `Dockerfile`·`Makefile`·`Jenkinsfile`도 secret scan용 text evidence로 분류한다. 깊이 제한, unreadable path, symlink/junction/reparse skip은 coverage 상태로 기록한다. | `forensicagent/scanner/` |
+| **Scanner** | CWD의 파일을 magic bytes + 확장자 + 파일명 + 부모 디렉터리 힌트로 식별한다. 포함 증거는 SHA-256/크기/mtime을 기록하고, **1.5 GiB 이상은 hash 없이 경로·크기·제외 이유를 남긴 뒤 자동 제외**한다. 깊이 제한, unreadable path, symlink/junction/reparse skip도 coverage 상태로 기록한다. | `forensicagent/scanner/` |
 | **Selector** | 3 단계 하이브리드. **Stage 1** = 결정론 매칭 (evidence_type ∩ applicable_evidence_types) — 실행 자격 게이트. **RAG** = 증거+시나리오로 도구 메타데이터 컬렉션을 벡터 검색해 후보를 관련도순 재정렬하고 도메인 스니펫을 프롬프트에 주입. **Stage 2** = LLM 에게 우선순위 + 보강된 reason 을 JSON 으로 요청. RAG 는 순서/컨텍스트에만 영향(자격 게이트는 불변), 의존성/질의 실패 시 결정론+LLM 경로로 자동 폴백. LLM 파싱 실패 시 Stage 1 결과 그대로 fallback. | `forensicagent/selector/` |
-| **Executor** | 어댑터 패턴. `GenericAdapter`가 YAML의 `command_templates`와 `install_check`로 동작. `shell=False`, stdout/stderr 파일 저장, Windows Job Object와 POSIX process group으로 timeout 자식 프로세스를 함께 종료한다. `parallelizable=true`면 ThreadPool, 아니면 직렬. | `forensicagent/executor/` |
-| **Analyzer** | 출력 크기에 따라 분기 — **Case A** (≤100 KB), **Case B** (≤4 MB), **Case C** (>4 MB). 등록된 `suspicious_indicators.id`의 명시적 matcher만 실행한다. 코드 보안 출력은 소스 비밀 유출을 막기 위해 LLM에 보내지 않고, 그 밖의 LLM-only 관찰도 근거 excerpt가 실제 입력에 있을 때만 허용하며 severity를 `low` 이하로 제한한다. | `forensicagent/analyzer/` |
-| **Reporter** | terminal (Rich 표) + JSON + Markdown 동시 출력. finding의 rule/source/confidence를 표시하고, 최대 500개를 severity 우선으로 보존하며 finding/분석/scan coverage 한도 도달 여부를 명시한다. | `forensicagent/reporter/` |
+| **Executor** | artifact별 최고 우선순위 도구 하나만 소유하며 설치되지 않은 소유자를 다른 도구로 대체하지 않는다. `shell=False`, 격리 job dir, Windows Job Object/POSIX process group을 사용하고 timeout·취소·출력 상한을 구분한다. 정확한 입력/settings hash와 산출물 재검증이 일치할 때만 완료 작업을 재사용한다. | `forensicagent/executor/` |
+| **Analyzer** | 출력 크기에 따라 Case A/B/C로 나누고 등록된 `suspicious_indicators.id` matcher만 실행한다. 실패·취소·상한 초과의 부분 산출물도 분석하되 coverage를 명시한다. 코드 보안 출력과 analyst notes는 LLM에 보내지 않는다. | `forensicagent/analyzer/` |
+| **Reporter** | terminal + JSON + Markdown 동시 출력. finding 타임라인(UTC+원문 시각), artifact coverage ledger, 도구/rule/executable provenance, 비인과적 user/IP/process correlation, fingerprint 기반 analyst annotation을 보존한다. | `forensicagent/reporter/` |
 
 ### 왜 이렇게 쪼갰나
 
@@ -166,10 +169,10 @@ known_false_positives:                      # LLM 시스템 프롬프트에 음�
 `applicable_evidence_platforms` gate이며, 현재 Volatility 실행 metadata는
 Windows plugin만 선언하므로 Linux/macOS 메모리 증거를 자동 선택하지 않는다.
 
-현재 실행 metadata는 11개다. 각 도구의 정확한 입력 gate와 지원 범위는
+현재 실행 metadata는 14개다. 각 도구의 정확한 입력 gate와 지원 범위는
 [감사 보고서의 등록 도구 표](AUDIT_REPORT.md#52-현재-등록-도구)를 기준으로 한다.
-기본 metadata가 선언하는 고유 indicator는 30개이고 matcher registry는 custom
-metadata 호환 ID까지 37개를 지원한다. AmcacheParser·EvtxECmd·MFTECmd·PECmd·RECmd
+기본 metadata가 선언하는 고유 indicator는 34개이고 matcher registry는 custom
+metadata 호환 ID까지 41개를 지원한다. AmcacheParser·EvtxECmd·MFTECmd·PECmd·RECmd
 같은 EZTools 실행 metadata는 Windows host 전용이다.
 
 ---
@@ -254,7 +257,8 @@ MRR을 **개선하지 못하고 낮췄다**. 첫 index rebuild는 48.26초(embed
 
 - **n=14 합성·단일 라벨러** — 통계적으로 견고하지 않은 지표(indicative). 라벨은
   분석가 한 명의 판단.
-- 도구 11 개뿐. 일부 evidence type 은 자격 도구가 1 개라 순서가 자명(지표=1.0,
+- 이 측정 당시 도구는 11개뿐이었다(현재 등록 14개). 일부 evidence type 은 자격
+  도구가 1개라 순서가 자명(지표=1.0,
   모드 무관) → 측정 delta 를 희석. 신호는 다-도구 케이스(registry_hive /
   evtx_log / source_code_*)에 있다.
 - `all-MiniLM-L6-v2` 는 영어 중심이고 벤치도 영어다. 한국어 시나리오는 성능이
@@ -271,10 +275,10 @@ MRR을 **개선하지 못하고 낮췄다**. 첫 index rebuild는 48.26초(embed
 |---|---|---|
 | 1. 기초 인프라 (CLI / Ollama / doctor) | 2주 | ✅ 완료 |
 | 2. Scanner | 1주 | ✅ 완료 |
-| 3. 도구 메타데이터 스키마 + 우선 5개 | 2~3주 | ✅ 스키마 + 실행 metadata 11개 |
-| 4. 단일 도구 end-to-end | 2주 | ✅ 합성 fixture와 mock subprocess로 회귀 검증 |
-| 5. 다중 도구 확장 (5→20→50) | 3~4주 | ⏳ 11개 등록, 실제 증거 E2E 검증 필요 |
-| 6. 평가 / 튜닝 | 2주 | ⏳ 순위 하니스 구현, 탐지 정확도 평가는 미실시 |
+| 3. 도구 메타데이터 스키마 + 우선 5개 | 2~3주 | ✅ 스키마 + 실행 metadata 14개 |
+| 4. 단일 도구 end-to-end | 2주 | ✅ 실제 내장 browser SQLite 파이프라인 + 합성 외부도구 회귀 검증 |
+| 5. 다중 도구 확장 (5→20→50) | 3~4주 | ⏳ 14개 등록; PCAP/disk는 TShark/fls 설치 시 실행 |
+| 6. 평가 / 튜닝 | 2주 | ⏳ 선택 순위 하니스와 별도 finding E2E 하니스 구현; 공개 EVTX 실행은 corpus/Chainsaw 필요 |
 
 **커밋 타임라인**
 
@@ -374,7 +378,7 @@ PATH 미등록을 모두 보여준다. 각 missing 도구 옆에 install 방법 
 - **Gitleaks** → 기본 규칙이 전부 무탐지되는 upstream v8.30.1을 제외하고,
   실제 가짜 AWS 키 탐지를 검증한 v8.30.0만 설치·실행
 - **Binwalk** → 오래된 PyPI 패키지를 자동 설치하지 않고 공식 v3 설치를 안내
-- **수동 설치 필요** (`yara`, `exiftool`, `tshark`, `plaso`, `regripper`,
+- **수동 설치 필요** (`yara`, `exiftool`, `tshark`, `fls`, `plaso`, `regripper`,
   `strings`, `tcpdump`) → 다운로드 URL + `curl` 예시를 출력
   (라이선스 마법사 / MSVC Build Tools / 버전 매번 바뀌는 URL 등이라 자동 불가)
 
@@ -401,9 +405,13 @@ forensic> /plan                        # Selector
 forensic> /run                         # Executor
 forensic> /analyze                     # Analyzer
 forensic> /report                      # Reporter (JSON+MD)
+forensic> /summary                     # 최근 /report 핵심 요약 (+ LLM, 가용 시)
+forensic> /annotate 1a2b3c4d confirmed 검토 완료
+                                        # finding fingerprint 상태/노트 보존
 forensic> /auto                        # scan -> plan -> run -> analyze -> report 한 번에
 forensic> /show findings               # 직전 결과 다시 보기
 forensic> /set no_llm true             # 옵션 토글
+forensic> /set max_job_output_mib 512  # job별 출력 상한
 forensic> /quit
 
 # 자연어도 가능 (LLM 가용 시 — 첫 호출 5~20초)
@@ -426,14 +434,24 @@ REPL 의 자연어 라우터는 입력을 `{"actions":[...], "message":"..."}` J
 .\.venv\Scripts\python.exe -m forensicagent --no-rag
 .\.venv\Scripts\python.exe -m forensicagent --scenario "로그인 실패 후 성공 흔적 조사"
 .\.venv\Scripts\python.exe -m forensicagent --path C:\cases\case03 --output-dir C:\reports
+.\.venv\Scripts\python.exe -m forensicagent --max-job-output-mib 512 --max-total-output-mib 2048 --min-free-disk-mib 512
 ```
 
 - `--tools`는 RAG/LLM 순위만 건너뛰고 지정 도구를 우선 선택한다. host OS,
-  evidence type, input format 안전 gate는 우회하지 않는다.
+  evidence type, input format 안전 gate는 우회하지 않는다. 같은 artifact에 여러
+  도구가 겹치면 우선순위(동률이면 나열 순서)가 가장 높은 하나만 실행하며,
+  해당 도구가 설치되지 않았으면 다른 도구로 대체하지 않고 skip한다.
 - `--no-llm`은 Selector/Analyzer LLM만 끈다. RAG는 `--no-rag`도 지정해야 꺼진다.
 - `--no-rag`은 RAG 재정렬과 검색 context만 끈다. LLM은 `--no-llm`도 지정해야 꺼진다.
 - `--scenario`는 RAG query와 Selector/Analyzer LLM context에 들어가지만,
   결정론 matcher나 도구 자격 gate를 바꾸지 않는다.
+- 성공한 동일 job은 입력 SHA-256, 실행 설정, tool/rule/executable provenance와
+  기존 산출물 hash가 모두 일치할 때만 자동 재사용한다. 변경되거나 불완전한 job은
+  새 UUID 디렉터리에서 다시 실행하고 이전 부분 산출물은 보존한다.
+- 실행기는 같은 입력을 실행 전·후 SHA-256으로 다시 확인하고 job 사이에는
+  size/mtime/file identity를 검사한다. 검사 사이에 파일을 바꿨다가 원래 바이트와
+  metadata로 완전히 복구하는 악의적 ABA 변경까지 막으려면 읽기 전용 snapshot이
+  필요하므로, 운영 원본에는 별도 snapshot/WORM 절차를 적용한다.
 
 > **결정 규칙**: 인자 없이 + TTY = REPL. 플래그 하나라도 있거나 stdin 이
 > 파이프 = one-shot. `forensicagent shell` 은 무조건 REPL.
@@ -496,13 +514,16 @@ forensicagent/
 │   └── selector.py       # 오케스트레이션 + RAG 재정렬 + --quick/--tools/--no-rag
 ├── executor/             # Layer 4 — 도구 실행
 │   ├── adapter.py        # GenericAdapter + register_adapter
-│   ├── runner.py         # subprocess + Job Object/process-group timeout + 파일 저장
-│   └── executor.py       # ThreadPool / serial 라우팅 + Rich Progress
+│   ├── browser_sqlite_adapter.py # 내장 read-only browser SQLite 실행
+│   ├── state.py          # strict/atomic resume manifest + case lock
+│   ├── runner.py         # subprocess tree 종료 + timeout/cancel/output-limit
+│   └── executor.py       # 단일 owner, 자원 budget, exact resume
 ├── analyzer/             # Layer 4 — 의심항목 추출
 │   ├── rules.py          # id 기반 명시적 matcher registry
 │   ├── llm_extract.py    # format=json + severity 가이드라인
 │   └── analyzer.py       # Case A/B/C 분기 + dedup
 ├── reporter/             # Layer 5 — 리포트
+│   ├── annotations.py    # fingerprint 기반 analyst 상태/노트 저장
 │   ├── builder.py        # 단계 결과를 Report 로 묶기
 │   ├── terminal.py       # Rich 출력
 │   ├── json_out.py       # JSON 직렬화
@@ -518,35 +539,46 @@ forensicagent/
 ├── observability/        # cross-cutting
 │   └── metrics.py        # Stopwatch / StageTimings / percentile
 ├── tools/                # 도구 메타데이터 스키마/로더
+│   ├── browser_sqlite.py # stdlib SQLite history/download parser
 │   ├── schema.py         # Pydantic ToolMetadata
 │   └── loader.py         # load_tool, load_all_tools
 ├── config.py             # env-override 가능한 전역 설정
 ├── __init__.py           # __version__
 └── __main__.py           # `python -m forensicagent`
 
-tools_metadata/           # 실행 metadata YAML 11개 (정확한 목록은 감사 보고서 참조)
+tools_metadata/           # 실행 metadata YAML 14개 (browser_sqlite/tshark/fls 포함)
+eval/                     # 공개 출처·라이선스·gold label E2E manifest (본문은 ignored)
 scripts/                  # 선택적 외부 자료 수집·가공 보조
 sample.txt                # 사용자가 직접 재수집할 외부 출처 URL 목록
 ```
 
 ---
 
-## 평가 / 측정 계획 (Phase 6)
+## 평가 / 측정 (Phase 6)
 
-명세대로:
+`bench/`는 **도구 선택 순위**만 측정한다. 실제 `rule_id` 라벨 탐지율은 별도
+`forensicagent.e2e_detection` 하니스가 scanner→selector→실제 executor→analyzer→
+report 전체를 실행한 뒤 `rule_id` 라벨의 중복 개수를 포함한 precision/recall/F1을
+계산한다. 이는 **이벤트 발생 위치·시각 localization 정확도는 측정하지 않는다**.
 
-1. **도구 선택 precision/recall** — 30~50 개 (증거, 정답 도구 셋) 쌍을 직접
-   만들고, Selector 출력과 비교.
-2. **의심항목 탐지율** — 공개 CTF (CyberDefenders, BlueTeamLabs) 의 분석가
-   workup 과 자동 finding 을 매칭, recall 측정.
-3. **False Positive 비율** — `severity ≥ medium` 으로 보고된 finding 중
-   실제 정상이었던 비율.
-4. **실행 시간** — JSON 리포트의 `summary.total_ms` 와 `stage_ms` 분포.
+```powershell
+# eval/e2e_manifest.json의 pinned URL/라이선스를 확인하고 corpus를 수동 배치
+.\.venv\Scripts\python.exe -m forensicagent.e2e_detection eval\e2e_manifest.json
+```
 
-비교 베이스라인:
-- (A) 분석가가 수동으로 50 개 도구 다 돌렸을 때 (시간/품질)
-- (B) 단순 "선택 없이 전부 자동" (시간/false positive)
-- (우리) 그 사이 어디에 위치하는지
+corpus 본문과 실행 산출물은 각각 `eval/corpus/`, `eval/runs/`에 두며 Git에서
+제외된다. SHA-256이 고정되지 않았거나, 필요한 외부 도구가 없거나, evidence hash가
+다르거나, 분석 coverage가 불완전한 case는 분모에 넣지 않고 명시적으로 skip/error
+처리한다. 실행 성공 case가 0개면
+`metrics_available=false`, aggregate metric은 `null`이므로 **0점 성능으로 해석하면
+안 된다**. 현재 manifest는 commit-pinned 공개 EVTX log-clear URL을 담고 있지만
+독립 검증된 파일 SHA-256은 아직 `null`이므로 점수화되지 않는다. 실제 대회 수치로
+쓰려면 SHA-256을 검증·고정하고 corpus와 Chainsaw를 준비한 뒤
+`executed_cases > 0`을 먼저 확인해야 한다.
+
+향후 비교 베이스라인은 (A) 분석가 수동 triage, (B) 선택 없이 전부 자동 실행,
+(C) forensicagent의 시간·finding 품질이다. 실행 시간은 JSON의 `summary.total_ms`와
+`stage_ms`로 분리한다.
 
 ---
 
@@ -560,12 +592,16 @@ sample.txt                # 사용자가 직접 재수집할 외부 출처 URL �
 - **도구 metadata 의 인덱싱 부담**: 50 개 도구 YAML 은 사람 노가다이고, 이
   부분은 코드로 해결 못 한다. (그래서 `scripts/crawlers/` 가 도메인 자료
   수집을 보조하지만, YAML 변환은 수작업.)
-- **실제 증거 검증 부족**: Chainsaw·RECmd에는 전용 adapter가 있고 자동화
-  테스트도 존재하지만, 테스트 대부분은 합성 fixture와 mock subprocess다.
-  공개 대용량 EVTX·hive·memory corpus를 이용한 버전별 E2E 검증은 남아 있다.
+- **공개 증거 점수는 아직 없음**: 내장 browser SQLite는 실제 subprocess를 포함한
+  전체 파이프라인 회귀를 통과하지만, 현재 로컬에는 pinned 공개 EVTX corpus와
+  Chainsaw/TShark/fls가 없어 공개 case의 `executed_cases`는 0이다. 따라서 공개
+  `rule_id` 라벨 precision/recall/F1을 주장하지 않는다.
 - **coverage는 성공과 별개**: scan의 `depth_limit_hit`, `unreadable_paths`,
   `reparse_paths` 또는 분석의 `coverage_truncated`가 있으면 보고서가 생성돼도
   전체 증거를 다 본 것이 아니다. 원본 artifact와 누락 경로를 검토해야 한다.
+- **1.5 GiB scan 상한**: 그 이상 파일은 자동 제외되고 hash도 계산하지 않는다.
+  메모리·디스크 이미지처럼 큰 증거는 지원 도구에 넣기 전에 복제본을 분할하거나
+  상한 정책을 별도로 조정해야 하며, 제외 목록을 보고서에서 확인해야 한다.
 
 ---
 
@@ -592,21 +628,26 @@ repository를 만들고 기존 이력은 private로 보존하는 방식을 권�
 - GitHub private vulnerability reporting, push protection, branch protection은 저장소
   관리자 설정에서 켠다.
 - 합성 선택 benchmark를 실제 사건 finding precision/recall 또는 수상 가능성의
-  증거로 표현하지 않는다. 라벨된 실제 증거 E2E 평가는 아직 없다.
+  증거로 표현하지 않는다. E2E 하니스도 `metrics_available=true`인 실행 결과만
+  `rule_id` 라벨 탐지 근거로 사용하며 사건 발생 위치 정확도로 확대 해석하지 않는다.
 
 ---
 
-## 다음 세션에서 시작할 만한 것
+## 남은 운영 작업과 의도적 제외 범위
 
-1. 공개 CTF/포렌식 증거셋으로 외부 도구와 matcher를 end-to-end 고정
-2. PCAP·disk image·SQLite/browser artifact의 실행 metadata와 parser 추가
-3. Chainsaw Sigma 지원이 필요하면 rules/mapping 경로를 명시하는 별도 실행 경로 추가
-4. 입력 증거 hash·획득 metadata를 포함한 evidence manifest 도입
+1. pinned 공개 EVTX를 수동 배치하고 프로젝트 내부 Chainsaw 설치가 가능한 환경에서
+   E2E 수치를 생성한다. PCAP/disk case도 라이선스와 gold label이 확인된 뒤 추가한다.
+2. GitHub 저장소 설정에서 private vulnerability reporting, push protection,
+   branch protection을 켠다. 공개 전에는 기존 이력 대신 sanitized fresh repository를
+   사용한다.
+3. 원본 이벤트 전체 정규화 timeline, Sigma/YARA 오프라인 규칙팩 버전 관리자,
+   STIX/CSV/Timesketch export는 이번 범위에서 의도적으로 제외했다.
 
 ---
 
 ## License
 
 MIT. 자세한 조건은 [LICENSE](LICENSE), 취약점 제보 절차는
-[SECURITY.md](SECURITY.md), 외부 도구·데이터 고지는
+[SECURITY.md](SECURITY.md), 기여 절차는 [CONTRIBUTING.md](CONTRIBUTING.md),
+외부 도구·데이터 고지는
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참조한다.

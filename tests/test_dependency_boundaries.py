@@ -58,14 +58,17 @@ def test_distribution_includes_only_runtime_tool_metadata() -> None:
         for tool_id in (
             "amcacheparser",
             "bandit",
+            "browser_sqlite",
             "chainsaw",
             "evtxecmd",
+            "fls",
             "gitleaks",
             "mftecmd",
             "pecmd",
             "recmd",
             "regripper",
             "semgrep",
+            "tshark",
             "volatility3",
         )
     } | {"bench/goldenset.json": "bench/goldenset.json"}

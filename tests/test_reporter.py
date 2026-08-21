@@ -1,5 +1,8 @@
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 
+from hypothesis import given, settings, strategies as st
 from rich.console import Console
 
 from forensicagent.analyzer.types import (
@@ -11,8 +14,9 @@ from forensicagent.analyzer.types import (
 from forensicagent.executor.types import ExecutionBundle, ExecutionResult, OutputArtifact
 from forensicagent.reporter.builder import build
 from forensicagent.reporter.md_out import write_md
-from forensicagent.reporter.terminal import render
-from forensicagent.scanner.types import Inventory
+from forensicagent.reporter.terminal import render, render_summary
+from forensicagent.reporter.types import Report, ToolBundle
+from forensicagent.scanner.types import Evidence, Inventory
 from forensicagent.selector.types import Plan, ToolSelection
 
 
@@ -44,6 +48,51 @@ def test_failed_execution_is_not_reported_as_clean_zero_findings(tmp_path):
     assert report.summary.tools_failed == 1
     assert "not analyzed" in report.tool_bundles[0].analysis.summary
     assert "CSV output was not created" in report.tool_bundles[0].analysis.summary
+
+
+def test_partial_output_limit_analysis_and_resume_status_are_reported(tmp_path):
+    finding = Finding(title="Recovered from partial output")
+    result = ExecutionResult(
+        tool_id="fake",
+        status="output_limit",
+        error_message="per-job output limit exceeded",
+        output_size_bytes=42,
+        artifacts=[
+            OutputArtifact(
+                path=str(tmp_path / "partial.txt"),
+                role="stdout",
+                format="text",
+                size_bytes=42,
+                sha256="a" * 64,
+            )
+        ],
+        provenance={
+            "resume": {
+                "job_key": "b" * 64,
+                "input_sha256": "c" * 64,
+                "settings_sha256": "d" * 64,
+                "reused": False,
+            }
+        },
+    )
+    report = build(
+        inventory=Inventory(),
+        plan=_plan(),
+        execution=ExecutionBundle(results=[result]),
+        analyses=[ToolAnalysis(tool_id="fake", findings=[finding])],
+        started_at="now",
+        working_directory=str(tmp_path),
+    )
+
+    analysis = report.tool_bundles[0].analysis
+    assert analysis is not None
+    assert analysis.findings == [finding]
+    assert "partial_artifacts_analyzed=true" in analysis.summary
+    assert "execution_status=output_limit=1" in analysis.summary
+    assert report.summary.tools_failed == 1
+    markdown = write_md(report, tmp_path / "partial.md").read_text(encoding="utf-8")
+    assert "status: **output_limit**" in markdown
+    assert "resume: reused=false" in markdown
 
 
 def test_markdown_escapes_tool_controlled_text_and_lists_artifact(tmp_path):
@@ -115,6 +164,129 @@ def test_terminal_renders_untrusted_finding_text_without_control_sequences(tmp_p
     terminal = stream.getvalue()
     assert "\x1b" not in terminal
     assert "[bold]literal[/bold]" in terminal
+
+
+def test_finding_timeline_normalizes_utc_and_separates_bad_timestamps(tmp_path):
+    findings = [
+        Finding(
+            title="offset",
+            evidence_ref=EvidenceRef(timestamp="2025-01-01T03:00:00+03:00"),
+        ),
+        Finding(
+            title="naive",
+            evidence_ref=EvidenceRef(timestamp="2025-01-01 01:00:00"),
+        ),
+        Finding(title="invalid", evidence_ref=EvidenceRef(timestamp="not-a-time")),
+        Finding(title="missing", evidence_ref=EvidenceRef()),
+    ]
+    report = build(
+        inventory=Inventory(),
+        plan=_plan(),
+        execution=ExecutionBundle(),
+        analyses=[ToolAnalysis(tool_id="fake", findings=findings)],
+        started_at="now",
+        working_directory=str(tmp_path),
+    )
+
+    timeline = report.to_dict()["timeline"]
+    assert [item["title"] for item in timeline["events"]] == ["offset", "naive"]
+    assert [item["timestamp_utc"] for item in timeline["events"]] == [
+        "2025-01-01T00:00:00Z",
+        "2025-01-01T01:00:00Z",
+    ]
+    assert [item["timezone_assumed"] for item in timeline["events"]] == [False, True]
+    assert {item["reason"] for item in timeline["undated"]} == {
+        "missing",
+        "unparseable",
+    }
+
+    markdown = write_md(report, tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "## Finding timeline" in markdown
+    assert "2025-01-01T00:00:00Z" in markdown
+    assert "2025-01-01T03:00:00+03:00" in markdown
+    assert "2025-01-01 01:00:00" in markdown
+    assert "not-a-time" in markdown
+    assert "### Findings without a usable timestamp" in markdown
+
+    console = Console(record=True, width=240)
+    render(report, console)
+    terminal = console.export_text()
+    assert "Finding timeline" in terminal
+    assert "2025-01-01T03:00:00+03:00" in terminal
+    assert "2025-01-01 01:00:00" in terminal
+    assert "not-a-time" in terminal
+    assert "Findings without a usable timestamp" in terminal
+
+
+@settings(max_examples=50, deadline=None)
+@given(
+    st.lists(
+        st.datetimes(
+            min_value=datetime(2000, 1, 1),
+            max_value=datetime(2030, 12, 31, 23, 59, 59),
+            timezones=st.integers(min_value=-14 * 60, max_value=14 * 60).map(
+                lambda minutes: timezone(timedelta(minutes=minutes))
+            ),
+        ),
+        max_size=20,
+    )
+)
+def test_timeline_preserves_and_orders_aware_timestamp_domain(values):
+    originals = [value.isoformat() for value in values]
+    report = Report(
+        tool_bundles=[
+            ToolBundle(
+                tool_id="fake",
+                analysis=ToolAnalysis(
+                    tool_id="fake",
+                    findings=[
+                        Finding(title=str(index), evidence_ref=EvidenceRef(timestamp=value))
+                        for index, value in enumerate(originals)
+                    ],
+                ),
+            )
+        ]
+    )
+
+    events = report.timeline()["events"]
+    observed = [
+        datetime.fromisoformat(item["timestamp_utc"].replace("Z", "+00:00"))
+        for item in events
+    ]
+
+    assert observed == sorted(value.astimezone(timezone.utc) for value in values)
+    assert Counter(item["timestamp_original"] for item in events) == Counter(originals)
+    assert all(item["timezone_assumed"] is False for item in events)
+
+
+def test_timeline_separates_timestamps_that_overflow_during_utc_conversion():
+    timestamps = [
+        "0001-01-01T00:00:00+23:59",
+        "9999-12-31T23:59:59-23:59",
+    ]
+    report = Report(
+        tool_bundles=[
+            ToolBundle(
+                tool_id="fake",
+                analysis=ToolAnalysis(
+                    tool_id="fake",
+                    findings=[
+                        Finding(
+                            title=str(index),
+                            evidence_ref=EvidenceRef(timestamp=value),
+                        )
+                        for index, value in enumerate(timestamps)
+                    ],
+                ),
+            )
+        ]
+    )
+
+    timeline = report.timeline()
+
+    assert timeline["events"] == []
+    assert [item["timestamp_original"] for item in timeline["undated"]] == timestamps
+    assert {item["reason"] for item in timeline["undated"]} == {"unparseable"}
 
 
 def test_merged_finding_limit_is_preserved_in_json_and_markdown(tmp_path):
@@ -248,3 +420,166 @@ def test_scan_coverage_is_preserved_in_summary_and_renderers(tmp_path):
     terminal = console.export_text()
     assert "Scan coverage incomplete" in terminal
     assert "depth_limit_hit=true, unreadable_paths=2, reparse_paths=3" in terminal
+
+
+def test_oversized_files_are_reported_without_skipped_tools(tmp_path):
+    excluded = tmp_path / "large image.E01"
+    report = build(
+        inventory=Inventory(
+            oversized_files=[{"path": str(excluded), "size_bytes": 1610612736}]
+        ),
+        plan=_plan(),
+        execution=ExecutionBundle(),
+        analyses=[],
+        started_at="now",
+        working_directory=str(tmp_path),
+    )
+
+    assert report.to_dict()["summary"]["oversized_files"] == 1
+    assert report.to_dict()["evidence_inventory"]["oversized_files"][0][
+        "path"
+    ] == str(excluded)
+    markdown = write_md(report, tmp_path / "report.md").read_text(encoding="utf-8")
+    assert "Files excluded from scan (>=1.5 GiB)" in markdown
+    assert "large image.E01" in markdown
+
+
+def test_artifact_ledger_distinguishes_zero_findings_from_not_analyzed(tmp_path):
+    analyzed_path = str(tmp_path / "analyzed.evtx")
+    skipped_path = str(tmp_path / "skipped.evtx")
+    oversized_path = str(tmp_path / "large.E01")
+    inventory = Inventory(
+        evidence_list=[
+            Evidence(
+                path=analyzed_path,
+                filename="analyzed.evtx",
+                size_bytes=100,
+                evidence_type="evtx_log",
+                detected_by="extension",
+                sha256="a" * 64,
+                mtime_ns=123,
+            ),
+            Evidence(
+                path=skipped_path,
+                filename="skipped.evtx",
+                size_bytes=200,
+                evidence_type="evtx_log",
+                detected_by="extension",
+                sha256="b" * 64,
+                mtime_ns=456,
+            ),
+        ],
+        oversized_files=[
+            {"path": oversized_path, "size_bytes": 1610612736, "mtime_ns": 789}
+        ],
+    )
+    plan = Plan(
+        selected_tools=[
+            ToolSelection(tool_id="analyzer", target_evidence=[analyzed_path]),
+            ToolSelection(tool_id="missing", target_evidence=[skipped_path]),
+        ]
+    )
+    execution = ExecutionBundle(
+        results=[
+            ExecutionResult(
+                tool_id="analyzer",
+                target_evidence=analyzed_path,
+                status="success",
+                command_executed="analyzer --json",
+                artifacts=[
+                    OutputArtifact(
+                        path=str(tmp_path / "out.json"),
+                        role="stdout",
+                        format="json",
+                        size_bytes=2,
+                        sha256="c" * 64,
+                    )
+                ],
+                provenance={"app_version": "0.0.1"},
+            ),
+            ExecutionResult(
+                tool_id="missing",
+                target_evidence=skipped_path,
+                status="skipped",
+                error_message="prerequisites failed: missing",
+                provenance={"app_version": "0.0.1"},
+            ),
+        ]
+    )
+    report = build(
+        inventory=inventory,
+        plan=plan,
+        execution=execution,
+        analyses=[
+            ToolAnalysis(
+                tool_id="analyzer",
+                target_evidence=analyzed_path,
+                status="analyzed",
+            ),
+            ToolAnalysis(
+                tool_id="missing",
+                target_evidence=skipped_path,
+                status="not_analyzed",
+            ),
+        ],
+        started_at="now",
+        working_directory=str(tmp_path),
+    )
+
+    by_path = {item["path"]: item for item in report.artifact_ledger}
+    analyzed = by_path[analyzed_path]
+    assert analyzed["sha256"] == "a" * 64
+    assert analyzed["selected_tool_id"] == "analyzer"
+    assert analyzed["executed_tool_ids"] == ["analyzer"]
+    assert analyzed["preflight_status"] == "passed"
+    assert analyzed["execution_status"] == "success"
+    assert analyzed["analysis_status"] == "analyzed"
+    assert analyzed["finding_count"] == 0
+
+    skipped = by_path[skipped_path]
+    assert skipped["preflight_status"] == "failed"
+    assert skipped["analysis_status"] == "not_analyzed"
+    assert skipped["finding_count"] is None
+
+    oversized = by_path[oversized_path]
+    assert oversized["discovery_status"] == "excluded_oversized"
+    assert oversized["exclusion_reason"] == (
+        "size is at or above the 1.5 GiB scan limit"
+    )
+    assert oversized["sha256"] is None
+    assert oversized["selected_tool_id"] is None
+    assert oversized["execution_status"] == "not_run"
+    assert oversized["analysis_status"] == "not_analyzed"
+
+    payload = report.to_dict()
+    assert payload["artifact_ledger"] == report.artifact_ledger
+    markdown = write_md(report, tmp_path / "coverage.md").read_text(encoding="utf-8")
+    assert "## Artifact coverage ledger" in markdown
+    assert "SHA-256 was not computed" in markdown
+
+    stream = StringIO()
+    render(
+        report,
+        Console(file=stream, force_terminal=False, color_system=None, width=200),
+    )
+    assert "Artifact coverage ledger" in stream.getvalue()
+
+
+def test_summary_treats_finding_limit_as_incomplete_coverage(tmp_path):
+    report = build(
+        inventory=Inventory(),
+        plan=_plan(),
+        execution=ExecutionBundle(),
+        analyses=[],
+        started_at="now",
+        working_directory=str(tmp_path),
+    )
+    report.summary.finding_limit_reached = True
+    stream = StringIO()
+
+    render_summary(
+        report,
+        Console(file=stream, force_terminal=False, color_system=None, width=160),
+    )
+
+    assert "기록된 coverage 경고 없음" not in stream.getvalue()

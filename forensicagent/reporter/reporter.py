@@ -9,6 +9,7 @@ from rich.console import Console
 
 from forensicagent.analyzer.types import ToolAnalysis
 from forensicagent.executor.types import ExecutionBundle
+from forensicagent.reporter.annotations import AnnotationStoreError, load_annotations
 from forensicagent.reporter.builder import build
 from forensicagent.reporter.json_out import write_json
 from forensicagent.reporter.md_out import write_md
@@ -16,6 +17,7 @@ from forensicagent.reporter.terminal import render
 from forensicagent.reporter.types import Report
 from forensicagent.scanner.types import Inventory
 from forensicagent.selector.types import Plan
+from forensicagent.ui_text import safe_text
 
 
 def write(
@@ -44,6 +46,25 @@ def write(
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        stored_annotations = load_annotations(out_dir)
+    except AnnotationStoreError as exc:
+        stored_annotations = {}
+        if console is not None:
+            console.print(
+                safe_text(
+                    f"Annotation store was not loaded; findings remain pending: {exc}",
+                    style="yellow",
+                )
+            )
+    current_fingerprints = {finding.fingerprint for finding in report.all_findings()}
+    # Stale annotations remain in the case store for future matching, but are
+    # not exposed by a report whose retained findings do not contain them.
+    report.analyst_annotations = {
+        fingerprint: annotation
+        for fingerprint, annotation in stored_annotations.items()
+        if fingerprint in current_fingerprints
+    }
     # Include microseconds + run id so two reports emitted in the same second
     # never overwrite one another (common in tests and short no-op runs).
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")

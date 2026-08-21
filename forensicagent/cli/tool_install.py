@@ -228,6 +228,17 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         homepage="https://www.wireshark.org/download.html",
         manual_hint="Install full Wireshark (.exe installer); tshark.exe goes to C:\\Program Files\\Wireshark\\.",
     ),
+    "fls": ToolSpec(
+        name="fls",
+        kind="manual",
+        description="The Sleuth Kit filesystem image lister",
+        homepage="https://sleuthkit.org/sleuthkit/download.php",
+        manual_hint=(
+            "Install The Sleuth Kit Windows binaries, then place the complete "
+            "release under the project-local tools_bin directory or expose fls "
+            "through an existing absolute PATH entry."
+        ),
+    ),
     "tcpdump": ToolSpec(
         name="tcpdump",
         kind="manual",

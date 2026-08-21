@@ -282,6 +282,7 @@ def _make_finding(
     timestamp: str = "",
     followup: str = "",
     confidence: float = 0.9,
+    entities: dict[str, list[str]] | None = None,
 ) -> Finding:
     row = row or {}
     finding = Finding(
@@ -299,6 +300,7 @@ def _make_finding(
         source="rule",
         rule_id=rule_id,
         confidence=confidence,
+        entities=entities or {},
     )
     finding.refresh_fingerprint()
     return finding
@@ -313,17 +315,28 @@ def _contains_credential_tool(text: str) -> bool:
     return _CREDENTIAL_TOOL_RE.search(text) is not None
 
 
-def _global_ip(value: str) -> bool:
-    candidate = value.strip().strip("[]")
-    if not candidate or candidate in {"-", "::", "0.0.0.0"}:
-        return False
-    # Some exporters append a port to an IPv4 address.
-    if candidate.count(":") == 1 and "." in candidate:
-        candidate = candidate.rsplit(":", 1)[0]
+def _canonical_ip(value: Any) -> str:
+    """Return stdlib-canonical IP text, accepting common host:port wrappers."""
+    candidate = _text(value).strip()
+    if candidate.startswith("[") and "]" in candidate:
+        closing = candidate.find("]")
+        suffix = candidate[closing + 1 :]
+        if not suffix or (suffix.startswith(":") and suffix[1:].isdigit()):
+            candidate = candidate[1:closing]
+    elif candidate.count(":") == 1 and "." in candidate:
+        host, port = candidate.rsplit(":", 1)
+        if port.isdigit():
+            candidate = host
     try:
-        return ipaddress.ip_address(candidate).is_global
+        address = ipaddress.ip_address(candidate)
     except ValueError:
-        return False
+        return ""
+    return "" if address.is_unspecified else address.compressed.casefold()
+
+
+def _global_ip(value: str) -> bool:
+    candidate = _canonical_ip(value)
+    return bool(candidate and ipaddress.ip_address(candidate).is_global)
 
 
 def _account(value: Any) -> str:
@@ -338,9 +351,67 @@ def _account(value: Any) -> str:
     return text.strip().strip('"')
 
 
+def _logon_user(row: dict[str, Any]) -> str:
+    return _account(
+        _value(
+            row,
+            "target_user_name",
+            "targetusername",
+            "account_name",
+            "username",
+        )
+    )
+
+
+def _logon_ip(row: dict[str, Any]) -> str:
+    return _canonical_ip(
+        _value(
+            row,
+            "ip_address",
+            "ipaddress",
+            "source_ip",
+            "sourceip",
+            "remote_address",
+        )
+    )
+
+
 def _basename(value: Any) -> str:
     """Return a Windows/POSIX basename independent of the host platform."""
     return _text(value).replace("/", "\\").rsplit("\\", 1)[-1].strip()
+
+
+_EMPTY_ENTITIES = {"", "-", "?", "n/a", "none", "null", "unknown"}
+
+
+def _entity_map(
+    *,
+    users: Iterable[Any] = (),
+    ips: Iterable[Any] = (),
+    processes: Iterable[Any] = (),
+) -> dict[str, list[str]]:
+    """Canonicalize only entities whose meaning is known by the caller."""
+    normalized = {
+        "user": {_account(value) for value in users},
+        "ip": {_canonical_ip(value) for value in ips},
+        "process": {_basename(value).casefold() for value in processes},
+    }
+    return {
+        kind: sorted(value for value in values if value not in _EMPTY_ENTITIES)
+        for kind, values in normalized.items()
+        if any(value not in _EMPTY_ENTITIES for value in values)
+    }
+
+
+def _principal_entities(key: str) -> dict[str, list[str]]:
+    kind, separator, value = key.partition(":")
+    if not separator:
+        return {}
+    if kind == "ip":
+        return _entity_map(ips=(value,))
+    if kind == "account":
+        return _entity_map(users=(value,))
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +777,7 @@ def _match_volatility_parent_child(
                 raw_excerpt=_text(_value(row, "raw_line")) or _excerpt(row),
                 followup="Validate the process objects, creation times, tokens, and executable mappings.",
                 confidence=0.96,
+                entities=_entity_map(processes=(child, parent)),
             )
         )
     return out
@@ -755,6 +827,7 @@ def _match_volatility_unusual_path(
                 source_file=path,
                 followup="Dump and hash the process image and inspect its parent, token, and network activity.",
                 confidence=0.91,
+                entities=_entity_map(processes=(process_name,)),
             )
         )
     return out
@@ -831,6 +904,7 @@ def _match_volatility_rare_network(
                 raw_excerpt=_text(_value(row, "raw_line")) or _excerpt(row),
                 followup="Validate the destination with approved services and threat intelligence, then inspect the owning process.",
                 confidence=0.84,
+                entities=_entity_map(ips=(remote_ip,), processes=(owner,)),
             )
         )
     return out
@@ -896,6 +970,7 @@ def _match_malfind_pe_unbacked(
                 ),
                 followup="Dump the region and validate it with static analysis and YARA.",
                 confidence=0.98,
+                entities=_entity_map(processes=(process,)),
             )
         )
     if rows:
@@ -1214,9 +1289,8 @@ def _match_rdp_external(
         if _event_id(row) != 4624:
             continue
         logon_type = _int_value(_value(row, "logon_type", "logontype"))
-        source_ip = _text(
-            _value(row, "ip_address", "ipaddress", "source_ip", "sourceip", "remote_address")
-        )
+        source_ip = _logon_ip(row)
+        user = _logon_user(row)
         if logon_type == 10 and _global_ip(source_ip):
             out.append(
                 _make_finding(
@@ -1229,6 +1303,7 @@ def _match_rdp_external(
                     event_id=4624,
                     followup="Validate the source IP, account, and remote-access authorization.",
                     confidence=0.98,
+                    entities=_entity_map(users=(user,), ips=(source_ip,)),
                 )
             )
     return out
@@ -1261,6 +1336,8 @@ def _match_rdp_offhours(
         )
         if in_business_hours:
             continue
+        user = _logon_user(row)
+        source_ip = _logon_ip(row)
         out.append(
             _make_finding(
                 rule_id=ind.id,
@@ -1277,6 +1354,7 @@ def _match_rdp_offhours(
                 timestamp=timestamp.isoformat(),
                 followup="Validate the account, source host, and approved remote-access schedule.",
                 confidence=0.78,
+                entities=_entity_map(users=(user,), ips=(source_ip,)),
             )
         )
     return out
@@ -1322,14 +1400,10 @@ def _match_service_install_temp(
 
 
 def _failed_logon_key(row: dict[str, Any]) -> str:
-    source_ip = _text(
-        _value(row, "ip_address", "ipaddress", "source_ip", "sourceip", "remote_address")
-    ).strip()
-    if source_ip and source_ip not in {"-", "::", "0.0.0.0"}:
-        return f"ip:{source_ip.casefold()}"
-    account = _account(
-        _value(row, "target_user_name", "targetusername", "account_name", "username")
-    )
+    source_ip = _logon_ip(row)
+    if source_ip:
+        return f"ip:{source_ip}"
+    account = _logon_user(row)
     return f"account:{account}" if account else ""
 
 
@@ -1386,6 +1460,7 @@ def _match_failed_logon_burst(
                 timestamp=first_ts.isoformat() if first_ts else "",
                 followup="Correlate the source/account with a subsequent successful logon.",
                 confidence=0.96 if first_ts else 0.75,
+                entities=_principal_entities(key),
             )
         )
     return out
@@ -1447,6 +1522,7 @@ def _match_bruteforce_then_success(
                 timestamp=timestamp.isoformat() if timestamp else "",
                 followup="Treat the account as potentially compromised and inspect its subsequent activity.",
                 confidence=0.98 if timestamp else 0.8,
+                entities=_principal_entities(key),
             )
         )
     return out
@@ -1524,6 +1600,7 @@ def _match_account_created_then_grouped(
                     if created_timestamp is not None and grouped_timestamp is not None
                     else 0.72
                 ),
+                entities=_entity_map(users=(account,)),
             )
         )
     return out
@@ -1537,6 +1614,15 @@ def _match_log_clear(
         event = _event_id(row)
         if event not in {104, 1102}:
             continue
+        user = _account(
+            _value(
+                row,
+                "subject_user_name",
+                "subjectusername",
+                "user_name",
+                "username",
+            )
+        )
         out.append(
             _make_finding(
                 rule_id=f"{ind.id}:{event}",
@@ -1548,6 +1634,7 @@ def _match_log_clear(
                 event_id=event,
                 followup="Preserve remaining logs and identify the account/process that cleared them.",
                 confidence=0.99,
+                entities=_entity_map(users=(user,)),
             )
         )
     return out
@@ -1792,6 +1879,157 @@ def _match_prefetch_lsass_reference(
     return out
 
 
+def _packet_timestamp(row: dict[str, Any]) -> str:
+    value = _text(_value(row, "frame.time_epoch", "frame_time_epoch")).strip()
+    try:
+        parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
+    except (OSError, OverflowError, TypeError, ValueError):
+        return ""
+    return parsed.isoformat().replace("+00:00", "Z")
+
+
+def _match_pcap_suspicious_remote_port(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    suspicious_ports = {1337, 4444, 5555, 6667, 9001, 9050}
+    out: list[Finding] = []
+    for row in _rows(parsed):
+        destination = _text(_value(row, "ip.dst", "ipv6.dst", "destination_ip")).strip()
+        port = _int_value(_value(row, "tcp.dstport", "udp.dstport", "destination_port"))
+        if port not in suspicious_ports or not _global_ip(destination):
+            continue
+        out.append(
+            _make_finding(
+                rule_id=ind.id,
+                severity=ind.severity_baseline,
+                category="command_and_control",
+                title="Network traffic to a global address on a suspicious port",
+                description=f"{destination}:{port} appeared in the packet capture.",
+                row=row,
+                timestamp=_packet_timestamp(row),
+                followup="Validate the endpoint and owning process against approved remote-access services.",
+                confidence=0.82,
+                entities=_entity_map(ips=(destination,)),
+            )
+        )
+    return out
+
+
+def _match_pcap_long_dns_query(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    out: list[Finding] = []
+    for row in _rows(parsed):
+        query = _text(_value(row, "dns.qry.name", "dns_query_name")).strip().rstrip(".")
+        txt = _text(_value(row, "dns.txt", "dns_txt")).strip()
+        labels = query.split(".") if query else []
+        encoded_label = any(
+            len(label) >= 40
+            and len(set(label.casefold())) >= 12
+            and re.fullmatch(r"[A-Za-z0-9_-]+", label) is not None
+            for label in labels
+        )
+        long_query = len(query) >= 150 and encoded_label
+        long_txt = len(txt) >= 300 and re.fullmatch(r"[A-Za-z0-9+/=_ -]+", txt) is not None
+        if not long_query and not long_txt:
+            continue
+        value = query if long_query else txt
+        out.append(
+            _make_finding(
+                rule_id=ind.id,
+                severity=ind.severity_baseline,
+                category="exfiltration",
+                title="Unusually long encoded-looking DNS data",
+                description=value[:300],
+                row=row,
+                timestamp=_packet_timestamp(row),
+                followup="Compare repeated DNS payloads and query volume with approved DNS-based services.",
+                confidence=0.76,
+            )
+        )
+    return out
+
+
+def _match_browser_suspicious_download(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    suspicious_suffixes = (
+        ".bat",
+        ".cmd",
+        ".com",
+        ".dll",
+        ".exe",
+        ".hta",
+        ".js",
+        ".msi",
+        ".ps1",
+        ".scr",
+        ".vbs",
+    )
+    out: list[Finding] = []
+    for row in _rows(parsed):
+        record_type = _text(_value(row, "record_type")).strip().casefold()
+        if record_type != "browser_download":
+            continue
+        path = _text(_value(row, "target_path", "current_path")).strip()
+        if not _basename(path).casefold().endswith(suspicious_suffixes):
+            continue
+        url = _text(_value(row, "url")).strip()
+        out.append(
+            _make_finding(
+                rule_id=ind.id,
+                severity=ind.severity_baseline,
+                category="execution",
+                title="Browser downloaded executable or script content",
+                description=f"{path or '(unknown path)'} from {url or '(unknown URL)'}"[:300],
+                row=row,
+                followup="Hash the downloaded file and validate its signature, source, and subsequent execution.",
+                confidence=0.86,
+            )
+        )
+    return out
+
+
+def _match_fls_deleted_suspicious_file(
+    parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
+) -> list[Finding]:
+    suspicious_suffixes = (
+        ".bat",
+        ".cmd",
+        ".com",
+        ".dll",
+        ".exe",
+        ".hta",
+        ".js",
+        ".ps1",
+        ".scr",
+        ".vbs",
+    )
+    out: list[Finding] = []
+    for line in raw.splitlines():
+        match = re.match(r"^\S+\s+\*\s+[^:]+:\s*(?P<path>.+)$", line.strip())
+        if match is None:
+            continue
+        path = match.group("path").split("\t", 1)[0].strip()
+        if not _basename(path).casefold().endswith(suspicious_suffixes):
+            continue
+        if not _path_is_suspicious(path):
+            continue
+        out.append(
+            _make_finding(
+                rule_id=ind.id,
+                severity=ind.severity_baseline,
+                category="defense_evasion",
+                title="Deleted executable or script in a commonly abused path",
+                description=path[:300],
+                raw_excerpt=line,
+                followup="Recover the deleted entry where possible, hash it, and correlate execution artifacts.",
+                confidence=0.88,
+            )
+        )
+    return out
+
+
 _SPECIFIC_MATCHERS: dict[str, Matcher] = {
     "sigma_rule_hit": _match_sigma_rule_hit,
     "run_key_unusual_binary": _match_registry_temp_persistence,
@@ -1830,6 +2068,10 @@ _SPECIFIC_MATCHERS: dict[str, Matcher] = {
     "prefetch_unusual_path": _match_prefetch_unusual_path,
     "prefetch_with_credential_tools": _match_prefetch_credential_tool,
     "prefetch_referenced_lsass_dump": _match_prefetch_lsass_reference,
+    "pcap_suspicious_remote_port": _match_pcap_suspicious_remote_port,
+    "pcap_long_dns_query": _match_pcap_long_dns_query,
+    "browser_suspicious_download": _match_browser_suspicious_download,
+    "fls_deleted_suspicious_file": _match_fls_deleted_suspicious_file,
 }
 
 

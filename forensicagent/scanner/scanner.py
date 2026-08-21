@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import stat
@@ -23,9 +24,8 @@ from forensicagent.scanner.types import Evidence, Inventory
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_DEPTH = 5
-# scan() 의 크기 상한 게이트. 이 값을 넘는 파일은 검사하지 않고 skipped_files
-# 로만 집계한다 (거대 파일이 스캔을 느리게 만드는 경우 방어). 0 = 무제한.
-MAX_FILE_SIZE_BYTES = 0
+# scan() 크기 상한. 1.5 GiB 이상 파일은 경로/크기를 기록하고 자동 제외한다.
+MAX_FILE_SIZE_BYTES = 3 * 1024**3 // 2
 
 # Common dependency/VCS directories are skipped for every source tree.
 _COMMON_IGNORE_DIRS = {
@@ -58,6 +58,14 @@ _PROJECT_ONLY_IGNORE_DIRS = {
     "bench_scripts",
     "forensicagent_output",
 }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _is_excluded(path: Path, excludes: tuple[Path, ...]) -> bool:
@@ -236,9 +244,18 @@ def scan(
                 continue
             size = file_stat.st_size
             # 크기 상한 게이트 (0 = 무제한). 초과 파일은 검사하지 않고 skip 로 집계.
-            if MAX_FILE_SIZE_BYTES > 0 and size > MAX_FILE_SIZE_BYTES:
+            if MAX_FILE_SIZE_BYTES > 0 and size >= MAX_FILE_SIZE_BYTES:
                 logger.debug("skip oversized %s (%d bytes)", p, size)
                 inv.skipped_files += 1
+                inv.oversized_files.append(
+                    {
+                        "path": str(p),
+                        "size_bytes": size,
+                        "mtime_ns": file_stat.st_mtime_ns,
+                        "reason": "size is at or above the 1.5 GiB scan limit",
+                        "limit_bytes": MAX_FILE_SIZE_BYTES,
+                    }
+                )
                 continue
             try:
                 with open(p, "rb") as stream:
@@ -252,20 +269,32 @@ def scan(
             hit = detect(p)
             if hit is None:
                 inv.unidentified_files += 1
-                if include_unknown:
-                    inv.evidence_list.append(
-                        Evidence(
-                            path=str(p),
-                            filename=p.name,
-                            size_bytes=size,
-                            evidence_type="unknown",
-                            detected_by="unclassified",
-                            platform_hint="unknown",
-                            confidence=0.0,
-                        )
-                    )
+                if not include_unknown:
+                    continue
+                etype, plat, conf, method = (
+                    "unknown",
+                    "unknown",
+                    0.0,
+                    "unclassified",
+                )
+            else:
+                etype, plat, conf, method = hit
+            try:
+                digest = _sha256_file(p)
+                final_stat = p.lstat()
+                stable = (
+                    not _stat_is_link_or_reparse(final_stat)
+                    and os.path.samestat(file_stat, final_stat)
+                    and file_stat.st_size == final_stat.st_size
+                    and file_stat.st_mtime_ns == final_stat.st_mtime_ns
+                )
+                if not stable:
+                    raise OSError("evidence changed while it was being fingerprinted")
+            except OSError:
+                inv.scanned_files -= 1
+                inv.skipped_files += 1
+                inv.unreadable_paths += 1
                 continue
-            etype, plat, conf, method = hit
             inv.evidence_list.append(
                 Evidence(
                     path=str(p),
@@ -275,6 +304,8 @@ def scan(
                     detected_by=method,
                     platform_hint=plat,
                     confidence=conf,
+                    sha256=digest,
+                    mtime_ns=file_stat.st_mtime_ns,
                 )
             )
     if stage_ms is not None:

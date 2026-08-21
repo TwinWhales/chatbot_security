@@ -59,14 +59,17 @@ exclude = [
 [tool.hatch.build.targets.wheel.force-include]
 "tools_metadata/amcacheparser.yaml" = "forensicagent/builtin_tools/amcacheparser.yaml"
 "tools_metadata/bandit.yaml" = "forensicagent/builtin_tools/bandit.yaml"
+"tools_metadata/browser_sqlite.yaml" = "forensicagent/builtin_tools/browser_sqlite.yaml"
 "tools_metadata/chainsaw.yaml" = "forensicagent/builtin_tools/chainsaw.yaml"
 "tools_metadata/evtxecmd.yaml" = "forensicagent/builtin_tools/evtxecmd.yaml"
+"tools_metadata/fls.yaml" = "forensicagent/builtin_tools/fls.yaml"
 "tools_metadata/gitleaks.yaml" = "forensicagent/builtin_tools/gitleaks.yaml"
 "tools_metadata/mftecmd.yaml" = "forensicagent/builtin_tools/mftecmd.yaml"
 "tools_metadata/pecmd.yaml" = "forensicagent/builtin_tools/pecmd.yaml"
 "tools_metadata/recmd.yaml" = "forensicagent/builtin_tools/recmd.yaml"
 "tools_metadata/regripper.yaml" = "forensicagent/builtin_tools/regripper.yaml"
 "tools_metadata/semgrep.yaml" = "forensicagent/builtin_tools/semgrep.yaml"
+"tools_metadata/tshark.yaml" = "forensicagent/builtin_tools/tshark.yaml"
 "tools_metadata/volatility3.yaml" = "forensicagent/builtin_tools/volatility3.yaml"
 "bench/goldenset.json" = "bench/goldenset.json"
 

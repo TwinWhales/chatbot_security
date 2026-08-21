@@ -20,7 +20,7 @@ from forensicagent.analyzer import analyze_all
 from forensicagent.cli.doctor import run_doctor
 from forensicagent.cli.repl import run as run_repl
 from forensicagent.cli.session import SessionOptions, make_session
-from forensicagent.cli.ui import console, render_inventory
+from forensicagent.cli.ui import console, render_inventory, render_oversized_exclusions
 from forensicagent.executor import execute
 from forensicagent.llm import OllamaClient
 from forensicagent.reporter import write as write_report
@@ -28,6 +28,7 @@ from forensicagent.reporter.types import now_iso
 from forensicagent.scanner import scan
 from forensicagent.selector import select
 from forensicagent.tools import load_all_tools
+from forensicagent.ui_text import safe_text
 
 app = typer.Typer(
     name="forensicagent",
@@ -42,6 +43,8 @@ app.add_typer(tools_app, name="tools")
 
 rag_app = typer.Typer(help="RAG index management (tool-metadata corpus).")
 app.add_typer(rag_app, name="rag")
+
+_MIB = 1024**2
 
 
 def _version_callback(value: bool) -> None:
@@ -124,6 +127,27 @@ def root(
         0, "--timeout",
         help="Per-tool timeout seconds (0 = use config default).",
     ),
+    max_job_output_mib: Optional[int] = typer.Option(
+        None,
+        "--max-job-output-mib",
+        "--max-job-output-mb",
+        min=1,
+        help="Maximum output per tool job in MiB (default: configured value).",
+    ),
+    max_total_output_mib: Optional[int] = typer.Option(
+        None,
+        "--max-total-output-mib",
+        "--max-total-output-mb",
+        min=1,
+        help="Maximum total raw tool output in MiB (default: configured value).",
+    ),
+    min_free_disk_mib: Optional[int] = typer.Option(
+        None,
+        "--min-free-disk-mib",
+        "--min-free-disk-mb",
+        min=1,
+        help="Free disk space to preserve in MiB (default: configured value).",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     version: bool = typer.Option(
         False, "--version", callback=_version_callback, is_eager=True,
@@ -141,12 +165,37 @@ def root(
 
     c = console()
 
+    max_job_output_bytes = (
+        max_job_output_mib * _MIB
+        if max_job_output_mib is not None
+        else settings.MAX_JOB_OUTPUT_BYTES
+    )
+    max_total_output_bytes = (
+        max_total_output_mib * _MIB
+        if max_total_output_mib is not None
+        else settings.MAX_TOTAL_OUTPUT_BYTES
+    )
+    min_free_disk_bytes = (
+        min_free_disk_mib * _MIB
+        if min_free_disk_mib is not None
+        else settings.MIN_FREE_DISK_BYTES
+    )
+    if max_total_output_bytes < max_job_output_bytes:
+        c.print(
+            "[red]--max-total-output-mib must be greater than or equal to "
+            "--max-job-output-mib.[/]"
+        )
+        raise typer.Exit(2)
+
     # 인자 없이 호출 + TTY 면 인터랙티브 REPL 로 진입.
     one_shot_signals = (
         auto or quick or dry_run or no_llm or no_rag
         or tools is not None or path is not None
         or output_dir is not None or timeout != 0
         or scenario is not None
+        or max_job_output_mib is not None
+        or max_total_output_mib is not None
+        or min_free_disk_mib is not None
     )
     if not one_shot_signals and sys.stdin.isatty():
         _, tool_metas = _load_tools_or_exit(c)
@@ -161,10 +210,10 @@ def root(
     target = (path or Path(os.getcwd())).resolve()
     out_dir = output_dir.resolve() if output_dir else settings.default_output_dir(target)
     if not target.exists():
-        c.print(f"[red]분석 경로가 없습니다:[/] {target}")
+        c.print("[red]분석 경로가 없습니다:[/]", safe_text(target))
         raise typer.Exit(2)
     c.print(f"[bold]forensicagent[/] {__version__}")
-    c.print(f"[*] 작업 디렉토리: {target}")
+    c.print(safe_text(f"[*] 작업 디렉토리: {target}"))
 
     started_at = now_iso()
     stage_ms: dict[str, int] = {}
@@ -184,6 +233,12 @@ def root(
             f"depth_limit_hit={str(inv.depth_limit_hit).lower()}, "
             f"unreadable_paths={inv.unreadable_paths}, "
             f"reparse_paths={inv.reparse_paths}.[/]"
+        )
+    if inv.oversized_files:
+        c.print(render_oversized_exclusions(inv))
+        c.print(
+            "[yellow]위 파일들은 1.5 GiB 이상이기 때문에 scan 작업에서 "
+            "제외되었습니다. 나머지 파일로 계속 진행합니다.[/]"
         )
     if not inv.evidence_list:
         suffix = (
@@ -231,11 +286,12 @@ def root(
     c.print(f"\n[*] 적용 가능한 도구 {len(plan.selected_tools)} 개 선별됨:")
     for i, sel in enumerate(plan.selected_tools, 1):
         c.print(
-            f"  {i}. [bold]{sel.tool_id}[/] "
-            f"(prio={sel.priority}, runtime={sel.estimated_runtime}, "
-            f"targets={len(sel.target_evidence)})"
+            safe_text(
+                f"  {i}. {sel.tool_id} (prio={sel.priority}, "
+                f"runtime={sel.estimated_runtime}, targets={len(sel.target_evidence)})"
+            )
         )
-        c.print(f"     [dim]{sel.reason}[/]")
+        c.print(safe_text(f"     {sel.reason}", style="dim"))
     if plan.llm_used:
         msg = "LLM 우선순위 보강 ok" if not plan.llm_fallback else "LLM 실패 → 기본 우선순위 fallback"
         c.print(f"[dim]({msg})[/]")
@@ -257,24 +313,42 @@ def root(
 
     # ---------- 3. Executor ----------
     raw_out_dir = out_dir / "raw"
-    c.print(f"\n[*] 도구 실행 중 (output → {out_dir})...")
+    c.print(safe_text(f"\n[*] 도구 실행 중 (output → {out_dir})..."))
     bundle = execute(
         plan,
         tool_metas,
         output_dir=raw_out_dir,
         timeout_sec=(timeout or None),
+        max_job_output_bytes=max_job_output_bytes,
+        max_total_output_bytes=max_total_output_bytes,
+        min_free_disk_bytes=min_free_disk_bytes,
+        inventory=inv,
         console=c,
         stage_ms=stage_ms,
     )
 
-    success_n = sum(1 for r in bundle.results if r.status == "success")
-    fail_n = sum(
-        1 for r in bundle.results
-        if r.status in ("failed", "timeout", "output_missing")
+    counts = {
+        status: sum(1 for r in bundle.results if r.status == status)
+        for status in (
+            "success",
+            "failed",
+            "timeout",
+            "cancelled",
+            "output_limit",
+            "output_missing",
+            "skipped",
+        )
+    }
+    reused_n = sum(
+        1
+        for result in bundle.results
+        if isinstance(result.provenance.get("resume"), dict)
+        and result.provenance["resume"].get("reused") is True
     )
-    skip_n = sum(1 for r in bundle.results if r.status == "skipped")
     c.print(
-        f"[*] 실행 완료: success={success_n}, failed={fail_n}, skipped={skip_n}"
+        "[*] 실행 완료: "
+        + ", ".join(f"{status}={count}" for status, count in counts.items())
+        + f", reused={reused_n}"
     )
 
     # ---------- 4. Analyzer ----------
@@ -306,8 +380,12 @@ def root(
     if paths:
         c.print("")
         for fmt, p in paths.items():
-            c.print(f"[green]리포트 저장됨 ({fmt}):[/] {p}")
-    if plan.selected_tools and success_n == 0:
+            c.print(f"[green]리포트 저장됨 ({fmt}):[/]", safe_text(p))
+    if counts["cancelled"]:
+        raise typer.Exit(130)
+    if counts["output_limit"]:
+        raise typer.Exit(3)
+    if plan.selected_tools and counts["success"] == 0:
         c.print(
             "[red]실행 가능한 도구가 하나도 성공하지 않았습니다. "
             "리포트의 skipped/failed 원인과 `forensicagent doctor` 결과를 "

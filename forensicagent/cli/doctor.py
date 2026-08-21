@@ -43,6 +43,7 @@ _OPTIONAL_TOOLS = [
     "psort.py",
     "plaso",
     "tshark",
+    "fls",
     "tcpdump",
     "yara",
     "exiftool",

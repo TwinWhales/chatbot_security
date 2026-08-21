@@ -15,13 +15,26 @@ import shlex
 import signal
 import stat
 import subprocess
+import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 from forensicagent.executor.types import ArtifactRole, ExecutionResult, OutputArtifact
 from forensicagent.tools.schema import ToolMetadata
 
 logger = logging.getLogger(__name__)
+
+_POLL_INTERVAL_SECONDS = 0.1
+
+
+def command_header_bytes(command_display: str) -> bytes:
+    """Return the audit header prepended to every captured stderr stream."""
+    return (
+        "=== COMMAND EXECUTED ===\n"
+        f"{command_display}\n"
+        "========================\n\n"
+    ).encode("utf-8")
 
 
 def _create_windows_kill_job() -> int:
@@ -134,6 +147,8 @@ def run_tool(
     timeout_sec: int,
     run_index: int = 0,
     command_template_used: str = "",
+    cancel_event: threading.Event | None = None,
+    limit_check: Callable[[int], str | None] | None = None,
 ) -> ExecutionResult:
     """단일 도구 1회 실행.
 
@@ -169,20 +184,18 @@ def run_tool(
     )
 
     start = time.perf_counter()
-    timed_out = False
+    stop_status: str | None = None
+    stop_message = ""
     exit_code = -1
     windows_job: int | None = None
+    proc: subprocess.Popen | None = None
+    captured_bytes = 0
     try:
         with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
             # 어떤 옵션으로 실행했는지 stderr 파일 상단에 기록한다.
             # (stdout 은 도구의 정형 출력이라 Analyzer 가 그대로 파싱 —
             #  헤더를 넣으면 JSON 이 깨지므로 stderr 쪽에만 남긴다.)
-            header = (
-                "=== COMMAND EXECUTED ===\n"
-                f"{command_display}\n"
-                "========================\n\n"
-            ).encode("utf-8")
-            err_f.write(header)
+            err_f.write(command_header_bytes(command_display))
             err_f.flush()
             popen_kwargs: dict[str, object] = {}
             if os.name == "nt":
@@ -209,10 +222,52 @@ def run_tool(
                     proc.kill()
                     proc.wait(timeout=5)
                     raise
+            deadline = time.monotonic() + timeout_sec
             try:
-                exit_code = proc.wait(timeout=timeout_sec)
-            except subprocess.TimeoutExpired:
-                timed_out = True
+                while True:
+                    if cancel_event is not None and cancel_event.is_set():
+                        stop_status = "cancelled"
+                        stop_message = "execution cancelled by user"
+                        break
+                    if limit_check is not None:
+                        try:
+                            captured_bytes = _capture_stream_bytes(out_f, err_f)
+                            limit_message = limit_check(captured_bytes)
+                        except OSError as exc:
+                            limit_message = f"output accounting failed safely: {exc}"
+                        if limit_message:
+                            stop_status = "output_limit"
+                            stop_message = limit_message
+                            break
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        stop_status = "timeout"
+                        stop_message = f"timeout after {timeout_sec}s"
+                        break
+                    try:
+                        exit_code = proc.wait(
+                            timeout=min(_POLL_INTERVAL_SECONDS, remaining)
+                        )
+                    except subprocess.TimeoutExpired:
+                        continue
+                    # A short-lived tool can cross a limit between polling ticks.
+                    if limit_check is not None:
+                        try:
+                            captured_bytes = _capture_stream_bytes(out_f, err_f)
+                            limit_message = limit_check(captured_bytes)
+                        except OSError as exc:
+                            limit_message = f"output accounting failed safely: {exc}"
+                        if limit_message:
+                            stop_status = "output_limit"
+                            stop_message = limit_message
+                    break
+            except KeyboardInterrupt:
+                if cancel_event is not None:
+                    cancel_event.set()
+                stop_status = "cancelled"
+                stop_message = "execution cancelled by user"
+
+            if stop_status is not None and proc.poll() is None:
                 result.warnings.extend(
                     _terminate_process_tree(proc, windows_job=windows_job)
                 )
@@ -237,11 +292,24 @@ def run_tool(
             except OSError as e:
                 result.warnings.append(f"Windows process containment close failed: {e}")
 
+    # On Windows, writes made through an inherited capture handle can remain
+    # invisible to path-based size accounting until the parent's handle is
+    # closed. Recheck once outside the capture context so short-lived tools
+    # cannot evade output limits by exiting between polling ticks.
+    if limit_check is not None:
+        try:
+            limit_message = limit_check(captured_bytes)
+        except OSError as exc:
+            limit_message = f"output accounting failed safely: {exc}"
+        if limit_message and stop_status is None:
+            stop_status = "output_limit"
+            stop_message = limit_message
+
     result.duration_seconds = time.perf_counter() - start
-    if timed_out:
-        result.status = "timeout"
+    if stop_status is not None:
+        result.status = stop_status  # type: ignore[assignment]
         result.exit_code = -1
-        result.error_message = f"timeout after {timeout_sec}s"
+        result.error_message = stop_message
         _finalize_stream_artifacts(result, metadata)
         return result
 
@@ -260,6 +328,41 @@ def _command_display(argv: list[str]) -> str:
     if os.name == "nt":
         return subprocess.list2cmdline(argv)
     return shlex.join(argv)
+
+
+def _capture_stream_bytes(*streams) -> int:
+    """Read growing capture EOFs, including inherited Windows handles."""
+    total = 0
+    for stream in streams:
+        sizes: list[int] = []
+        try:
+            sizes.append(os.fstat(stream.fileno()).st_size)
+        except OSError:
+            pass
+        try:
+            sizes.append(stream.tell())
+        except (OSError, ValueError):
+            pass
+        if os.name == "nt":
+            try:
+                import ctypes
+                import msvcrt
+                from ctypes import wintypes
+
+                handle = msvcrt.get_osfhandle(stream.fileno())
+                value = ctypes.c_longlong()
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.GetFileSizeEx.argtypes = [
+                    wintypes.HANDLE,
+                    ctypes.POINTER(ctypes.c_longlong),
+                ]
+                kernel32.GetFileSizeEx.restype = wintypes.BOOL
+                if kernel32.GetFileSizeEx(handle, ctypes.byref(value)):
+                    sizes.append(value.value)
+            except (OSError, TypeError, ValueError):
+                pass
+        total += max(sizes, default=0)
+    return total
 
 
 def _system_taskkill() -> Path | None:
@@ -287,7 +390,7 @@ def _terminate_process_tree(
 ) -> list[str]:
     """Best-effort termination of the process and every descendant."""
     warnings: list[str] = []
-    if proc.poll() is not None:
+    if proc.poll() is not None and os.name == "nt" and windows_job is None:
         return warnings
 
     if os.name == "nt":
@@ -357,7 +460,7 @@ def _terminate_process_tree(
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        warnings.append("process remained alive after timeout termination")
+        warnings.append("process remained alive after termination")
     return warnings
 
 
@@ -392,36 +495,181 @@ def describe_artifact(
 ) -> OutputArtifact:
     """Build a size/hash manifest entry for a completed output file."""
     p = Path(path)
-    digest = hashlib.sha256()
-    with open(p, "rb") as f:
-        while chunk := f.read(1024 * 1024):
-            digest.update(chunk)
+    size, sha256 = hash_file(p)
     return OutputArtifact(
         path=str(p),
         role=role,
         format=output_format,
-        size_bytes=p.stat().st_size,
-        sha256=digest.hexdigest(),
+        size_bytes=size,
+        sha256=sha256,
     )
+
+
+def hash_file(path: str | Path) -> tuple[int, str]:
+    """Hash a stable regular file and reject mutation while it is read."""
+    p = Path(path)
+    before = p.lstat()
+    if _is_link_or_reparse(before) or not stat.S_ISREG(before.st_mode):
+        raise OSError(f"not a regular non-link file: {p}")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(p, flags)
+    digest = hashlib.sha256()
+    with os.fdopen(descriptor, "rb") as stream:
+        opened_before = os.fstat(stream.fileno())
+        if _is_link_or_reparse(opened_before) or not stat.S_ISREG(
+            opened_before.st_mode
+        ):
+            raise OSError(f"file handle is not a regular non-link file: {p}")
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+        opened_after = os.fstat(stream.fileno())
+    after = p.lstat()
+    if _is_link_or_reparse(after):
+        raise OSError(f"file became a link/reparse point while hashing: {p}")
+    before_path_key = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    after_path_key = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    before_handle_key = (
+        opened_before.st_dev,
+        opened_before.st_ino,
+        opened_before.st_size,
+        opened_before.st_mtime_ns,
+    )
+    after_handle_key = (
+        opened_after.st_dev,
+        opened_after.st_ino,
+        opened_after.st_size,
+        opened_after.st_mtime_ns,
+    )
+    if (
+        before_path_key != after_path_key
+        or before_handle_key != after_handle_key
+        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        != before_handle_key
+    ):
+        raise OSError(f"file changed while hashing: {p}")
+    return after.st_size, digest.hexdigest()
+
+
+def _is_link_or_reparse(value: os.stat_result) -> bool:
+    return stat.S_ISLNK(value.st_mode) or bool(
+        getattr(value, "st_file_attributes", 0)
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
+def _contained_non_link(
+    path: str | Path,
+    root: str | Path,
+    *,
+    require_directory: bool,
+) -> Path:
+    """Resolve a path only after every lexical component passes lstat checks."""
+    root_path = Path(os.path.abspath(root))
+    target = Path(path)
+    target_path = Path(
+        os.path.abspath(target if target.is_absolute() else root_path / target)
+    )
+    if target_path != root_path and not target_path.is_relative_to(root_path):
+        raise OSError(f"path escapes output root: {path}")
+
+    root_value = root_path.lstat()
+    if _is_link_or_reparse(root_value) or not stat.S_ISDIR(root_value.st_mode):
+        raise OSError(f"output root is not a regular non-link directory: {root_path}")
+    current = root_path
+    if target_path != root_path:
+        for part in target_path.relative_to(root_path).parts:
+            current = current / part
+            value = current.lstat()
+            if _is_link_or_reparse(value):
+                raise OSError(f"output path contains link/reparse point: {path}")
+
+    resolved_root = root_path.resolve(strict=True)
+    resolved = target_path.resolve(strict=True)
+    if resolved != resolved_root and not resolved.is_relative_to(resolved_root):
+        raise OSError(f"resolved path escapes output root: {path}")
+    value = resolved.lstat()
+    expected = stat.S_ISDIR(value.st_mode) if require_directory else stat.S_ISREG(
+        value.st_mode
+    )
+    if not expected:
+        kind = "directory" if require_directory else "file"
+        raise OSError(f"output path is not a regular {kind}: {path}")
+    return resolved
+
+
+def contained_directory(path: str | Path, root: str | Path) -> Path:
+    return _contained_non_link(path, root, require_directory=True)
+
+
+def contained_regular_file(path: str | Path, root: str | Path) -> Path:
+    return _contained_non_link(path, root, require_directory=False)
+
+
+def logical_tree_size(
+    root: str | Path,
+    *,
+    exclude_root_names: frozenset[str] = frozenset(),
+) -> int:
+    """Return regular-file logical bytes without following links/reparse points."""
+    total = 0
+    root_path = Path(os.path.abspath(root))
+    contained_directory(root_path, root_path)
+    pending = [(root_path, True)]
+    while pending:
+        directory, is_root = pending.pop()
+        safe_directory = contained_directory(directory, root_path)
+        for entry in os.scandir(safe_directory):
+            if is_root and entry.name in exclude_root_names:
+                continue
+            value = entry.stat(follow_symlinks=False)
+            is_reparse = bool(
+                getattr(value, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            )
+            if entry.is_symlink() or is_reparse:
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                pending.append((Path(entry.path), False))
+            elif entry.is_file(follow_symlinks=False):
+                total += value.st_size
+    return total
 
 
 def collect_generated_artifacts(
     generated_dir: str | Path,
     *,
     default_format: str,
+    containment_root: str | Path | None = None,
 ) -> tuple[list[OutputArtifact], list[str]]:
     """Recursively manifest regular files created in a job's generated dir."""
-    root = Path(generated_dir)
+    root = Path(os.path.abspath(generated_dir))
+    boundary = Path(os.path.abspath(containment_root or root))
     artifacts: list[OutputArtifact] = []
     warnings: list[str] = []
-    if not root.is_dir():
+    try:
+        root = contained_directory(root, boundary)
+    except OSError as exc:
+        warnings.append(f"refused unsafe generated output root {root}: {exc}")
         return artifacts, warnings
     paths: list[Path] = []
     pending = [root]
     while pending:
         directory = pending.pop()
         try:
-            entries = list(os.scandir(directory))
+            safe_directory = contained_directory(directory, boundary)
+            entries = list(os.scandir(safe_directory))
         except OSError as e:
             warnings.append(f"could not enumerate generated outputs in {directory}: {e}")
             continue
@@ -445,6 +693,7 @@ def collect_generated_artifacts(
     paths.sort(key=lambda path: str(path).lower())
     for path in paths:
         try:
+            path = contained_regular_file(path, boundary)
             artifacts.append(
                 describe_artifact(
                     path,

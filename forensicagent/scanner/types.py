@@ -47,6 +47,8 @@ class Evidence:
     detected_by: DetectionMethod
     platform_hint: Platform = "unknown"
     confidence: float = 0.5
+    sha256: str = ""
+    mtime_ns: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +59,8 @@ class Evidence:
             "detected_by": self.detected_by,
             "platform_hint": self.platform_hint,
             "confidence": self.confidence,
+            "sha256": self.sha256,
+            "mtime_ns": self.mtime_ns,
         }
 
 
@@ -70,6 +74,7 @@ class Inventory:
     unidentified_files: int = 0
     unreadable_paths: int = 0
     reparse_paths: int = 0
+    oversized_files: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -80,6 +85,7 @@ class Inventory:
             "unreadable_paths": self.unreadable_paths,
             "reparse_paths": self.reparse_paths,
             "depth_limit_hit": self.depth_limit_hit,
+            "oversized_files": [dict(item) for item in self.oversized_files],
             "evidence_list": [e.to_dict() for e in self.evidence_list],
         }
 

@@ -71,5 +71,5 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           python -c "import os; from pathlib import Path; import forensicagent; workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve(); module_path = Path(forensicagent.__file__).resolve(); assert workspace not in module_path.parents, module_path; assert not (module_path.parent / 'builtin_tools' / '_failures').exists(); print(forensicagent.__version__, module_path)"
-          python -c "from forensicagent.tools import load_all_tools; tools = load_all_tools(); assert len(tools) == 11, sorted(tools); print('builtin tools:', ', '.join(sorted(tools)))"
+          python -c "from forensicagent.tools import load_all_tools; tools = load_all_tools(); assert len(tools) == 14, sorted(tools); print('builtin tools:', ', '.join(sorted(tools)))"
           python -m forensicagent --version

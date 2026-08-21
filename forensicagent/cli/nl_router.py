@@ -16,6 +16,7 @@ from typing import Any
 from forensicagent.cli import repl as repl_mod
 from forensicagent.cli.session import SessionState
 from forensicagent.llm.ollama_client import JsonRetryFailed, OllamaUnavailable
+from forensicagent.ui_text import safe_text
 
 ROUTER_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -66,7 +67,7 @@ Available actions:
 - auto       args: {{}}                          - scan->plan->run->analyze->report 전체
 - show       args: {{ "what": "inventory"|"plan"|"findings"|"report" }}
 - status     args: {{}}                          - 세션 상태
-- set        args: {{ "key": string, "value": string }}  - no_llm/quick/max_depth/timeout/tools/path/output_dir
+- set        args: {{ "key": string, "value": string }}  - no_llm/quick/max_depth/timeout/max_job_output_mib/max_total_output_mib/min_free_disk_mib/tools/path/output_dir (MiB values are positive integers; total must be >= job)
 - cd         args: {{ "path": string }}          - target_path 변경
 - tools      args: {{ "arg"?: string }}          - "" 또는 "list" 또는 "info <id>"
 - clear      args: {{}}                          - 실행 상태 초기화
@@ -131,21 +132,21 @@ def handle(state: SessionState, c, text: str) -> None:
         c.print("[yellow]LLM 미가용. /help 의 슬래시 명령만 사용하세요.[/]")
         return
 
-    safe_text = _strip_surrogates(text)
+    safe_input = _strip_surrogates(text)
     safe_system = _strip_surrogates(_system_prompt(state))
     messages = [
         {"role": "system", "content": safe_system},
-        {"role": "user", "content": safe_text},
+        {"role": "user", "content": safe_input},
     ]
     c.print("[dim](LLM 라우팅 중...)[/]")
     try:
         with c.status("[dim]thinking...[/]", spinner="dots"):
             payload = client.json_chat(messages, format_schema=ROUTER_SCHEMA)
     except OllamaUnavailable as e:
-        c.print(f"[red]Ollama 사용 불가:[/] {e}")
+        c.print("[red]Ollama 사용 불가:[/]", safe_text(e))
         return
     except JsonRetryFailed as e:
-        c.print(f"[red]LLM JSON 파싱 실패:[/] {e}")
+        c.print("[red]LLM JSON 파싱 실패:[/]", safe_text(e))
         return
 
     if not isinstance(payload, dict):
@@ -155,14 +156,14 @@ def handle(state: SessionState, c, text: str) -> None:
     msg = payload.get("message", "")
     actions = payload.get("actions", [])
     if msg:
-        c.print(f"[cyan]{msg}[/]")
+        c.print(safe_text(msg, style="cyan"))
 
     if not isinstance(actions, list) or not actions:
         return
 
     for idx, act in enumerate(actions, 1):
         if not isinstance(act, dict):
-            c.print(f"[red]action[{idx}] 형식 오류:[/] {act}")
+            c.print(f"[red]action[{idx}] 형식 오류:[/]", safe_text(act))
             continue
         name = str(act.get("name", "")).lower().strip()
         args = act.get("args") or {}
@@ -170,10 +171,10 @@ def handle(state: SessionState, c, text: str) -> None:
             args = {}
         handler = _DISPATCH.get(name)
         if handler is None:
-            c.print(f"[red]알 수 없는 action:[/] {name}")
+            c.print("[red]알 수 없는 action:[/]", safe_text(name))
             continue
-        c.print(f"[dim]-> /{name} {args if args else ''}[/]")
+        c.print(safe_text(f"-> /{name} {args if args else ''}", style="dim"))
         try:
             handler(state, c, args)
         except Exception as e:  # noqa: BLE001
-            c.print(f"[red]action /{name} 에러:[/] {e}")
+            c.print("[red]action 에러:[/]", safe_text(f"/{name}: {e}"))

@@ -9,6 +9,7 @@ LLM / 네트워크 없이 임시 디렉토리 트리로만 결정론 검증.
 from __future__ import annotations
 
 import builtins
+import hashlib
 import os
 from pathlib import Path
 
@@ -59,15 +60,49 @@ def test_ignored_dirs_do_not_trigger_depth_limit(tmp_path):
 
 # ---- MAX_FILE_SIZE_BYTES 크기 게이트 ----
 
-def test_oversized_file_counted_as_skipped(tmp_path, monkeypatch):
+def test_files_at_or_above_size_limit_are_recorded_and_skipped(tmp_path, monkeypatch):
     monkeypatch.setattr(scanner, "MAX_FILE_SIZE_BYTES", 10)
-    _write(tmp_path / "small.txt", b"tiny")          # 4 bytes → scanned
-    _write(tmp_path / "big.bin", b"x" * 100)         # 100 bytes → skipped
+    hashed: list[Path] = []
+    real_sha256 = scanner._sha256_file
+
+    def tracked_sha256(path: Path) -> str:
+        hashed.append(path)
+        return real_sha256(path)
+
+    monkeypatch.setattr(scanner, "_sha256_file", tracked_sha256)
+    _write(tmp_path / "small.txt", b"x" * 9)
+    _write(tmp_path / "boundary.bin", b"x" * 10)
+    _write(tmp_path / "big.bin", b"x" * 11)
+
     inv = scan(tmp_path, max_depth=2)
-    assert inv.skipped_files >= 1
-    names = {Path(e.path).name for e in inv.evidence_list}
-    assert "big.bin" not in names
-    assert "small.txt" in names
+
+    assert inv.skipped_files == 2
+    assert {Path(e.path).name for e in inv.evidence_list} == {"small.txt"}
+    assert [Path(item["path"]).name for item in inv.oversized_files] == [
+        "big.bin",
+        "boundary.bin",
+    ]
+    assert sorted(item["size_bytes"] for item in inv.oversized_files) == [10, 11]
+    assert {item["reason"] for item in inv.oversized_files} == {
+        "size is at or above the 1.5 GiB scan limit"
+    }
+    assert {item["limit_bytes"] for item in inv.oversized_files} == {10}
+    assert inv.to_dict()["oversized_files"] == inv.oversized_files
+    assert {path.name for path in hashed} == {"small.txt"}
+
+
+def test_included_evidence_records_stable_fingerprint_and_mtime(tmp_path):
+    target = tmp_path / "case.txt"
+    payload = b"forensic evidence\n"
+    _write(target, payload)
+    expected_mtime = target.stat().st_mtime_ns
+
+    evidence = scan(target).evidence_list[0]
+
+    assert evidence.sha256 == hashlib.sha256(payload).hexdigest()
+    assert evidence.mtime_ns == expected_mtime
+    assert evidence.to_dict()["sha256"] == evidence.sha256
+    assert evidence.to_dict()["mtime_ns"] == expected_mtime
 
 
 def test_zero_limit_means_no_size_gate(tmp_path, monkeypatch):
@@ -76,6 +111,7 @@ def test_zero_limit_means_no_size_gate(tmp_path, monkeypatch):
     inv = scan(tmp_path, max_depth=2)
     names = {Path(e.path).name for e in inv.evidence_list}
     assert "big.bin" in names
+    assert inv.oversized_files == []
 
 
 def test_scan_accepts_a_file_root(tmp_path):

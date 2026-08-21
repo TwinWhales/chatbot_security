@@ -94,7 +94,14 @@ class GenericAdapter:
 
         haystack = (proc.stdout or "") + (proc.stderr or "")
         if check.expected_pattern in haystack:
-            return True, f"{self._meta.tool_id} {check.expected_pattern} found"
+            version = " ".join(haystack.split())
+            version = "".join(
+                char if char.isprintable() else "\N{REPLACEMENT CHARACTER}"
+                for char in version
+            )
+            return True, version[:240] or (
+                f"{self._meta.tool_id} {check.expected_pattern} found"
+            )
         return False, (
             f"install_check stdout/stderr did not contain "
             f"{check.expected_pattern!r}"
