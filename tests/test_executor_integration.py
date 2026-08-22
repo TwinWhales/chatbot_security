@@ -14,7 +14,7 @@ import pytest
 from forensicagent import config as settings
 from forensicagent.analyzer import analyze_one
 from forensicagent.executor.adapter import GenericAdapter
-from forensicagent.executor.executor import _build_jobs, execute
+from forensicagent.executor.executor import _build_jobs, _command_dependencies, execute
 from forensicagent.executor.runner import collect_generated_artifacts, run_tool
 from forensicagent.executor.state import (
     load_state,
@@ -79,6 +79,32 @@ def _selection(tool_id: str, template: str, targets: list[str], priority: int = 
         command_template=template,
         priority=priority,
     )
+
+
+def test_generated_file_argument_is_never_hashed_as_a_tool_dependency(tmp_path):
+    evidence = tmp_path / "evidence.evtx"
+    dependency = tmp_path / "rules.yml"
+    generated = tmp_path / "job" / "generated"
+    output = generated / "result.jsonl"
+    evidence.write_bytes(b"evidence")
+    dependency.write_bytes(b"rules")
+    generated.mkdir(parents=True)
+    argv = ["tool", str(dependency), str(output), str(evidence)]
+
+    before = _command_dependencies(
+        argv,
+        evidence_path=evidence,
+        generated_dir=generated,
+    )
+    output.write_bytes(b"result")
+    after = _command_dependencies(
+        argv,
+        evidence_path=evidence,
+        generated_dir=generated,
+    )
+
+    assert before == after
+    assert [item["path"] for item in after] == [str(dependency.resolve())]
 
 
 def test_generated_output_manifest_and_stdout_compatibility(tmp_path):
@@ -525,6 +551,29 @@ def test_prerequisite_validation_runs_once_per_tool(tmp_path, monkeypatch):
     execute(plan, {"preflight": metadata}, output_dir=tmp_path / "runs")
 
     assert calls == 1
+
+
+def test_prerequisite_output_is_decoded_as_utf8_on_windows(monkeypatch):
+    metadata = _metadata("utf8-preflight", f"{sys.executable} {{evidence_path}}")
+    metadata.install_check = InstallCheck(
+        command="tool --version", expected_pattern="tool"
+    )
+    seen = {}
+
+    def fake_run(_argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(stdout="tool \u2713", stderr="", returncode=0)
+
+    monkeypatch.setattr(
+        "forensicagent.executor.adapter.resolve_executable", lambda _name: Path("tool")
+    )
+    monkeypatch.setattr("forensicagent.executor.adapter.subprocess.run", fake_run)
+
+    ok, detail = GenericAdapter(metadata).validate_prerequisites()
+
+    assert ok, detail
+    assert seen["encoding"] == "utf-8"
+    assert seen["errors"] == "replace"
 
 
 def test_prerequisite_check_uses_trusted_project_cwd(tmp_path, monkeypatch):

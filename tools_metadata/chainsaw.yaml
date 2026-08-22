@@ -41,41 +41,42 @@ usage_description: |
 
 suspicious_indicators:
   - id: rdp_logon_external_ip
-    pattern: "EventID 4624 + LogonType=10 (RemoteInteractive) + IpAddress 가 RFC1918 외부"
+    pattern: "Security/Microsoft-Windows-Security-Auditing EventID 4624 + LogonType=10 + IpAddress 가 RFC1918 외부"
     severity_baseline: high
     description: "외부 IP 에서의 RDP 로그온 성공"
   - id: rdp_logon_offhours
-    pattern: "EventID 4624 + LogonType 10 + 설정된 조직 현지 업무시간 밖"
+    pattern: "Security/Microsoft-Windows-Security-Auditing EventID 4624 + LogonType 10 + 설정된 조직 현지 업무시간 밖"
     severity_baseline: medium
     description: "설정된 UTC offset과 업무시간 밖의 RDP 로그온; 단독 확정 신호 아님"
   - id: brute_force_followed_by_success
-    pattern: "동일 source_ip 에서 EventID 4625 (실패) 다수 후 4624 (성공)"
+    pattern: "Security/Microsoft-Windows-Security-Auditing의 동일 source_ip 에서 4625 다수 후 4624"
     severity_baseline: high
     description: "Brute force 가 성공으로 끝난 경우"
   - id: failed_logon_burst
-    pattern: "EventID 4625 (실패) 가 동일 source_ip 또는 동일 target_username 으로 10건 이상"
+    pattern: "Security/Microsoft-Windows-Security-Auditing EventID 4625가 동일 주체로 10건 이상"
     severity_baseline: medium
     description: "5분 내 반복 실패 후보. 후속 4624 성공 여부를 별도로 확인한다."
   - id: account_creation_4720
-    pattern: "EventID 4720 (계정 생성) + 곧이어 4732 (privileged group 추가)"
+    pattern: "Security/Microsoft-Windows-Security-Auditing EventID 4720 후 4732 privileged group 추가"
     severity_baseline: high
     description: "공격자가 backdoor 계정 생성 후 권한 부여하는 전형 패턴"
   - id: clear_log_event
-    pattern: "EventID 1102 (Security log cleared) 또는 104 (System log cleared)"
-    severity_baseline: critical
-    description: "공격자 흔적 제거 시도. 항상 critical."
+    pattern: "Microsoft-Windows-Eventlog Provider의 Security/1102 또는 System/104"
+    severity_baseline: high
+    description: "로그 삭제 사실은 확인되지만 정상 관리 작업 가능성을 별도로 검증한다."
   - id: powershell_encoded_command
-    pattern: "EventID 4104 ScriptBlockText 에 -EncodedCommand 또는 base64 블롭"
+    pattern: "PowerShell/Operational의 Microsoft-Windows-PowerShell EventID 4104에 인코딩 흔적"
     severity_baseline: high
     description: "인코딩된 PowerShell 명령은 회피 패턴"
   - id: service_install_4697
-    pattern: "EventID 4697 ServiceFileName 또는 7045 ImagePath가 사용자 쓰기 가능 경로인 경우"
+    pattern: "Security-Auditing/4697 또는 System Service Control Manager/7045의 경로가 사용자 쓰기 가능"
     severity_baseline: high
     description: "사용자 쓰기 가능 경로에서 신규 서비스 실행"
 
 known_false_positives:
   - "관리자가 PowerShell 로 정상 작업 (서명된 스크립트 / known admin)"
   - "도메인 컨트롤러의 정상 머신 계정 로그온"
+  - "같은 Event ID를 사용하는 다른 Channel/Provider 이벤트는 보안 이벤트가 아님"
 
 reference_urls:
   - https://github.com/WithSecureLabs/chainsaw

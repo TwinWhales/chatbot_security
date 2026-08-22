@@ -45,16 +45,17 @@ usage_description: |
 suspicious_indicators:
   - id: prefetch_with_credential_tools
     pattern: "Prefetch 실행 파일명이 mimikatz / lazagne / nanodump / sekurlsa / lsassy"
-    severity_baseline: critical
-    description: "명시적인 자격증명 접근 도구 실행 흔적"
+    severity_baseline: high
+    description: "자격증명 접근 도구명 실행 흔적; 접근 성공과 사용 목적은 별도 확인"
   - id: prefetch_referenced_lsass_dump
-    pattern: "Prefetch 의 FilesLoaded 에 lsass.dmp / lsass.exe 직접 참조 (정상 프로그램은 직접 참조 안 함)"
-    severity_baseline: critical
-    description: "LSASS 메모리 덤프 도구 (mimikatz, procdump -ma lsass) 흔적"
+    pattern: "Prefetch FilesLoaded에 lsass*.dmp 덤프 파일명 참조"
+    severity_baseline: high
+    description: "LSASS dump 후보 파일 참조; Prefetch만으로 메모리 접근이나 자격증명 추출을 확정하지 않음"
 
 known_false_positives:
   - "정상 OS / 사용자 프로세스의 정상 실행 (대다수 prefetch)"
   - "관리자가 의도적으로 실행한 sysinternals 도구 (procmon, autoruns 등 - 합법 사용)"
+  - "TASKMGR.EXE 등 정상 도구의 LSASS.EXE 파일 참조는 메모리 dump 증거가 아님"
 
 reference_urls:
   - https://github.com/EricZimmerman/PECmd

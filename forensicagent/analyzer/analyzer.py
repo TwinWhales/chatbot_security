@@ -668,6 +668,8 @@ def _canonical_key(finding: Finding, tool_id: str) -> tuple[str, ...]:
         source_file,
         line,
         str(ref.event_id or ""),
+        ref.channel.strip().casefold(),
+        ref.provider.strip().casefold(),
         ref.timestamp.strip(),
     )
     # Event IDs and timestamps are not unique: several records can occur in

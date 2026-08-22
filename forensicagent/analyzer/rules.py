@@ -161,6 +161,36 @@ def _text(value: Any) -> str:
     return str(value)
 
 
+def _qualified_value(
+    row: dict[str, Any],
+    *,
+    qualified_aliases: tuple[str, ...],
+    flat_aliases: tuple[str, ...],
+) -> Any:
+    """Prefer an unambiguous structured field over same-named payload leaves."""
+    normalized = normalize_row(row)
+    qualified = tuple(normalize_field_name(alias) for alias in qualified_aliases)
+    matches = [
+        value
+        for key, value in normalized.items()
+        if any(key == alias or key.endswith(alias) for alias in qualified)
+        and value not in (None, "")
+    ]
+    if matches:
+        distinct = {_text(value).strip().casefold() for value in matches}
+        return matches[0] if len(distinct) == 1 else None
+    flat = [
+        normalized[key]
+        for alias in flat_aliases
+        if (key := normalize_field_name(alias)) in normalized
+        and normalized[key] not in (None, "")
+    ]
+    if not flat:
+        return None
+    distinct = {_text(value).strip().casefold() for value in flat}
+    return flat[0] if len(distinct) == 1 else None
+
+
 def _row_text(row: dict[str, Any]) -> str:
     return " ".join(_text(v) for v in row.values())
 
@@ -200,15 +230,64 @@ def _int_value(value: Any) -> int | None:
 
 
 def _event_id(row: dict[str, Any]) -> int | None:
-    return _int_value(_value(row, "event_id", "eventid", "id"))
+    return _int_value(
+        _qualified_value(
+            row,
+            qualified_aliases=("event_system_event_id",),
+            flat_aliases=("event_id", "eventid"),
+        )
+    )
+
+
+def _event_channel(row: dict[str, Any]) -> str:
+    return _text(
+        _qualified_value(
+            row,
+            qualified_aliases=("event_system_channel",),
+            flat_aliases=("channel", "channel_name", "log_name"),
+        )
+    ).strip()
+
+
+def _event_provider(row: dict[str, Any]) -> str:
+    return _text(
+        _qualified_value(
+            row,
+            qualified_aliases=(
+                "event_system_provider_attributes_name",
+                "event_system_provider_name",
+            ),
+            flat_aliases=("provider_name", "provider"),
+        )
+    ).strip()
+
+
+def _event_context_is(
+    row: dict[str, Any],
+    *,
+    channel: str,
+    providers: set[str],
+) -> bool:
+    """Require the namespace that gives a Windows Event ID its meaning."""
+    actual_channel = _event_channel(row).casefold()
+    actual_provider = _event_provider(row).casefold()
+    return actual_channel == channel.casefold() and actual_provider in providers
+
+
+def _is_security_audit_event(row: dict[str, Any], *event_ids: int) -> bool:
+    return _event_id(row) in event_ids and _event_context_is(
+        row,
+        channel="Security",
+        providers={"microsoft-windows-security-auditing"},
+    )
 
 
 def cross_batch_correlation_family(row: dict[str, Any]) -> str | None:
     """Return the bounded carry family for cross-row event correlations."""
     event_id = _event_id(row)
-    if event_id in {4624, 4625}:
+    if event_id in {4624, 4625} and _is_security_audit_event(row, event_id):
         return "logon"
-    if event_id in {4720, 4732}:
+    if event_id in {4720, 4732} and _is_security_audit_event(row, event_id):
         return "account"
     return None
 
@@ -281,6 +360,7 @@ def _make_finding(
     event_id: int | None = None,
     timestamp: str = "",
     followup: str = "",
+    alternative_explanation: str = "",
     confidence: float = 0.9,
     entities: dict[str, list[str]] | None = None,
 ) -> Finding:
@@ -293,10 +373,13 @@ def _make_finding(
         evidence_ref=EvidenceRef(
             source_file=source_file or _source_file(row),
             event_id=event_id if event_id is not None else _event_id(row),
+            channel=_event_channel(row),
+            provider=_event_provider(row),
             timestamp=timestamp or _timestamp_text(row),
             raw_excerpt=(raw_excerpt or _excerpt(row))[:700],
         ),
         suggested_followup=followup,
+        alternative_explanation=alternative_explanation,
         source="rule",
         rule_id=rule_id,
         confidence=confidence,
@@ -556,6 +639,24 @@ def _match_registry_ifeo_debugger(
     parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
 ) -> list[Finding]:
     out: list[Finding] = []
+    accessibility_targets = (
+        "sethc.exe",
+        "utilman.exe",
+        "osk.exe",
+        "magnify.exe",
+        "narrator.exe",
+        "displayswitch.exe",
+        "atbroker.exe",
+    )
+    command_interpreters = (
+        "cmd.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "rundll32.exe",
+        "mshta.exe",
+        "wscript.exe",
+        "cscript.exe",
+    )
     for row, blob in _registry_rows_or_lines(parsed, raw):
         lowered = blob.casefold()
         if "image file execution options" not in lowered or "debugger" not in lowered:
@@ -563,17 +664,26 @@ def _match_registry_ifeo_debugger(
         debugger = _text(_value(row, "debugger", "value_data", "data", "value"))
         if row and not debugger:
             continue
+        candidate = f"{lowered} {debugger.casefold()}"
+        if not any(target in candidate for target in accessibility_targets) or not any(
+            interpreter in candidate for interpreter in command_interpreters
+        ):
+            continue
         out.append(
             _make_finding(
                 rule_id=ind.id,
                 severity=ind.severity_baseline,
                 category="persistence",
-                title="Image File Execution Options debugger configured",
+                title="Accessibility IFEO debugger points to a command interpreter",
                 description=(debugger or blob)[:300],
                 row=row,
                 raw_excerpt=blob,
                 followup="Validate the IFEO target and debugger binary and remove unauthorized persistence.",
-                confidence=0.97,
+                alternative_explanation=(
+                    "A debugger may be configured for authorized testing, but this "
+                    "accessibility-target combination is a high-risk persistence setting."
+                ),
+                confidence=0.95,
             )
         )
     return out
@@ -610,6 +720,10 @@ def _match_registry_appinit(
                 row=row,
                 raw_excerpt=blob,
                 followup="Inspect the DLL signature and every process into which it may load.",
+                alternative_explanation=(
+                    "Legacy or vendor software may legitimately configure AppInit DLLs; "
+                    "the setting alone does not prove a malicious load."
+                ),
                 confidence=0.94,
             )
         )
@@ -641,6 +755,10 @@ def _match_registry_winlogon_shell(
                 row=row,
                 raw_excerpt=blob,
                 followup="Validate the configured shell and inspect its binary and launch chain.",
+                alternative_explanation=(
+                    "Kiosk software or a managed custom desktop can intentionally replace "
+                    "Explorer; the setting alone does not prove malicious execution."
+                ),
                 confidence=0.98,
             )
         )
@@ -1174,6 +1292,15 @@ def _no_duplicate_supplement(
 # Concrete forensic row matchers
 # ---------------------------------------------------------------------------
 
+def _amcache_identifier(row: dict[str, Any]) -> str:
+    return " ".join(
+        (
+            _text(_value(row, "application_name", "applicationname")),
+            _text(_value(row, "full_path", "fullpath", "application_path")),
+        )
+    ).strip()
+
+
 def _match_amcache_temp(
     parsed: Any, raw: str, meta: ToolMetadata, ind: SuspiciousIndicator
 ) -> list[Finding]:
@@ -1184,9 +1311,15 @@ def _match_amcache_temp(
         path = _text(
             _value(row, "full_path", "fullpath", "path", "application_path")
         )
-        blob = f"{path} {_row_text(row)}"
-        if _contains_credential_tool(blob):
+        if _contains_credential_tool(_amcache_identifier(row)):
             continue  # owned by the higher-confidence credential-tool rule
+        normalized = normalize_row(row)
+        association_fields = {
+            normalize_field_name(name)
+            for name in ("associated", "is_associated", "entry_type", "program_id")
+        }
+        if not any(field in normalized for field in association_fields):
+            continue
         association = _text(
             _value(row, "associated", "is_associated", "entry_type", "program_id")
         ).casefold()
@@ -1204,12 +1337,16 @@ def _match_amcache_temp(
                 _make_finding(
                     rule_id=ind.id,
                     severity=ind.severity_baseline,
-                    category="execution",
+                    category="artifact_anomaly",
                     title="Unassociated Amcache executable in a user-writable path",
                     description=path,
                     row=row,
-                    followup="Recover and hash the executable, then correlate its first execution.",
-                    confidence=0.9,
+                    followup="Recover and hash the file, then seek independent execution evidence.",
+                    alternative_explanation=(
+                        "Portable applications and installers can create unassociated "
+                        "Amcache entries in user-writable paths."
+                    ),
+                    confidence=0.78,
                 )
             )
     return out
@@ -1220,20 +1357,25 @@ def _match_amcache_credential_tool(
 ) -> list[Finding]:
     out: list[Finding] = []
     for row in _rows(parsed):
-        if _is_header_row(row) or not _contains_credential_tool(_row_text(row)):
+        candidate = _amcache_identifier(row)
+        if _is_header_row(row) or not _contains_credential_tool(candidate):
             continue
         out.append(
             _make_finding(
                 rule_id=ind.id,
                 severity=ind.severity_baseline,
                 category="credential_access",
-                title="Credential-access utility recorded in Amcache",
+                title="Credential-access utility name recorded in Amcache",
                 description=_text(
                     _value(row, "full_path", "fullpath", "application_name", "name")
                 ),
                 row=row,
-                followup="Isolate the host and inspect credential-access activity around this execution.",
-                confidence=0.98,
+                followup="Confirm execution with Prefetch, UserAssist, or process events and validate authorization.",
+                alternative_explanation=(
+                    "The entry may be stale or belong to authorized security testing; "
+                    "Amcache alone does not prove execution or credential access."
+                ),
+                confidence=0.88,
             )
         )
     return out
@@ -1286,7 +1428,7 @@ def _match_rdp_external(
 ) -> list[Finding]:
     out: list[Finding] = []
     for row in _rows(parsed):
-        if _event_id(row) != 4624:
+        if not _is_security_audit_event(row, 4624):
             continue
         logon_type = _int_value(_value(row, "logon_type", "logontype"))
         source_ip = _logon_ip(row)
@@ -1302,6 +1444,10 @@ def _match_rdp_external(
                     row=row,
                     event_id=4624,
                     followup="Validate the source IP, account, and remote-access authorization.",
+                    alternative_explanation=(
+                        "This may be approved remote administration or traffic observed "
+                        "through an organization-controlled VPN or jump host."
+                    ),
                     confidence=0.98,
                     entities=_entity_map(users=(user,), ips=(source_ip,)),
                 )
@@ -1315,7 +1461,7 @@ def _match_rdp_offhours(
     """Detect RemoteInteractive logons outside the configured local work window."""
     out: list[Finding] = []
     for row in _rows(parsed):
-        if _event_id(row) != 4624:
+        if not _is_security_audit_event(row, 4624):
             continue
         if _int_value(_value(row, "logon_type", "logontype")) != 10:
             continue
@@ -1353,6 +1499,10 @@ def _match_rdp_offhours(
                 event_id=4624,
                 timestamp=timestamp.isoformat(),
                 followup="Validate the account, source host, and approved remote-access schedule.",
+                alternative_explanation=(
+                    "This may be approved after-hours support, scheduled work, or a "
+                    "mismatch between the configured and host time zones."
+                ),
                 confidence=0.78,
                 entities=_entity_map(users=(user,), ips=(source_ip,)),
             )
@@ -1367,6 +1517,14 @@ def _match_service_install_temp(
     for row in _rows(parsed):
         event = _event_id(row)
         if event not in {4697, 7045}:
+            continue
+        if event == 4697 and not _is_security_audit_event(row, 4697):
+            continue
+        if event == 7045 and not _event_context_is(
+            row,
+            channel="System",
+            providers={"service control manager"},
+        ):
             continue
         image_path = _text(
             _value(
@@ -1393,6 +1551,10 @@ def _match_service_install_temp(
                 raw_excerpt=image_path,
                 event_id=event,
                 followup="Inspect the service binary, creator account, signature, and process tree.",
+                alternative_explanation=(
+                    "A legitimate installer may stage a service binary in a writable "
+                    "directory before moving or removing it."
+                ),
                 confidence=0.97,
             )
         )
@@ -1412,7 +1574,7 @@ def _match_failed_logon_burst(
 ) -> list[Finding]:
     groups: dict[str, list[tuple[datetime | None, dict[str, Any]]]] = defaultdict(list)
     for row in _rows(parsed):
-        if _event_id(row) != 4625:
+        if not _is_security_audit_event(row, 4625):
             continue
         key = _failed_logon_key(row)
         if key:
@@ -1459,6 +1621,10 @@ def _match_failed_logon_burst(
                 event_id=4625,
                 timestamp=first_ts.isoformat() if first_ts else "",
                 followup="Correlate the source/account with a subsequent successful logon.",
+                alternative_explanation=(
+                    "Repeated failures may come from stale credentials, a misconfigured "
+                    "service, or an unavailable domain controller."
+                ),
                 confidence=0.96 if first_ts else 0.75,
                 entities=_principal_entities(key),
             )
@@ -1475,6 +1641,8 @@ def _match_bruteforce_then_success(
     out: list[Finding] = []
     for index, row in enumerate(_rows(parsed)):
         event = _event_id(row)
+        if event in {4624, 4625} and not _is_security_audit_event(row, event):
+            continue
         key = _failed_logon_key(row)
         if not key:
             continue
@@ -1521,6 +1689,10 @@ def _match_bruteforce_then_success(
                 event_id=4624,
                 timestamp=timestamp.isoformat() if timestamp else "",
                 followup="Treat the account as potentially compromised and inspect its subsequent activity.",
+                alternative_explanation=(
+                    "A user or service may have corrected stale credentials after "
+                    "repeated authentication failures."
+                ),
                 confidence=0.98 if timestamp else 0.8,
                 entities=_principal_entities(key),
             )
@@ -1561,6 +1733,8 @@ def _match_account_created_then_grouped(
         event = _event_id(row)
         if event not in {4720, 4732}:
             continue
+        if not _is_security_audit_event(row, event):
+            continue
         account = _event_account(row, event)
         if not account:
             continue
@@ -1595,6 +1769,10 @@ def _match_account_created_then_grouped(
                 raw_excerpt=f"account={account}; events=4720->4732",
                 event_id=4732,
                 followup="Validate the account owner and inspect all activity by the new account.",
+                alternative_explanation=(
+                    "This may be authorized account provisioning by an administrator "
+                    "or identity-management workflow."
+                ),
                 confidence=(
                     0.97
                     if created_timestamp is not None and grouped_timestamp is not None
@@ -1612,7 +1790,21 @@ def _match_log_clear(
     out: list[Finding] = []
     for row in _rows(parsed):
         event = _event_id(row)
-        if event not in {104, 1102}:
+        if event == 1102:
+            valid_context = _event_context_is(
+                row,
+                channel="Security",
+                providers={"microsoft-windows-eventlog"},
+            )
+        elif event == 104:
+            valid_context = _event_context_is(
+                row,
+                channel="System",
+                providers={"microsoft-windows-eventlog"},
+            )
+        else:
+            continue
+        if not valid_context:
             continue
         user = _account(
             _value(
@@ -1633,6 +1825,10 @@ def _match_log_clear(
                 row=row,
                 event_id=event,
                 followup="Preserve remaining logs and identify the account/process that cleared them.",
+                alternative_explanation=(
+                    "An administrator or maintenance task may have intentionally cleared "
+                    "the log, but the resulting loss of visibility still requires review."
+                ),
                 confidence=0.99,
                 entities=_entity_map(users=(user,)),
             )
@@ -1650,7 +1846,11 @@ def _match_powershell_encoded(
 ) -> list[Finding]:
     out: list[Finding] = []
     for row in _rows(parsed):
-        if _event_id(row) != 4104:
+        if _event_id(row) != 4104 or not _event_context_is(
+            row,
+            channel="Microsoft-Windows-PowerShell/Operational",
+            providers={"microsoft-windows-powershell"},
+        ):
             continue
         script = _text(
             _value(row, "script_block_text", "scriptblocktext", "message", "command_line")
@@ -1668,6 +1868,10 @@ def _match_powershell_encoded(
                 raw_excerpt=script,
                 event_id=4104,
                 followup="Decode the command in an isolated environment and trace its parent process.",
+                alternative_explanation=(
+                    "Encoded PowerShell is also used by legitimate deployment, "
+                    "configuration-management, and administration tooling."
+                ),
                 confidence=0.96,
             )
         )
@@ -1697,13 +1901,17 @@ def _match_mft_deleted_temp_exe(
                 _make_finding(
                     rule_id=ind.id,
                     severity=ind.severity_baseline,
-                    category="defense_evasion",
+                    category="file_activity",
                     title="Deleted executable in a temporary path",
                     description=path,
                     row=row,
                     source_file=path,
                     followup="Recover the file from disk/unallocated space and correlate execution artifacts.",
-                    confidence=0.96,
+                    alternative_explanation=(
+                        "Installers, updaters, and application cleanup commonly delete "
+                        "temporary executables and libraries."
+                    ),
+                    confidence=0.78,
                 )
             )
     return out
@@ -1849,7 +2057,11 @@ def _match_prefetch_credential_tool(
                     description=executable[:300],
                     row=row,
                     followup="Inspect the process tree and credential-access telemetry at this run time.",
-                    confidence=0.98,
+                    alternative_explanation=(
+                        "The tool may have been run during authorized security testing; "
+                        "Prefetch proves execution, not successful credential extraction."
+                    ),
+                    confidence=0.93,
                 )
             )
     return out
@@ -1863,16 +2075,23 @@ def _match_prefetch_lsass_reference(
         loaded = _text(
             _value(row, "files_loaded", "filesloaded", "referenced_files", "directories")
         )
-        if re.search(r"(?i)\blsass(?:\.exe|\.dmp)?\b", loaded):
+        # FilesLoaded containing LSASS.EXE proves only a file reference
+        # (Task Manager does this), not process-memory access. Require a dump
+        # filename before raising a credential-access finding.
+        if re.search(r"(?i)\blsass[^\\/:]*\.dmp\b", loaded):
             out.append(
                 _make_finding(
                     rule_id=ind.id,
                     severity=ind.severity_baseline,
                     category="credential_access",
-                    title="Prefetch references LSASS",
+                    title="Prefetch references an LSASS dump file",
                     description=loaded[:300],
                     row=row,
                     followup="Determine whether the executable opened or dumped LSASS memory.",
+                    alternative_explanation=(
+                        "The dump may come from authorized incident response or crash "
+                        "diagnostics; Prefetch alone does not prove credential extraction."
+                    ),
                     confidence=0.92,
                 )
             )
@@ -1902,12 +2121,15 @@ def _match_pcap_suspicious_remote_port(
             _make_finding(
                 rule_id=ind.id,
                 severity=ind.severity_baseline,
-                category="command_and_control",
+                category="network_anomaly",
                 title="Network traffic to a global address on a suspicious port",
                 description=f"{destination}:{port} appeared in the packet capture.",
                 row=row,
                 timestamp=_packet_timestamp(row),
                 followup="Validate the endpoint and owning process against approved remote-access services.",
+                alternative_explanation=(
+                    "Developer tunnels or approved remote-access software can use the same port."
+                ),
                 confidence=0.82,
                 entities=_entity_map(ips=(destination,)),
             )
@@ -1938,12 +2160,15 @@ def _match_pcap_long_dns_query(
             _make_finding(
                 rule_id=ind.id,
                 severity=ind.severity_baseline,
-                category="exfiltration",
+                category="network_anomaly",
                 title="Unusually long encoded-looking DNS data",
                 description=value[:300],
                 row=row,
                 timestamp=_packet_timestamp(row),
                 followup="Compare repeated DNS payloads and query volume with approved DNS-based services.",
+                alternative_explanation=(
+                    "CDNs and approved DNS-based services can produce long encoded records."
+                ),
                 confidence=0.76,
             )
         )
@@ -1979,11 +2204,15 @@ def _match_browser_suspicious_download(
             _make_finding(
                 rule_id=ind.id,
                 severity=ind.severity_baseline,
-                category="execution",
+                category="file_acquisition",
                 title="Browser downloaded executable or script content",
                 description=f"{path or '(unknown path)'} from {url or '(unknown URL)'}"[:300],
                 row=row,
                 followup="Hash the downloaded file and validate its signature, source, and subsequent execution.",
+                alternative_explanation=(
+                    "The download may be an approved installer or administrator-supplied script; "
+                    "download history does not prove execution."
+                ),
                 confidence=0.86,
             )
         )

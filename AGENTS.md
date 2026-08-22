@@ -16,6 +16,12 @@ These instructions apply to the whole repository.
 - Treat `data/`, `seed_docs/`, and generated forensic output as evidence or generated artifacts. Do not rewrite or delete them unless the user explicitly puts them in scope.
 - Preserve unrelated user changes. Use the smallest targeted test first, then the full test suite when the change can affect shared behavior.
 
+## Malicious evidence safety
+
+- `test_evi/` is known to contain malware. Treat every file in it as hostile evidence.
+- Never execute, import, load as executable code, or shell-open anything from `test_evi/`; never invoke embedded scripts, commands, macros, or binaries.
+- Only parse it as data with a trusted analysis tool in a read-only, network-isolated environment. If a tool might execute evidence content, stop and ask the user instead.
+
 ## Local checks
 
 - Lint: `.venv\Scripts\ruff.exe check .`

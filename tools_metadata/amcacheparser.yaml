@@ -43,16 +43,17 @@ usage_description: |
 suspicious_indicators:
   - id: amcache_unassociated_in_temp
     pattern: "Unassociated entry + FullPath 가 %TEMP% / %APPDATA% / Public / Downloads"
-    severity_baseline: high
-    description: "정식 설치 안된 + 임시 경로에서 실행된 바이너리. malware 첫 의심 위치."
+    severity_baseline: medium
+    description: "정식 프로그램과 연결되지 않은 사용자 쓰기 경로의 파일 기록; 독립 실행 증거 필요"
   - id: amcache_credential_dump_tool
-    pattern: "ApplicationName 또는 FullPath 가 mimikatz / procdump / lsass / nltest / lazagne 등"
-    severity_baseline: critical
-    description: "알려진 자격증명 / 정찰 도구 실행 흔적"
+    pattern: "ApplicationName 또는 FullPath가 mimikatz / lazagne / nanodump / sekurlsa / lsassy"
+    severity_baseline: high
+    description: "알려진 자격증명 접근 도구명 기록; Amcache만으로 실행이나 접근 성공은 확정하지 않음"
 
 known_false_positives:
   - "PowerShell / Sysmon / WSL / WinPE 등 OEM 미서명 정상 도구"
   - "사용자가 의도적으로 다운로드 후 실행한 portable 유틸리티 (보안 도구, IT 진단 등)"
+  - "Amcache 등록만 존재하고 Prefetch/UserAssist/프로세스 이벤트 등 실행 증거가 없는 경우"
 
 reference_urls:
   - https://github.com/EricZimmerman/AmcacheParser

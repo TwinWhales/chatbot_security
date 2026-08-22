@@ -22,11 +22,18 @@ class EvidenceRef:
     event_id: int | None = None
     timestamp: str = ""
     raw_excerpt: str = ""
+    # Appended fields preserve positional construction compatibility.
+    evidence_id: str = ""
+    channel: str = ""
+    provider: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source_file": self.source_file,
+            "evidence_id": self.evidence_id,
             "event_id": self.event_id,
+            "channel": self.channel,
+            "provider": self.provider,
             "timestamp": self.timestamp,
             "raw_excerpt": self.raw_excerpt,
         }
@@ -51,6 +58,8 @@ class Finding:
     # deliberately stay outside the fingerprint payload so analyst identity is
     # stable when entity extraction evolves.
     entities: dict[str, list[str]] = field(default_factory=dict)
+    # Appended field preserves positional construction compatibility.
+    alternative_explanation: str = ""
 
     def __post_init__(self) -> None:
         try:
@@ -66,7 +75,10 @@ class Finding:
         canonical = {
             "rule_id": (self.rule_id or self.title).strip().casefold(),
             "source_file": self.evidence_ref.source_file.strip().casefold(),
+            "evidence_id": self.evidence_ref.evidence_id.strip().casefold(),
             "event_id": self.evidence_ref.event_id,
+            "channel": self.evidence_ref.channel.strip().casefold(),
+            "provider": self.evidence_ref.provider.strip().casefold(),
             "timestamp": self.evidence_ref.timestamp.strip(),
             "excerpt": excerpt[:800],
         }
@@ -85,6 +97,7 @@ class Finding:
             "description": self.description,
             "evidence_ref": self.evidence_ref.to_dict(),
             "suggested_followup": self.suggested_followup,
+            "alternative_explanation": self.alternative_explanation,
             "source": self.source,
             "rule_id": self.rule_id,
             "fingerprint": self.fingerprint,

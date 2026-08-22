@@ -50,8 +50,8 @@ usage_description: |
 suspicious_indicators:
   - id: deleted_executable_in_temp
     pattern: "InUse=False, Extension=.exe/.dll, ParentPath 가 %TEMP% / %APPDATA% / Public"
-    severity_baseline: high
-    description: "임시 경로의 삭제된 실행파일은 anti-forensics 흔적"
+    severity_baseline: medium
+    description: "사용자 쓰기 경로에서 삭제된 실행파일 기록; 정상 설치·업데이트 정리 가능성을 함께 검증"
   - id: timestomp_inconsistency
     pattern: "SI Created > FN Created 또는 SI Modified < SI Created (시간 일관성 깨짐)"
     severity_baseline: high

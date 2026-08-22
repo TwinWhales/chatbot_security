@@ -22,8 +22,10 @@ from forensicagent.tools.schema import CommandTemplate, SuspiciousIndicator, Too
 
 def _meta(*ids: str, tool_id: str = "fake") -> ToolMetadata:
     severities = {
-        "amcache_credential_dump_tool": "critical",
+        "amcache_credential_dump_tool": "high",
+        "amcache_unassociated_in_temp": "medium",
         "clear_log_event": "critical",
+        "deleted_executable_in_temp": "medium",
         "gitleaks_aws_key": "critical",
         "gitleaks_secret": "high",
     }
@@ -47,10 +49,30 @@ def _meta(*ids: str, tool_id: str = "fake") -> ToolMetadata:
     )
 
 
+SECURITY_AUDIT = {
+    "Channel": "Security",
+    "Provider": "Microsoft-Windows-Security-Auditing",
+}
+SECURITY_EVENTLOG = {
+    "Channel": "Security",
+    "Provider": "Microsoft-Windows-Eventlog",
+}
+SYSTEM_EVENTLOG = {
+    "Channel": "System",
+    "Provider": "Microsoft-Windows-Eventlog",
+}
+SYSTEM_SCM = {"Channel": "System", "Provider": "Service Control Manager"}
+POWERSHELL_EVENT = {
+    "Channel": "Microsoft-Windows-PowerShell/Operational",
+    "Provider": "Microsoft-Windows-PowerShell",
+}
+
+
 def test_evtx_field_normalization_and_correlations():
     start = datetime(2025, 1, 1, tzinfo=timezone.utc)
     rows = [
         {
+            **SECURITY_AUDIT,
             "Event Id": "4625",
             "Ip Address": "8.8.8.8",
             "Time Created": (start + timedelta(seconds=index)).isoformat(),
@@ -60,22 +82,29 @@ def test_evtx_field_normalization_and_correlations():
     rows.extend(
         [
             {
+                **SECURITY_AUDIT,
                 "EVENTID": 4624,
                 "Logon Type": "10 - RemoteInteractive",
                 "Source IP": "8.8.8.8",
                 "TimeCreated": (start + timedelta(seconds=10)).isoformat(),
             },
-            {"EventID": 4720, "Target User Name": "case-user"},
+            {**SECURITY_AUDIT, "EventID": 4720, "Target User Name": "case-user"},
             {
+                **SECURITY_AUDIT,
                 "EventID": 4732,
                 "Member Name": "CN=case-user,CN=Users,DC=example",
                 "TargetSid": "S-1-5-32-544",
                 "TargetUserName": "Administrators",
             },
-            {"EventID": 1102},
-            {"EventID": 104},
-            {"EventID": 4697, "Service File Name": "%TEMP%\\svc.exe"},
+            {**SECURITY_EVENTLOG, "EventID": 1102},
+            {**SYSTEM_EVENTLOG, "EventID": 104},
             {
+                **SECURITY_AUDIT,
+                "EventID": 4697,
+                "Service File Name": "%TEMP%\\svc.exe",
+            },
+            {
+                **POWERSHELL_EVENT,
                 "EventID": 4104,
                 "Script Block Text": "powershell.exe -EncodedCommand SQBFAFgA",
             },
@@ -104,9 +133,80 @@ def test_evtx_field_normalization_and_correlations():
     assert "powershell_encoded_command" in rule_ids
 
 
+def test_event_ids_do_not_match_outside_their_provider_and_channel():
+    findings = apply_rules(
+        {
+            "items": [
+                {
+                    "EventID": 1102,
+                    "Channel": "Microsoft-Windows-ShellCommon/Operational",
+                    "Provider": "Microsoft-Windows-ShellCommon",
+                }
+            ]
+        },
+        "",
+        _meta("clear_log_event", tool_id="evtxecmd"),
+    )
+
+    assert findings == []
+
+
+def test_nested_event_namespace_is_preserved_on_evidence():
+    row = {
+        "Event": {
+            "System": {
+                "EventID": 104,
+                "Channel": "System",
+                "Provider": {
+                    "#attributes": {"Name": "Microsoft-Windows-Eventlog"}
+                },
+            }
+        }
+    }
+
+    finding = apply_rules(
+        {"items": [row]},
+        "",
+        _meta("clear_log_event", tool_id="chainsaw"),
+    )[0]
+
+    assert finding.rule_id == "clear_log_event:104"
+    assert finding.evidence_ref.event_id == 104
+    assert finding.evidence_ref.channel == "System"
+    assert finding.evidence_ref.provider == "Microsoft-Windows-Eventlog"
+
+
+def test_qualified_event_id_wins_over_conflicting_payload_event_id():
+    row = {
+        "EventID": 1102,
+        "Channel": "Security",
+        "Provider": "Microsoft-Windows-Eventlog",
+        "Event": {
+            "System": {
+                "EventID": 1,
+                "Channel": "Security",
+                "Provider": {"Name": "Microsoft-Windows-Eventlog"},
+            }
+        },
+    }
+
+    findings = apply_rules(
+        {"items": [row]},
+        "",
+        _meta("clear_log_event", tool_id="chainsaw"),
+    )
+
+    assert findings == []
+
+
 def test_failed_logon_equal_timestamps_do_not_crash_or_duplicate():
     rows = [
-        {"EventID": 4625, "IpAddress": "203.0.113.8", "Timestamp": "2025-01-01T00:00:00Z"}
+        {
+            **SECURITY_AUDIT,
+            "EventID": 4625,
+            "IpAddress": "203.0.113.8",
+            "Timestamp": "2025-01-01T00:00:00Z",
+        }
         for _ in range(10)
     ]
     findings = apply_rules(
@@ -117,7 +217,7 @@ def test_failed_logon_equal_timestamps_do_not_crash_or_duplicate():
 
 def test_failed_logon_without_timestamps_does_not_claim_a_time_window():
     rows = [
-        {"EventID": 4625, "IpAddress": "203.0.113.8"}
+        {**SECURITY_AUDIT, "EventID": 4625, "IpAddress": "203.0.113.8"}
         for _ in range(10)
     ]
     finding = apply_rules(
@@ -137,12 +237,12 @@ def test_rdp_offhours_uses_configured_local_offset(monkeypatch):
     metadata = _meta("rdp_logon_offhours", tool_id="chainsaw")
 
     business_hours = apply_rules(
-        {"items": [{"EventID": 4624, "LogonType": 10, "Timestamp": "2025-01-01T00:00:00Z"}]},
+        {"items": [{**SECURITY_AUDIT, "EventID": 4624, "LogonType": 10, "Timestamp": "2025-01-01T00:00:00Z"}]},
         "",
         metadata,
     )
     off_hours = apply_rules(
-        {"items": [{"EventID": 4624, "LogonType": 10, "Timestamp": "2025-01-01T12:00:00Z"}]},
+        {"items": [{**SECURITY_AUDIT, "EventID": 4624, "LogonType": 10, "Timestamp": "2025-01-01T12:00:00Z"}]},
         "",
         metadata,
     )
@@ -155,11 +255,13 @@ def test_rdp_offhours_uses_configured_local_offset(monkeypatch):
 def test_service_install_supports_system_7045_image_path():
     rows = [
         {
+            **SYSTEM_SCM,
             "EventID": 7045,
             "ServiceName": "case-service",
             "ImagePath": "C:\\Users\\Public\\svc.exe",
         },
         {
+            **SYSTEM_SCM,
             "EventID": 7045,
             "ServiceName": "normal-service",
             "ImagePath": "C:\\Windows\\System32\\svchost.exe -k netsvcs",
@@ -178,11 +280,13 @@ def test_service_install_supports_system_7045_image_path():
 def test_new_account_requires_privileged_group_and_bounded_time():
     rows = [
         {
+            **SECURITY_AUDIT,
             "EventID": 4720,
             "TargetUserName": "ordinary-user",
             "Timestamp": "2025-01-01T00:00:00Z",
         },
         {
+            **SECURITY_AUDIT,
             "EventID": 4732,
             "MemberName": "ordinary-user",
             "TargetUserName": "Users",
@@ -190,11 +294,13 @@ def test_new_account_requires_privileged_group_and_bounded_time():
             "Timestamp": "2025-01-01T00:01:00Z",
         },
         {
+            **SECURITY_AUDIT,
             "EventID": 4720,
             "TargetUserName": "stale-user",
             "Timestamp": "2025-01-01T00:00:00Z",
         },
         {
+            **SECURITY_AUDIT,
             "EventID": 4732,
             "MemberName": "stale-user",
             "TargetUserName": "Administrators",
@@ -202,18 +308,21 @@ def test_new_account_requires_privileged_group_and_bounded_time():
             "Timestamp": "2025-01-01T02:00:00Z",
         },
         {
+            **SECURITY_AUDIT,
             "EventID": 4720,
             "TargetUserName": "fresh-user",
             "Timestamp": "2025-01-01T00:00:00Z",
         },
         {
+            **SECURITY_AUDIT,
             "EventID": 4732,
             "MemberName": "fresh-user",
             "TargetUserName": "Administrators",
             "Timestamp": "2025-01-01T00:30:00Z",
         },
-        {"EventID": 4720, "TargetUserName": "untimed-user"},
+        {**SECURITY_AUDIT, "EventID": 4720, "TargetUserName": "untimed-user"},
         {
+            **SECURITY_AUDIT,
             "EventID": 4732,
             "MemberName": "untimed-user",
             "TargetSid": "S-1-5-32-551",
@@ -246,6 +355,13 @@ def test_amcache_header_benign_and_high_confidence_rows():
             "FullPath": "C:\\Users\\alice\\tool.exe",
             "Signing Status": "unsigned",
         },
+        {"FullPath": "C:\\Temp\\unknown.exe"},
+        {
+            "ApplicationName": "explorer.exe",
+            "FullPath": "C:\\Windows\\explorer.exe",
+            "Associated": "yes",
+            "Notes": "mimikatz investigation notes",
+        },
         {"FullPath": "C:\\Users\\Public\\known.exe", "Associated": "known"},
     ]
     findings = apply_rules(
@@ -266,7 +382,12 @@ def test_amcache_header_benign_and_high_confidence_rows():
         "amcache_credential_dump_tool",
         "amcache_signing_status_invalid",
     }
-    assert by_rule["amcache_credential_dump_tool"].severity == "critical"
+    assert by_rule["amcache_unassociated_in_temp"].severity == "medium"
+    assert by_rule["amcache_unassociated_in_temp"].category == "artifact_anomaly"
+    assert by_rule["amcache_credential_dump_tool"].severity == "high"
+    assert "does not prove execution" in by_rule[
+        "amcache_credential_dump_tool"
+    ].alternative_explanation
 
 
 def test_mft_and_prefetch_concrete_matchers():
@@ -296,6 +417,13 @@ def test_mft_and_prefetch_concrete_matchers():
         "timestomp_inconsistency",
         "ads_alternate_data_stream",
     }
+    deleted = next(
+        finding
+        for finding in mft_findings
+        if finding.rule_id == "deleted_executable_in_temp"
+    )
+    assert deleted.severity == "medium"
+    assert deleted.category == "file_activity"
 
     prefetch_rows = [
         {
@@ -327,6 +455,22 @@ def test_mft_and_prefetch_concrete_matchers():
         "prefetch_with_credential_tools",
         "prefetch_referenced_lsass_dump",
     }
+    lsass_dump = next(
+        finding
+        for finding in prefetch_findings
+        if finding.rule_id == "prefetch_referenced_lsass_dump"
+    )
+    assert lsass_dump.severity == "high"
+    assert "does not prove credential extraction" in lsass_dump.alternative_explanation
+    credential_tool = next(
+        finding
+        for finding in prefetch_findings
+        if finding.rule_id == "prefetch_with_credential_tools"
+    )
+    assert credential_tool.severity == "high"
+    assert "not successful credential extraction" in (
+        credential_tool.alternative_explanation
+    )
 
 
 def test_prefetch_uses_only_the_executable_for_path_and_tool_rules():
@@ -363,6 +507,27 @@ def test_prefetch_uses_only_the_executable_for_path_and_tool_rules():
     assert len(findings) == 1
     assert findings[0].rule_id == "prefetch_with_credential_tools"
     assert "nanodump.exe" in findings[0].description
+
+
+def test_prefetch_lsass_binary_reference_does_not_claim_a_memory_dump():
+    findings = apply_rules(
+        {
+            "items": [
+                {
+                    "ExecutableName": "TASKMGR.EXE",
+                    "ExecutablePath": "C:\\Windows\\System32\\Taskmgr.exe",
+                    "FilesLoaded": (
+                        "C:\\Windows\\System32\\LSASS.EXE;"
+                        "C:\\Windows\\System32\\KERNEL32.DLL"
+                    ),
+                }
+            ]
+        },
+        "",
+        _meta("prefetch_referenced_lsass_dump", tool_id="pecmd"),
+    )
+
+    assert findings == []
 
 
 def test_prefetch_single_file_cannot_claim_relative_recency():
@@ -425,6 +590,17 @@ def test_registry_structured_and_text_matchers():
         {}, raw, _meta("image_file_execution_debugger", tool_id="regripper")
     )
     assert len(ifeo) == 1
+
+    generic_ifeo = (
+        "HKLM\\Software\\Microsoft\\Windows NT\\CurrentVersion\\"
+        "Image File Execution Options\\notepad.exe\n"
+        "  Debugger = C:\\Program Files\\Debugger\\vsjitdebugger.exe\n"
+    )
+    assert apply_rules(
+        {},
+        generic_ifeo,
+        _meta("image_file_execution_debugger", tool_id="regripper"),
+    ) == []
 
 
 def test_regripper_userassist_raw_temp_execution_needs_no_signature_field():
@@ -645,7 +821,8 @@ def test_real_secret_in_example_file_is_not_suppressed():
 def test_csv_surplus_columns_do_not_create_mixed_json_keys(tmp_path):
     report_path = tmp_path / "evtxecmd.csv"
     report_path.write_text(
-        "EventID,Computer\n1102,host01,unexpected-value\n",
+        "EventID,Channel,Provider,Computer\n"
+        "1102,Security,Microsoft-Windows-Eventlog,host01,unexpected-value\n",
         encoding="utf-8",
     )
 
@@ -673,7 +850,8 @@ def test_csv_surplus_columns_do_not_create_mixed_json_keys(tmp_path):
 def test_csv_surplus_key_never_overwrites_a_real_header(tmp_path):
     report_path = tmp_path / "evtxecmd.csv"
     report_path.write_text(
-        "EventID,__extra_fields__\n1102,legitimate-value,unexpected-value\n",
+        "EventID,Channel,Provider,__extra_fields__\n"
+        "1102,Security,Microsoft-Windows-Eventlog,legitimate-value,unexpected-value\n",
         encoding="utf-8",
     )
 
@@ -846,11 +1024,13 @@ def test_same_second_distinct_events_are_not_deduplicated():
         parsed_output={
             "items": [
                 {
+                    **SECURITY_EVENTLOG,
                     "EventID": 1102,
                     "Timestamp": "2025-01-01T00:00:00Z",
                     "SubjectUserName": "alice",
                 },
                 {
+                    **SECURITY_EVENTLOG,
                     "EventID": 1102,
                     "Timestamp": "2025-01-01T00:00:00Z",
                     "SubjectUserName": "bob",
@@ -981,7 +1161,8 @@ def test_oversized_ndjson_record_is_skipped_but_tail_is_analyzed(tmp_path):
     output.write_text(
         '{"EventID":4624,"padding":"'
         + ("x" * CASE_A_MAX)
-        + '"}\n{"EventID":1102}\n',
+        + '"}\n{"EventID":1102,"Channel":"Security",'
+        '"Provider":"Microsoft-Windows-Eventlog"}\n',
         encoding="utf-8",
     )
     result = ExecutionResult(
@@ -1019,6 +1200,7 @@ def _service_install_result(count: int) -> ExecutionResult:
         parsed_output={
             "items": [
                 {
+                    **SECURITY_AUDIT,
                     "EventID": 4697,
                     "ServiceFileName": f"%TEMP%\\service-{index}.exe",
                 }
@@ -1057,19 +1239,22 @@ def test_finding_limit_keeps_critical_tail_after_noisy_batch(tmp_path):
     with output.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["EventID", "ServiceFileName"],
+            fieldnames=["EventID", "Channel", "Provider", "ServiceFileName"],
         )
         writer.writeheader()
         for index in range(600):
             writer.writerow(
                 {
+                    **SECURITY_AUDIT,
                     "EventID": 4697,
                     "ServiceFileName": f"%TEMP%\\noisy-{index}.exe",
                 }
             )
         for _ in range(600, 5_000):
             writer.writerow({"EventID": 1, "ServiceFileName": ""})
-        writer.writerow({"EventID": 1102, "ServiceFileName": ""})
+        writer.writerow(
+            {**SECURITY_EVENTLOG, "EventID": 1102, "ServiceFileName": ""}
+        )
 
     metadata = _meta(
         "service_install_4697",
@@ -1113,6 +1298,8 @@ def _write_cross_batch_evtx_csv(
             handle,
             fieldnames=[
                 "EventID",
+                "Channel",
+                "Provider",
                 "TimeCreated",
                 "IpAddress",
                 "TargetUserName",
@@ -1123,10 +1310,11 @@ def _write_cross_batch_evtx_csv(
         writer.writeheader()
         final_row = 10_002 if duplicate_terminals else 5_002
         for row_number in range(1, final_row + 1):
-            row: dict[str, object] = {"EventID": 1}
+            row: dict[str, object] = {**SECURITY_AUDIT, "EventID": 1}
             if 4_477 <= row_number <= 4_486:
                 failure_number = row_number - 4_477
                 row = {
+                    **SECURITY_AUDIT,
                     "EventID": 4625,
                     "TimeCreated": (
                         start + timedelta(seconds=failure_number * failure_step_seconds)
@@ -1135,12 +1323,14 @@ def _write_cross_batch_evtx_csv(
                 }
             elif row_number == 4_487:
                 row = {
+                    **SECURITY_AUDIT,
                     "EventID": 4720,
                     "TimeCreated": start.isoformat(),
                     "TargetUserName": "boundary-user",
                 }
             elif row_number == 5_001:
                 row = {
+                    **SECURITY_AUDIT,
                     "EventID": 4732,
                     "TimeCreated": (
                         start + timedelta(seconds=grouped_after_seconds)
@@ -1151,6 +1341,7 @@ def _write_cross_batch_evtx_csv(
                 }
             elif row_number == 5_002:
                 row = {
+                    **SECURITY_AUDIT,
                     "EventID": 4624,
                     "TimeCreated": (
                         start + timedelta(seconds=success_after_seconds)
@@ -1159,6 +1350,7 @@ def _write_cross_batch_evtx_csv(
                 }
             elif duplicate_terminals and row_number == 10_001:
                 row = {
+                    **SECURITY_AUDIT,
                     "EventID": 4732,
                     "TimeCreated": (
                         start + timedelta(seconds=grouped_after_seconds + 30)
@@ -1169,6 +1361,7 @@ def _write_cross_batch_evtx_csv(
                 }
             elif duplicate_terminals and row_number == 10_002:
                 row = {
+                    **SECURITY_AUDIT,
                     "EventID": 4624,
                     "TimeCreated": (
                         start + timedelta(seconds=success_after_seconds + 30)
@@ -1259,6 +1452,8 @@ def test_evtx_correlation_families_isolate_floods_and_report_eviction(tmp_path):
             handle,
             fieldnames=[
                 "EventID",
+                "Channel",
+                "Provider",
                 "TimeCreated",
                 "IpAddress",
                 "TargetUserName",
@@ -1269,6 +1464,7 @@ def test_evtx_correlation_families_isolate_floods_and_report_eviction(tmp_path):
         writer.writeheader()
         writer.writerow(
             {
+                **SECURITY_AUDIT,
                 "EventID": 4720,
                 "TimeCreated": start.isoformat(),
                 "TargetUserName": "isolated-account",
@@ -1277,12 +1473,14 @@ def test_evtx_correlation_families_isolate_floods_and_report_eviction(tmp_path):
         for index in range(9_999):
             writer.writerow(
                 {
+                    **SECURITY_AUDIT,
                     "EventID": 4625,
                     "IpAddress": f"203.0.{index // 256}.{index % 256}",
                 }
             )
         writer.writerow(
             {
+                **SECURITY_AUDIT,
                 "EventID": 4732,
                 "TimeCreated": (start + timedelta(seconds=60)).isoformat(),
                 "TargetUserName": "Administrators",
@@ -1305,11 +1503,18 @@ def test_evtx_correlation_families_isolate_floods_and_report_eviction(tmp_path):
 def test_exact_final_correlation_carry_cap_does_not_claim_truncation(tmp_path):
     output = tmp_path / "exact-correlation-family-cap.csv"
     with output.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["EventID", "TargetUserName"])
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["EventID", "Channel", "Provider", "TargetUserName"],
+        )
         writer.writeheader()
         for index in range(10_000):
             writer.writerow(
-                {"EventID": 4720, "TargetUserName": f"boundary-user-{index}"}
+                {
+                    **SECURITY_AUDIT,
+                    "EventID": 4720,
+                    "TargetUserName": f"boundary-user-{index}",
+                }
             )
 
     analysis = _analyze_cross_batch_evtx_csv(output)
@@ -1470,9 +1675,9 @@ def test_oversized_csv_record_is_skipped_but_tail_is_analyzed(tmp_path):
     output = tmp_path / "events.csv"
     oversized = "x" * (csv.field_size_limit() + 1)
     output.write_text(
-        "EventID,Payload\n"
-        f'4625,"{oversized}"\n'
-        '1102,"tail"\n',
+        "EventID,Channel,Provider,Payload\n"
+        f'4625,Security,Microsoft-Windows-Security-Auditing,"{oversized}"\n'
+        "1102,Security,Microsoft-Windows-Eventlog,tail\n",
         encoding="utf-8",
     )
     analysis = analyze_one(
@@ -1499,12 +1704,18 @@ def test_oversized_csv_record_is_skipped_but_tail_is_analyzed(tmp_path):
 
 def test_wide_csv_record_cannot_exceed_batch_budget(tmp_path):
     output = tmp_path / "wide-events.csv"
-    fields = ["EventID", *(f"Field{index}" for index in range(43))]
+    fields = ["EventID", "Channel", "Provider", *(f"Field{index}" for index in range(43))]
     with output.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
-        writer.writerow({"EventID": 4625, **{name: "x" * 100_000 for name in fields[1:]}})
-        writer.writerow({"EventID": 1102})
+        writer.writerow(
+            {
+                **SECURITY_AUDIT,
+                "EventID": 4625,
+                **{name: "x" * 100_000 for name in fields[3:]},
+            }
+        )
+        writer.writerow({**SECURITY_EVENTLOG, "EventID": 1102})
 
     analysis = analyze_one(
         ExecutionResult(
@@ -1532,9 +1743,10 @@ def test_oversized_cr_only_csv_record_keeps_tail_detection(tmp_path):
     output = tmp_path / "classic-mac-events.csv"
     output.write_bytes(
         (
-            "EventID,Payload\r4625,"
+            "EventID,Channel,Provider,Payload\r"
+            "4625,Security,Microsoft-Windows-Security-Auditing,"
             + ("x" * (CASE_B_MAX + 1))
-            + "\r1102,tail\r"
+            + "\r1102,Security,Microsoft-Windows-Eventlog,tail\r"
         ).encode()
     )
 
@@ -1563,7 +1775,12 @@ def test_oversized_cr_only_csv_record_keeps_tail_detection(tmp_path):
 def test_large_jsonl_stream_keeps_tail_detection(tmp_path):
     output = tmp_path / "chainsaw.jsonl"
     benign = '{"EventID": 1, "padding": "' + ("x" * 90_000) + '"}\n'
-    output.write_text(benign * 47 + '{"EventID": 1102}\n', encoding="utf-8")
+    output.write_text(
+        benign * 47
+        + '{"EventID":1102,"Channel":"Security",'
+        '"Provider":"Microsoft-Windows-Eventlog"}\n',
+        encoding="utf-8",
+    )
     assert output.stat().st_size > CASE_B_MAX
 
     analysis = analyze_one(

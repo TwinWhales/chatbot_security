@@ -14,6 +14,15 @@ from forensicagent.scanner.types import Inventory
 from forensicagent.selector.types import Plan
 
 
+def event_namespace(entry: dict[str, Any]) -> str:
+    parts = [
+        str(entry[key])
+        for key in ("channel", "provider", "event_id")
+        if entry.get(key) not in (None, "")
+    ]
+    return " / ".join(parts) or "-"
+
+
 @dataclass
 class ReportMeta:
     version: str = "0.0.1"
@@ -172,6 +181,8 @@ class Report:
                     "severity": finding.severity,
                     "tool_id": bundle.tool_id,
                     "event_id": finding.evidence_ref.event_id,
+                    "channel": finding.evidence_ref.channel,
+                    "provider": finding.evidence_ref.provider,
                     "title": finding.title,
                     "source_file": finding.evidence_ref.source_file,
                     "annotation_status": self.annotation_for(finding.fingerprint)[

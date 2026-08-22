@@ -170,7 +170,12 @@ def test_finding_timeline_normalizes_utc_and_separates_bad_timestamps(tmp_path):
     findings = [
         Finding(
             title="offset",
-            evidence_ref=EvidenceRef(timestamp="2025-01-01T03:00:00+03:00"),
+            evidence_ref=EvidenceRef(
+                timestamp="2025-01-01T03:00:00+03:00",
+                event_id=1102,
+                channel="Security",
+                provider="Microsoft-Windows-Eventlog",
+            ),
         ),
         Finding(
             title="naive",
@@ -207,6 +212,7 @@ def test_finding_timeline_normalizes_utc_and_separates_bad_timestamps(tmp_path):
     assert "2025-01-01 01:00:00" in markdown
     assert "not-a-time" in markdown
     assert "### Findings without a usable timestamp" in markdown
+    assert "Security / Microsoft-Windows-Eventlog / 1102" in markdown
 
     console = Console(record=True, width=240)
     render(report, console)
@@ -216,6 +222,7 @@ def test_finding_timeline_normalizes_utc_and_separates_bad_timestamps(tmp_path):
     assert "2025-01-01 01:00:00" in terminal
     assert "not-a-time" in terminal
     assert "Findings without a usable timestamp" in terminal
+    assert "Security / Microsoft-Windows-Eventlog / 1102" in terminal
 
 
 @settings(max_examples=50, deadline=None)

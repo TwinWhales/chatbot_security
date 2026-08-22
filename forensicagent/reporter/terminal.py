@@ -8,7 +8,7 @@ from rich.table import Table
 from rich.text import Text
 
 from forensicagent.analyzer.types import SEVERITY_RANK, Finding
-from forensicagent.reporter.types import Report
+from forensicagent.reporter.types import Report, event_namespace
 from forensicagent.ui_text import safe_text as _safe_text
 
 _SEV_COLORS = {
@@ -22,6 +22,27 @@ _SEV_COLORS = {
 
 def _sev_text(sev: str) -> Text:
     return Text(sev, style=_SEV_COLORS.get(sev, "white"))
+
+
+def _compact(value: object, limit: int = 300) -> str:
+    """Keep untrusted report fields readable and bounded in compact views."""
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _coverage_label(warning: str) -> str:
+    """Describe coverage loss without repeating paths or raw parser errors."""
+    value = warning.casefold()
+    if "correlation" in value:
+        return "배치 간 이벤트 상관분석 범위가 설정 한도를 넘어 일부 축소됨"
+    if "integrity" in value:
+        return "아티팩트 무결성 문제로 일부 결과가 분석에서 제외됨"
+    if "record" in value and any(
+        token in value for token in ("oversized", "malformed", "above")
+    ):
+        return "대형 또는 비정상 레코드 일부가 분석에서 제외됨(원본 유지)"
+    if "could not be parsed" in value or "unreadable" in value:
+        return "일부 아티팩트를 파싱하지 못함(원본 유지)"
+    return "분석 범위 경고가 기록됨(상세 내용은 /report 확인)"
 
 
 def render_summary(
@@ -45,7 +66,8 @@ def render_summary(
     body.append(f"{s.total_findings}건 ({severity_line})\n")
     body.append("도구: ", style="bold")
     body.append(
-        f"성공 {s.tools_run}, 실패 {s.tools_failed}, 건너뜀 {s.tools_skipped}\n"
+        f"실행 {s.tools_run}, 문제 포함 {s.tools_failed}, "
+        f"전부 건너뜀 {s.tools_skipped}\n"
     )
     body.append("분석 범위: ", style="bold")
     if (
@@ -79,25 +101,99 @@ def render_summary(
         console.print(
             "[yellow]탐지 항목이 없습니다. 이는 침해가 없다는 증명은 아닙니다.[/]"
         )
-        return
-
-    table = Table(title=f"우선 확인 항목 (최대 {max_findings}건)", show_lines=False)
-    table.add_column("severity")
-    table.add_column("status")
-    table.add_column("ref")
-    table.add_column("tool")
-    table.add_column("category")
-    table.add_column("title", overflow="fold")
-    for tool_id, finding in findings[:max_findings]:
-        table.add_row(
-            _sev_text(finding.severity),
-            _safe_text(report.annotation_for(finding.fingerprint)["status"]),
-            _safe_text(finding.fingerprint[:12]),
-            _safe_text(tool_id),
-            _safe_text(finding.category),
-            _safe_text(finding.title),
+    else:
+        console.print(
+            _safe_text(
+                f"핵심 탐지 {len(findings)}건 (상위 {min(len(findings), max_findings)}건 표시)",
+                style="bold",
+            )
         )
-    console.print(table)
+        for tool_id, finding in findings[:max_findings]:
+            ref = finding.evidence_ref
+            namespace = event_namespace(ref.to_dict())
+            source_name = (
+                ref.source_file.replace("\\", "/").rsplit("/", 1)[-1] or "-"
+            )
+            method = {
+                "rule": "규칙 기반",
+                "llm": "LLM 의미판정",
+            }.get(finding.source, finding.source or "알 수 없음")
+            detail = Text()
+            rows = [
+                ("시각", _compact(ref.timestamp, 80) or "-"),
+                ("관련 파일", _compact(source_name, 160)),
+                ("이벤트", _compact(namespace, 240)),
+                ("탐지 방식", f"{_compact(method, 80)} / {_compact(tool_id, 80)}"),
+                ("규칙", _compact(finding.rule_id, 160) or "-"),
+                ("근거", _compact(finding.description, 500) or "기록 없음"),
+                ("신뢰도", f"{finding.confidence:.0%}"),
+            ]
+            if finding.alternative_explanation:
+                rows.append(
+                    ("대안 설명", _compact(finding.alternative_explanation, 400))
+                )
+            if finding.suggested_followup:
+                rows.append(("후속 확인", _compact(finding.suggested_followup, 300)))
+            rows.append(
+                (
+                    "상태 / ref",
+                    f"{_compact(report.annotation_for(finding.fingerprint)['status'], 40)}"
+                    f" / {_compact(finding.fingerprint[:12], 12)}",
+                )
+            )
+            for index, (label, value) in enumerate(rows):
+                detail.append(f"{label}: ", style="bold")
+                detail.append_text(_safe_text(value))
+                if index < len(rows) - 1:
+                    detail.append("\n")
+            console.print(
+                Panel(
+                    detail,
+                    title=_safe_text(
+                        f"[{finding.severity.upper()}] {_compact(finding.title, 180)}"
+                    ),
+                    border_style=_SEV_COLORS.get(finding.severity, "white"),
+                )
+            )
+        if len(findings) > max_findings:
+            console.print(
+                _safe_text(
+                    f"나머지 {len(findings) - max_findings}건은 /report에서 확인하세요.",
+                    style="dim",
+                )
+            )
+
+    issues: list[str] = []
+    for bundle in report.tool_bundles:
+        statuses: dict[str, int] = {}
+        for result in bundle.execution:
+            if result.status != "success":
+                statuses[result.status] = statuses.get(result.status, 0) + 1
+        for status, count in sorted(statuses.items()):
+            issues.append(f"{bundle.tool_id}: {status} {count}건")
+        if bundle.analysis:
+            labels: dict[str, int] = {}
+            for warning in bundle.analysis.coverage_warnings:
+                label = _coverage_label(warning)
+                labels[label] = labels.get(label, 0) + 1
+            for label, count in labels.items():
+                issues.append(f"{bundle.tool_id}: {label} ({count}건)")
+            if bundle.analysis.finding_limit_reached:
+                issues.append(f"{bundle.tool_id}: finding 표시 한도에 도달함")
+            if bundle.analysis.llm_failed:
+                issues.append(f"{bundle.tool_id}: LLM 의미판정을 완료하지 못함")
+    if s.depth_limit_hit:
+        issues.append("스캔 깊이 한도에 도달함")
+    if s.unreadable_paths:
+        issues.append(f"읽지 못한 경로 {s.unreadable_paths}개")
+    if s.reparse_paths:
+        issues.append(f"제외된 reparse 경로 {s.reparse_paths}개")
+    if s.oversized_files:
+        issues.append(f"1.5 GiB 이상으로 제외된 파일 {s.oversized_files}개")
+    if issues:
+        console.print("[bold yellow]분석 한계[/]")
+        for issue in dict.fromkeys(issues):
+            console.print(_safe_text(f"- {issue}"))
 
 
 def render_summary_narrative(text: str, console: Console) -> None:
@@ -115,13 +211,13 @@ def _render_timeline(report: Report, console: Console) -> None:
         table.add_column("status")
         table.add_column("ref")
         table.add_column("tool")
-        table.add_column("event")
+        table.add_column("event namespace")
         table.add_column("title", overflow="fold")
         for item in timeline["events"]:
             timestamp = str(item["timestamp_utc"])
             if item["timezone_assumed"]:
                 timestamp += " (assumed)"
-            event_id = item["event_id"] if item["event_id"] is not None else "-"
+            event_id = event_namespace(item)
             table.add_row(
                 _safe_text(timestamp),
                 _safe_text(item["timestamp_original"]),
@@ -141,10 +237,10 @@ def _render_timeline(report: Report, console: Console) -> None:
         table.add_column("status")
         table.add_column("ref")
         table.add_column("tool")
-        table.add_column("event")
+        table.add_column("event namespace")
         table.add_column("title", overflow="fold")
         for item in timeline["undated"]:
-            event_id = item["event_id"] if item["event_id"] is not None else "-"
+            event_id = event_namespace(item)
             table.add_row(
                 _safe_text(item["reason"]),
                 _safe_text(item["timestamp_original"]),
@@ -327,6 +423,28 @@ def render(report: Report, console: Console) -> None:
             console.print(line)
             if f.description:
                 console.print(_safe_text(f"    {f.description[:300]}"))
+            if f.evidence_ref.evidence_id:
+                console.print(
+                    _safe_text(
+                        f"    evidence ID: {f.evidence_ref.evidence_id}", style="dim"
+                    )
+                )
+            if f.evidence_ref.channel or f.evidence_ref.provider:
+                console.print(
+                    _safe_text(
+                        "    namespace: "
+                        f"{f.evidence_ref.channel or 'unknown'} / "
+                        f"{f.evidence_ref.provider or 'unknown'}",
+                        style="dim",
+                    )
+                )
+            if f.alternative_explanation:
+                console.print(
+                    _safe_text(
+                        f"    alternative: {f.alternative_explanation}",
+                        style="dim",
+                    )
+                )
             if f.suggested_followup:
                 console.print(
                     _safe_text(f"    followup: {f.suggested_followup}", style="dim")

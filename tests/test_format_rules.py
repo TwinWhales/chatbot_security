@@ -35,6 +35,8 @@ def test_browser_download_rule_uses_structured_download_rows():
     assert [finding.rule_id for finding in findings] == ["browser_suspicious_download"]
     assert findings[0].evidence_ref.timestamp == "2026-01-02T03:04:05Z"
     assert findings[0].evidence_ref.source_file == "History"
+    assert findings[0].category == "file_acquisition"
+    assert "does not prove execution" in findings[0].alternative_explanation
 
 
 def test_pcap_rules_are_conservative_and_preserve_packet_time():
@@ -63,6 +65,7 @@ def test_pcap_rules_are_conservative_and_preserve_packet_time():
         finding for finding in findings if finding.rule_id == "pcap_suspicious_remote_port"
     )
     assert remote.evidence_ref.timestamp.endswith("Z")
+    assert {finding.category for finding in findings} == {"network_anomaly"}
 
 
 def test_fls_rule_requires_deleted_marker_path_and_executable_suffix():

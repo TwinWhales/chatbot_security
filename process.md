@@ -51,8 +51,9 @@ REPL이 열리면 다음 순서로 입력한다.
 - `/analyze`: CSV의 비정상 추가 열이 있어도 중단되지 않아야 한다.
 - `/report`: JSON과 Markdown에 finding 타임라인, 원문 시각, coverage ledger,
   입력·출력 hash와 provenance가 기록된다.
-- `/summary`: 최근 `/report`의 집계만 요약하며 원본 증거·명령·secret은 모델에
-  보내지 않는다.
+- `/summary`: 최근 `/report`의 상위 finding에 대해 시각·관련 파일명·이벤트
+  namespace·탐지 방식·규칙·근거·신뢰도·대안 설명과 분석 한계를 요약한다.
+  원본 증거·명령·secret은 모델에 보내지 않는다.
 
 분석가 판정도 시험하려면 `/show findings`에서 fingerprint를 확인한 뒤 실행한다.
 

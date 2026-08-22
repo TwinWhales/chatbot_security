@@ -49,10 +49,21 @@ def test_finding_cap_prioritizes_a_later_critical_indicator():
         ],
     )
     rows = [
-        {"EventID": 4697, "ServiceFileName": f"%TEMP%\\svc-{index}.exe"}
+        {
+            "EventID": 4697,
+            "Channel": "Security",
+            "Provider": "Microsoft-Windows-Security-Auditing",
+            "ServiceFileName": f"%TEMP%\\svc-{index}.exe",
+        }
         for index in range(501)
     ]
-    rows.append({"EventID": 1102})
+    rows.append(
+        {
+            "EventID": 1102,
+            "Channel": "Security",
+            "Provider": "Microsoft-Windows-Eventlog",
+        }
+    )
 
     findings = apply_rules({"items": rows}, "", meta)
 

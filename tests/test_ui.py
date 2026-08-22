@@ -8,6 +8,13 @@ from forensicagent.cli.nl_router import handle
 from forensicagent.cli.repl import do_scenario
 from forensicagent.cli.ui import render_inventory, render_oversized_exclusions
 from forensicagent.scanner.types import Evidence, Inventory
+from forensicagent.ui_text import safe_text
+
+
+def test_safe_text_preserves_layout_and_uses_console_portable_control_replacement():
+    rendered = safe_text("first\nsecond\tvalue\x1b").plain
+
+    assert rendered == "first\nsecond\tvalue?"
 
 
 def test_inventory_preview_is_bounded():

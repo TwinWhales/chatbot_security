@@ -406,16 +406,24 @@ def _command_dependencies(
     argv: list[str],
     *,
     evidence_path: Path,
+    generated_dir: Path,
 ) -> list[dict[str, object]]:
     """Hash direct regular-file command arguments used by the tool invocation."""
     evidence = evidence_path.resolve(strict=True)
+    generated = generated_dir.resolve(strict=False)
     dependencies: list[dict[str, object]] = []
     seen: set[Path] = set()
     for argument in argv:
         candidate = Path(argument)
         try:
             resolved = candidate.resolve(strict=True)
-            if resolved == evidence or resolved in seen or not resolved.is_file():
+            if (
+                resolved == evidence
+                or resolved == generated
+                or generated in resolved.parents
+                or resolved in seen
+                or not resolved.is_file()
+            ):
                 continue
             size, sha256 = hash_file(resolved)
         except (OSError, RuntimeError):
@@ -462,7 +470,11 @@ def _prepare_job(
     adapter = get_adapter(job.metadata)
     argv, selected_template = _build_command(adapter, job, placeholder)
     provenance = _tool_provenance(job.metadata, preflight, argv=argv)
-    dependencies = _command_dependencies(argv, evidence_path=evidence)
+    dependencies = _command_dependencies(
+        argv,
+        evidence_path=evidence,
+        generated_dir=placeholder,
+    )
     argv_fingerprint = _canonical_argv(argv, placeholder)
     settings_payload = {
         "app_version": __version__,
@@ -712,7 +724,9 @@ def _execute_one(
         if _canonical_argv(argv, generated_dir) != prepared.argv_fingerprint:
             raise ValueError("command changed after fingerprinting")
         dependencies = _command_dependencies(
-            argv, evidence_path=Path(prepared.input_path)
+            argv,
+            evidence_path=Path(prepared.input_path),
+            generated_dir=generated_dir,
         )
         if dependencies != prepared.provenance.get("command_dependencies"):
             raise ValueError("tool dependency changed after fingerprinting")
@@ -840,7 +854,9 @@ def _execute_one(
         )
 
     final_dependencies = _command_dependencies(
-        argv, evidence_path=Path(prepared.input_path)
+        argv,
+        evidence_path=Path(prepared.input_path),
+        generated_dir=generated_dir,
     )
     if final_dependencies != prepared.provenance.get("command_dependencies"):
         result.warnings.append(

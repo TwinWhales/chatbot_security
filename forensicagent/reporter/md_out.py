@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from forensicagent.analyzer.types import SEVERITY_RANK, Finding
-from forensicagent.reporter.types import Report
+from forensicagent.reporter.types import Report, event_namespace
 
 
 def _single_line(value: object) -> str:
@@ -124,10 +124,10 @@ def write_md(report: Report, path: str | Path) -> Path:
     lines.append("")
     if timeline["events"]:
         lines.append(
-            "| time (UTC) | original timestamp | severity | status | tool | event | "
+            "| time (UTC) | original timestamp | severity | status | tool | event namespace | "
             "finding | fingerprint | title | source |"
         )
-        lines.append("|---|---|---|---|---|---:|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
         for item in timeline["events"]:
             timestamp = str(item["timestamp_utc"])
             if item["timezone_assumed"]:
@@ -137,7 +137,7 @@ def write_md(report: Report, path: str | Path) -> Path:
                 f"{_md_text(item['timestamp_original'])} | "
                 f"{_md_text(item['severity'])} | "
                 f"{_md_text(item['annotation_status'])} | {_md_text(item['tool_id'])} | "
-                f"{_md_text(item['event_id'] or '')} | "
+                f"{_md_text(event_namespace(item))} | "
                 f"{_inline_code(item['finding_id'])} | "
                 f"{_inline_code(item['fingerprint'][:12])} | "
                 f"{_md_text(item['title'])} | "
@@ -151,17 +151,17 @@ def write_md(report: Report, path: str | Path) -> Path:
         lines.append("### Findings without a usable timestamp")
         lines.append("")
         lines.append(
-            "| reason | original timestamp | severity | status | tool | event | "
+            "| reason | original timestamp | severity | status | tool | event namespace | "
             "finding | fingerprint | title | source |"
         )
-        lines.append("|---|---|---|---|---|---:|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
         for item in timeline["undated"]:
             lines.append(
                 f"| {_md_text(item['reason'])} | "
                 f"{_md_text(item['timestamp_original'])} | "
                 f"{_md_text(item['severity'])} | "
                 f"{_md_text(item['annotation_status'])} | "
-                f"{_md_text(item['tool_id'])} | {_md_text(item['event_id'] or '')} | "
+                f"{_md_text(item['tool_id'])} | {_md_text(event_namespace(item))} | "
                 f"{_inline_code(item['finding_id'])} | "
                 f"{_inline_code(item['fingerprint'][:12])} | "
                 f"{_md_text(item['title'])} | "
@@ -301,9 +301,24 @@ def write_md(report: Report, path: str | Path) -> Path:
                     lines.append(
                         f"    - source: {_inline_code(f.evidence_ref.source_file)}"
                     )
+                if f.evidence_ref.evidence_id:
+                    lines.append(
+                        f"    - evidence ID: {_inline_code(f.evidence_ref.evidence_id)}"
+                    )
+                if f.evidence_ref.channel or f.evidence_ref.provider:
+                    lines.append(
+                        "    - event namespace: "
+                        f"{_inline_code(f.evidence_ref.channel or 'unknown')} / "
+                        f"{_inline_code(f.evidence_ref.provider or 'unknown')}"
+                    )
                 if f.evidence_ref.raw_excerpt:
                     lines.append(
                         f"    - excerpt: {_inline_code(f.evidence_ref.raw_excerpt[:160])}"
+                    )
+                if f.alternative_explanation:
+                    lines.append(
+                        "    - alternative: "
+                        f"{_md_text(f.alternative_explanation)}"
                     )
                 if f.suggested_followup:
                     lines.append(f"    - followup: {_md_text(f.suggested_followup)}")

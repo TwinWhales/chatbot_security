@@ -287,7 +287,7 @@ def do_summary(state: SessionState, c) -> None:
         c.print("[yellow]먼저 /report 를 실행하세요.[/]")
         return
 
-    render_summary(report, c, include_finding_details=False)
+    render_summary(report, c)
     client = state.client()
     if client is None:
         c.print("[dim]no_llm 모드: 구조화 요약만 표시했습니다.[/]")

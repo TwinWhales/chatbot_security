@@ -44,29 +44,30 @@ usage_description: |
 
 suspicious_indicators:
   - id: rdp_logon_external_ip
-    pattern: "EventID 4624 + LogonType=10 (RemoteInteractive) + IpAddress 가 RFC1918 외부"
+    pattern: "Security/Microsoft-Windows-Security-Auditing EventID 4624 + LogonType=10 + 외부 IP"
     severity_baseline: high
     description: "외부 IP 에서의 RDP 로그온 성공"
   - id: failed_logon_burst
-    pattern: "EventID 4625 (실패) 가 동일 source_ip 또는 동일 target_username 으로 10건 이상"
+    pattern: "Security/Microsoft-Windows-Security-Auditing EventID 4625가 동일 주체로 10건 이상"
     severity_baseline: medium
     description: "5분 내 반복 실패 후보. 후속 4624 성공 여부를 별도로 확인한다."
   - id: service_install_4697
-    pattern: "EventID 4697 또는 7045 (서비스 설치) + ServicePath/ImagePath 가 %TEMP% / %APPDATA% / Public"
+    pattern: "Security-Auditing/4697 또는 System Service Control Manager/7045 + writable ServicePath/ImagePath"
     severity_baseline: high
     description: "비표준 경로의 서비스 설치는 흔한 persistence"
   - id: account_creation_4720
-    pattern: "EventID 4720 (계정 생성) + 곧이어 4732 (privileged group 추가)"
+    pattern: "Security/Microsoft-Windows-Security-Auditing EventID 4720 후 4732 privileged group 추가"
     severity_baseline: high
     description: "공격자가 backdoor 계정 생성 후 권한 부여하는 전형 패턴"
   - id: clear_log_event
-    pattern: "EventID 1102 (Security log cleared) 또는 104 (System log cleared)"
-    severity_baseline: critical
-    description: "공격자 흔적 제거 시도. 항상 critical."
+    pattern: "Microsoft-Windows-Eventlog Provider의 Security/1102 또는 System/104"
+    severity_baseline: high
+    description: "로그 삭제 사실은 확인되지만 정상 관리 작업 가능성을 별도로 검증한다."
 
 known_false_positives:
   - "정상 admin 작업: 로컬 도메인 관리자가 RDP 로 점검 (LogonType=10) 자체는 정상"
   - "Windows update 가 서비스 임시 설치 (4697) 후 즉시 제거하는 경우"
+  - "같은 Event ID를 사용하는 다른 Channel/Provider 이벤트는 보안 이벤트가 아님"
 
 reference_urls:
   - https://github.com/EricZimmerman/evtx

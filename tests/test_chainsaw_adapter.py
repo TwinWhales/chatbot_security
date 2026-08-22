@@ -14,6 +14,7 @@ from pathlib import Path
 
 from forensicagent.executor.adapter import get_adapter
 from forensicagent.executor.chainsaw_adapter import (
+    DEFAULT_EVENT_IDS,
     ChainsawAdapter,
     event_ids_for_file,
 )
@@ -77,6 +78,20 @@ def test_powershell_takes_precedence_and_is_not_treated_as_security():
 def test_unknown_channel_uses_small_cross_channel_fallback():
     ids = event_ids_for_file("host123.evtx")
     assert {"4104", "4697", "4720", "4732", "7045"} <= set(ids)
+
+
+def test_security_substring_is_not_mistaken_for_security_channel():
+    ids = event_ids_for_file(
+        "Microsoft-Windows-Security-Mitigations%4KernelMode.evtx"
+    )
+    assert ids == DEFAULT_EVENT_IDS
+
+
+def test_system_substring_is_not_mistaken_for_system_channel():
+    ids = event_ids_for_file(
+        "Microsoft-Windows-SystemEventsBroker%4Operational.evtx"
+    )
+    assert ids == DEFAULT_EVENT_IDS
 
 
 def test_system_and_sysmon_channels_get_channel_specific_ids():

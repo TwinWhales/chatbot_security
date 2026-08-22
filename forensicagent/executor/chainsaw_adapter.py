@@ -50,13 +50,13 @@ DEFAULT_EVENT_IDS: list[str] = [
 def event_ids_for_file(filename: str) -> list[str]:
     """파일명으로 채널을 추정해 검색할 Event ID 목록을 돌려준다."""
     f = filename.lower()
-    if "powershell" in f and "operational" in f:
+    if f == "microsoft-windows-powershell%4operational.evtx":
         return CHANNEL_EVENT_IDS["powershell"]
-    if "sysmon" in f and "operational" in f:
+    if f == "microsoft-windows-sysmon%4operational.evtx":
         return CHANNEL_EVENT_IDS["sysmon"]
-    if "security" in f:
+    if f == "security.evtx":
         return CHANNEL_EVENT_IDS["security"]
-    if f == "system.evtx" or "windows-system" in f:
+    if f == "system.evtx":
         return CHANNEL_EVENT_IDS["system"]
     return DEFAULT_EVENT_IDS
 

@@ -58,17 +58,17 @@ suspicious_indicators:
     severity_baseline: high
     description: "랜덤 이름 서비스는 malware persistence 전형"
   - id: image_file_execution_debugger
-    pattern: "Image File Execution Options 의 Debugger 값 설정 (sethc.exe, utilman.exe 등)"
-    severity_baseline: critical
-    description: "Sticky Keys 백도어 - 로그인 화면에서 SHIFT 5번으로 cmd.exe 실행"
+    pattern: "접근성 실행파일(sethc/utilman/osk 등)의 IFEO Debugger가 cmd/powershell을 가리킴"
+    severity_baseline: high
+    description: "로그인 화면 접근성 기능을 악용할 수 있는 고위험 persistence 설정; 실행 여부는 별도 확인"
   - id: applnit_dlls
     pattern: "Windows\\CurrentVersion\\Windows\\AppInit_DLLs 값에 비표준 DLL"
     severity_baseline: high
     description: "모든 user32.dll 로딩 프로세스에 주입되는 persistence"
   - id: winlogon_shell_modified
     pattern: "Winlogon\\Shell 이 explorer.exe 외 다른 값으로 변경"
-    severity_baseline: critical
-    description: "사용자 로그온 시 explorer.exe 대신 임의 바이너리 실행"
+    severity_baseline: high
+    description: "Explorer 외 shell persistence 설정; 실제 실행과 악성 여부는 별도 확인"
   - id: userassist_temp_execution
     pattern: "UserAssist 에 %TEMP% / Downloads 경로의 .exe 실행 기록"
     severity_baseline: medium

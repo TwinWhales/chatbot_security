@@ -95,6 +95,8 @@ def test_semantic_rules_emit_canonical_user_ip_and_process_entities():
             "items": [
                 {
                     "EventID": 4624,
+                    "Channel": "Security",
+                    "Provider": "Microsoft-Windows-Security-Auditing",
                     "LogonType": 10,
                     "IpAddress": "8.8.8.8:3389",
                     "TargetUserName": "DOMAIN\\Alice",
