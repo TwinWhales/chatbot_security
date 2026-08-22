@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from typing import Iterable
 
 from forensicagent import config as settings
@@ -41,6 +42,24 @@ def _finalize_run_specs(
     tools: dict[str, ToolMetadata],
     scenario: str | None,
 ) -> Plan:
+    owners: dict[str, str] = {}
+    for _, selection in sorted(
+        enumerate(plan.selected_tools),
+        key=lambda item: (-item[1].priority, item[0]),
+    ):
+        for target in selection.target_evidence:
+            key = os.path.normcase(os.path.abspath(target))
+            owners.setdefault(key, selection.tool_id)
+    for selection in plan.selected_tools:
+        selection.target_evidence = [
+            target
+            for target in selection.target_evidence
+            if owners[os.path.normcase(os.path.abspath(target))]
+            == selection.tool_id
+        ]
+    plan.selected_tools = [
+        selection for selection in plan.selected_tools if selection.target_evidence
+    ]
     populate_run_specs(plan.selected_tools, tools, scenario)
     return plan
 

@@ -210,6 +210,11 @@ def record_result(payload: dict[str, Any], result: ExecutionResult) -> None:
     job_key = resume.get("job_key")
     if not _is_sha256(job_key):
         return
+    if (
+        result.provenance.get("chainsaw_no_matches") is True
+        and not result.provenance.get("job_output_dir")
+    ):
+        return
     jobs = payload["jobs"]
     if job_key not in jobs and len(jobs) >= MAX_JOBS:
         raise StateError(f"execution state contains more than {MAX_JOBS} jobs")
@@ -245,26 +250,14 @@ def reusable_result(
         if not isinstance(job_output_dir, str) or not job_output_dir:
             return None, "previous attempt lacks verified output containment"
         safe_job_output_dir = contained_directory(job_output_dir, output_root)
-        chainsaw_no_matches = result.provenance.get("chainsaw_no_matches") is True
-        if chainsaw_no_matches:
-            if result.tool_id.casefold() != "chainsaw":
-                raise StateError("invalid Chainsaw no-match marker")
-            empty_output = _contained_regular_file(
-                safe_job_output_dir / "generated" / "chainsaw.jsonl",
-                Path(output_root).resolve(strict=True),
-            )
-            size, _ = hash_file(empty_output)
-            if size != 0:
-                raise StateError("cached Chainsaw no-match output is not empty")
         _validate_result_artifacts(result, Path(output_root))
         result.provenance = dict(result.provenance)
         result.provenance["output_root"] = str(Path(output_root).resolve(strict=True))
         result.provenance["job_output_dir"] = str(safe_job_output_dir)
         result.provenance["resume"] = dict(resume, reused=True)
-        # Parsed data is not an immutable artifact. Re-analyze verified raw
-        # artifacts, except for the independently revalidated empty Chainsaw
-        # output which deterministically represents zero records.
-        result.parsed_output = {"items": []} if chainsaw_no_matches else None
+        # Parsed data is not an immutable artifact. Re-analyze the verified raw
+        # artifact instead of trusting a mutable manifest copy.
+        result.parsed_output = None
         return result, ""
     except (OSError, StateError, ValueError, TypeError) as exc:
         return None, f"cached result rejected: {exc}"

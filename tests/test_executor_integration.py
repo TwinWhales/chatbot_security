@@ -374,7 +374,8 @@ def test_empty_chainsaw_jsonl_is_excluded_from_results(tmp_path, monkeypatch):
         "import sys\n"
         "out = Path(sys.argv[1])\n"
         "out.mkdir(parents=True, exist_ok=True)\n"
-        "(out / 'chainsaw.jsonl').touch()\n",
+        "(out / 'chainsaw.jsonl').touch()\n"
+        "print('Chainsaw completed with 0 hits')\n",
         encoding="utf-8",
     )
     template = f"{sys.executable} {{evidence_path}} {{output_dir}}"
@@ -383,20 +384,20 @@ def test_empty_chainsaw_jsonl_is_excluded_from_results(tmp_path, monkeypatch):
         "forensicagent.executor.executor.get_adapter",
         lambda meta: GenericAdapter(meta),
     )
+    raw_dir = tmp_path / "runs"
 
     result = execute(
         Plan(selected_tools=[_selection("chainsaw", template, [str(script)])]),
         {"chainsaw": metadata},
-        output_dir=tmp_path / "runs",
+        output_dir=raw_dir,
     ).results[0]
 
     assert result.status == "success"
     assert result.parsed_output == {"items": []}
-    assert not [item for item in result.artifacts if item.role == "generated"]
-    assert not any(
-        Path(item.path).name.casefold() == "chainsaw.jsonl"
-        for item in result.artifacts
-    )
+    assert result.stdout_path == ""
+    assert result.stderr_path == ""
+    assert result.artifacts == []
+    assert not [path for path in raw_dir.iterdir() if path.is_dir()]
     assert not any(
         item.get("path", "").casefold().endswith("chainsaw.jsonl")
         for item in result.to_dict()["artifacts"]
@@ -408,11 +409,12 @@ def test_empty_chainsaw_jsonl_is_excluded_from_results(tmp_path, monkeypatch):
     reused = execute(
         Plan(selected_tools=[_selection("chainsaw", template, [str(script)])]),
         {"chainsaw": metadata},
-        output_dir=tmp_path / "runs",
+        output_dir=raw_dir,
     ).results[0]
-    assert reused.provenance["resume"]["reused"] is True
+    assert reused.provenance["resume"]["reused"] is False
     assert reused.provenance["chainsaw_no_matches"] is True
     assert reused.parsed_output == {"items": []}
+    assert not [path for path in raw_dir.iterdir() if path.is_dir()]
 
 
 def test_nonempty_chainsaw_jsonl_remains_a_generated_result(tmp_path, monkeypatch):

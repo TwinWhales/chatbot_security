@@ -33,6 +33,7 @@ from forensicagent.executor.adapter import GenericAdapter, get_adapter
 from forensicagent.executor.runner import (
     collect_generated_artifacts,
     command_header_bytes,
+    contained_regular_file,
     hash_file,
     logical_tree_size,
     run_tool,
@@ -275,6 +276,8 @@ def _remove_if_empty(path: Path) -> None:
 
 
 def _has_substantive_output(result: ExecutionResult) -> bool:
+    if result.provenance.get("chainsaw_no_matches") is True:
+        return False
     if any(
         artifact.role in ("stdout", "generated") and artifact.size_bytes > 0
         for artifact in result.artifacts
@@ -342,7 +345,9 @@ def _prune_empty_success(
     result.stdout_path = ""
     result.stderr_path = ""
     result.artifacts = []
-    result.parsed_output = None
+    result.output_size_bytes = 0
+    if result.provenance.get("chainsaw_no_matches") is True:
+        result.provenance.pop("job_output_dir", None)
 
 
 def _adapter_accepts_preferred_template(adapter: GenericAdapter) -> bool:
@@ -740,15 +745,31 @@ def _execute_one(
         default_format=metadata.output_format,
         containment_root=output_dir,
     )
+    empty_chainsaw_outputs = [
+        artifact
+        for artifact in generated
+        if Path(artifact.path).name.casefold() == "chainsaw.jsonl"
+        and artifact.size_bytes == 0
+    ]
     chainsaw_no_matches = (
         result.status == "success"
         and metadata.tool_id.casefold() == "chainsaw"
-        and any(
-            Path(artifact.path).name.casefold() == "chainsaw.jsonl"
-            and artifact.size_bytes == 0
-            for artifact in generated
-        )
+        and bool(empty_chainsaw_outputs)
+        and not any(artifact.size_bytes > 0 for artifact in generated)
     )
+    if chainsaw_no_matches:
+        try:
+            empty_paths = [
+                contained_regular_file(artifact.path, output_dir)
+                for artifact in empty_chainsaw_outputs
+            ]
+            if any(path.stat().st_size != 0 for path in empty_paths):
+                raise OSError("Chainsaw output changed before empty cleanup")
+            for path in empty_paths:
+                path.unlink()
+        except OSError as exc:
+            chainsaw_no_matches = False
+            warnings.append(f"could not remove empty Chainsaw output safely: {exc}")
     if metadata.tool_id.casefold() == "chainsaw":
         generated = [
             artifact
@@ -1107,14 +1128,9 @@ def execute(
                             )
                     if reused is not None:
                         cached_job_output_dir = reused.provenance["job_output_dir"]
-                        cached_chainsaw_no_matches = (
-                            reused.provenance.get("chainsaw_no_matches") is True
-                        )
                         reused.provenance = dict(prepared.provenance)
                         reused.provenance["output_root"] = str(out_dir)
                         reused.provenance["job_output_dir"] = cached_job_output_dir
-                        if cached_chainsaw_no_matches:
-                            reused.provenance["chainsaw_no_matches"] = True
                         resume = reused.provenance.get("resume")
                         if isinstance(resume, dict):
                             reused.provenance["resume"] = dict(resume, reused=True)

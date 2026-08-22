@@ -51,8 +51,7 @@ def test_rag_reorders_candidates(monkeypatch):
     plan = select(_evtx_only_inventory(), _evtx_and_mem_tools(), use_llm=False, use_rag=True)
     assert plan.rag_used is True
     ids = [t.tool_id for t in plan.selected_tools]
-    assert ids[0] == "evtxecmd"          # higher RAG score sorted first
-    assert set(ids) == {"chainsaw", "evtxecmd"}   # evtx-only → no volatility3
+    assert ids == ["evtxecmd"]  # highest-ranked owner only
 
 
 def test_rag_partial_scores_do_not_reorder(monkeypatch):
@@ -69,7 +68,7 @@ def test_rag_partial_scores_do_not_reorder(monkeypatch):
         use_rag=True,
     )
 
-    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw"]
     assert plan.rag_used is False
 
 
@@ -93,7 +92,7 @@ def test_rag_rejects_scores_below_configured_similarity(monkeypatch):
         use_rag=True,
     )
 
-    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw"]
     assert plan.rag_used is False
 
 
@@ -118,7 +117,7 @@ def test_rag_near_tied_scores_do_not_reorder(monkeypatch):
         use_rag=True,
     )
 
-    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw"]
     assert plan.rag_used is False
 
 
@@ -139,7 +138,7 @@ def test_rag_used_false_when_complete_scores_keep_existing_order(monkeypatch):
         use_rag=True,
     )
 
-    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw"]
     assert plan.rag_used is False
 
 
@@ -147,8 +146,8 @@ def test_rag_none_falls_back_to_deterministic(monkeypatch):
     monkeypatch.setattr(retrieval_mod, "retrieve_tools", lambda q, **k: None)
     plan = select(_evtx_only_inventory(), _evtx_and_mem_tools(), use_llm=False, use_rag=True)
     assert plan.rag_used is False
-    # 순서 불변 = 결정론 필터 순서 (dict 삽입 순서: chainsaw, evtxecmd).
-    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    # 동점이면 결정론 필터 순서의 첫 후보가 owner다.
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw"]
 
 
 def test_rag_never_promotes_tool_outside_stage1(monkeypatch):
@@ -160,8 +159,7 @@ def test_rag_never_promotes_tool_outside_stage1(monkeypatch):
     plan = select(_evtx_only_inventory(), _evtx_and_mem_tools(), use_llm=False, use_rag=True)
     ids = [t.tool_id for t in plan.selected_tools]
     assert "volatility3" not in ids      # 증거(evtx)에 없는 도구는 절대 실행 계획에 없음
-    assert set(ids) == {"chainsaw", "evtxecmd"}
-    assert ids == ["chainsaw", "evtxecmd"]
+    assert ids == ["chainsaw"]
     assert plan.rag_used is False
 
 
@@ -182,8 +180,53 @@ def test_rag_invalid_score_does_not_complete_score_set(monkeypatch):
         use_rag=True,
     )
 
-    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw", "evtxecmd"]
+    assert [t.tool_id for t in plan.selected_tools] == ["chainsaw"]
     assert plan.rag_used is False
+
+
+def test_plan_shows_one_owner_per_target_but_keeps_unique_targets():
+    inventory = Inventory(
+        evidence_list=[
+            Evidence(
+                path="S.evtx",
+                filename="S.evtx",
+                size_bytes=1,
+                evidence_type="evtx_log",
+                detected_by="extension",
+            ),
+            Evidence(
+                path="notes.txt",
+                filename="notes.txt",
+                size_bytes=1,
+                evidence_type="text_log",
+                detected_by="extension",
+            ),
+        ]
+    )
+    tools = {
+        "evtx_owner": _meta(
+            "evtx_owner", category="log_analysis", applicable=["evtx_log"]
+        ),
+        "mixed_owner": _meta(
+            "mixed_owner",
+            category="log_analysis",
+            applicable=["evtx_log", "text_log"],
+        ),
+    }
+
+    plan = select(inventory, tools, use_llm=False, use_rag=False)
+
+    assert plan.stage_one_candidates == 2
+    assert [item.tool_id for item in plan.selected_tools] == [
+        "evtx_owner",
+        "mixed_owner",
+    ]
+    assert plan.selected_tools[0].target_evidence == ["S.evtx"]
+    assert plan.selected_tools[1].target_evidence == ["notes.txt"]
+    assert [spec.target_evidence for item in plan.selected_tools for spec in item.run_specs] == [
+        "S.evtx",
+        "notes.txt",
+    ]
 
 
 def test_rag_query_contains_filename_type_and_configured_threshold(monkeypatch):
