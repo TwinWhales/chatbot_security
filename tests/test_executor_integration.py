@@ -367,6 +367,118 @@ def test_zero_byte_generated_file_is_output_missing(tmp_path):
     assert [item.size_bytes for item in result.artifacts if item.role == "generated"] == [0]
 
 
+def test_empty_chainsaw_jsonl_is_excluded_from_results(tmp_path, monkeypatch):
+    script = tmp_path / "empty_chainsaw.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "out = Path(sys.argv[1])\n"
+        "out.mkdir(parents=True, exist_ok=True)\n"
+        "(out / 'chainsaw.jsonl').touch()\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {{evidence_path}} {{output_dir}}"
+    metadata = _metadata("chainsaw", template, output_format="jsonl")
+    monkeypatch.setattr(
+        "forensicagent.executor.executor.get_adapter",
+        lambda meta: GenericAdapter(meta),
+    )
+
+    result = execute(
+        Plan(selected_tools=[_selection("chainsaw", template, [str(script)])]),
+        {"chainsaw": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+
+    assert result.status == "success"
+    assert result.parsed_output == {"items": []}
+    assert not [item for item in result.artifacts if item.role == "generated"]
+    assert not any(
+        Path(item.path).name.casefold() == "chainsaw.jsonl"
+        for item in result.artifacts
+    )
+    assert not any(
+        item.get("path", "").casefold().endswith("chainsaw.jsonl")
+        for item in result.to_dict()["artifacts"]
+    )
+    analysis = analyze_one(result, metadata, use_llm=False, use_rag=False)
+    assert analysis.status == "analyzed"
+    assert analysis.findings == []
+
+    reused = execute(
+        Plan(selected_tools=[_selection("chainsaw", template, [str(script)])]),
+        {"chainsaw": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+    assert reused.provenance["resume"]["reused"] is True
+    assert reused.provenance["chainsaw_no_matches"] is True
+    assert reused.parsed_output == {"items": []}
+
+
+def test_nonempty_chainsaw_jsonl_remains_a_generated_result(tmp_path, monkeypatch):
+    script = tmp_path / "chainsaw_hit.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "out = Path(sys.argv[1])\n"
+        "out.mkdir(parents=True, exist_ok=True)\n"
+        "(out / 'chainsaw.jsonl').write_text('{\"EventID\": 4624}\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {{evidence_path}} {{output_dir}}"
+    metadata = _metadata("chainsaw", template, output_format="jsonl")
+    monkeypatch.setattr(
+        "forensicagent.executor.executor.get_adapter",
+        lambda meta: GenericAdapter(meta),
+    )
+
+    result = execute(
+        Plan(selected_tools=[_selection("chainsaw", template, [str(script)])]),
+        {"chainsaw": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+
+    generated = [item for item in result.artifacts if item.role == "generated"]
+    assert result.status == "success"
+    assert [Path(item.path).name for item in generated] == ["chainsaw.jsonl"]
+    assert generated[0].size_bytes > 0
+    assert "chainsaw_no_matches" not in result.provenance
+
+
+def test_other_empty_chainsaw_filename_keeps_missing_output_policy(
+    tmp_path, monkeypatch
+):
+    script = tmp_path / "other_empty.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "out = Path(sys.argv[1])\n"
+        "out.mkdir(parents=True, exist_ok=True)\n"
+        "(out / 'other.jsonl').touch()\n",
+        encoding="utf-8",
+    )
+    template = f"{sys.executable} {{evidence_path}} {{output_dir}}"
+    metadata = _metadata("chainsaw", template, output_format="jsonl")
+    monkeypatch.setattr(
+        "forensicagent.executor.executor.get_adapter",
+        lambda meta: GenericAdapter(meta),
+    )
+
+    result = execute(
+        Plan(selected_tools=[_selection("chainsaw", template, [str(script)])]),
+        {"chainsaw": metadata},
+        output_dir=tmp_path / "runs",
+    ).results[0]
+
+    assert result.status == "output_missing"
+    assert [
+        Path(item.path).name
+        for item in result.artifacts
+        if item.role == "generated"
+    ] == ["other.jsonl"]
+    assert "chainsaw_no_matches" not in result.provenance
+
+
 def test_generic_adapter_honors_preferred_template():
     preferred = "preferred {evidence_path}"
     metadata = ToolMetadata(

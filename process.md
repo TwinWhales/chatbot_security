@@ -45,7 +45,8 @@ REPL이 열리면 다음 순서로 입력한다.
 - `/scan`: 1.5 GiB 이상 파일은 경로·크기·제외 이유를 표시하고 계속 진행한다.
 - `/plan`: artifact마다 우선순위가 가장 높은 도구 하나만 선택한다.
 - `/run`: 성공했지만 내용이 없는 job 폴더는 남기지 않는다. 실패·timeout·부분
-  산출물은 진단을 위해 보존한다.
+  산출물은 진단을 위해 보존한다. 0바이트 `chainsaw.jsonl`은 generated 결과
+  목록과 이후 분석 대상에서 제외하고 정상적인 탐지 0건으로 기록한다.
 - `/analyze`: CSV의 비정상 추가 열이 있어도 중단되지 않아야 한다.
 - `/report`: JSON과 Markdown에 finding 타임라인, 원문 시각, coverage ledger,
   입력·출력 hash와 provenance가 기록된다.

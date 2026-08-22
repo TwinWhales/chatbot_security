@@ -740,6 +740,26 @@ def _execute_one(
         default_format=metadata.output_format,
         containment_root=output_dir,
     )
+    chainsaw_no_matches = (
+        result.status == "success"
+        and metadata.tool_id.casefold() == "chainsaw"
+        and any(
+            Path(artifact.path).name.casefold() == "chainsaw.jsonl"
+            and artifact.size_bytes == 0
+            for artifact in generated
+        )
+    )
+    if metadata.tool_id.casefold() == "chainsaw":
+        generated = [
+            artifact
+            for artifact in generated
+            if not (
+                Path(artifact.path).name.casefold() == "chainsaw.jsonl"
+                and artifact.size_bytes == 0
+            )
+        ]
+    if chainsaw_no_matches:
+        result.provenance["chainsaw_no_matches"] = True
     result.artifacts.extend(generated)
     result.warnings.extend(warnings)
 
@@ -752,6 +772,7 @@ def _execute_one(
         result.status == "success"
         and expects_generated_output
         and not has_generated_output
+        and not chainsaw_no_matches
     ):
         message = (
             "selected command template expected generated output, but no files "
@@ -776,6 +797,8 @@ def _execute_one(
             )
         else:
             result.parsed_output = adapter.parse_output(result.stdout_path)
+    if chainsaw_no_matches:
+        result.parsed_output = {"items": []}
 
     try:
         final_stat = _input_stat(prepared.input_path)
@@ -1084,9 +1107,14 @@ def execute(
                             )
                     if reused is not None:
                         cached_job_output_dir = reused.provenance["job_output_dir"]
+                        cached_chainsaw_no_matches = (
+                            reused.provenance.get("chainsaw_no_matches") is True
+                        )
                         reused.provenance = dict(prepared.provenance)
                         reused.provenance["output_root"] = str(out_dir)
                         reused.provenance["job_output_dir"] = cached_job_output_dir
+                        if cached_chainsaw_no_matches:
+                            reused.provenance["chainsaw_no_matches"] = True
                         resume = reused.provenance.get("resume")
                         if isinstance(resume, dict):
                             reused.provenance["resume"] = dict(resume, reused=True)
